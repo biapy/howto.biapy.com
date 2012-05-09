@@ -72,9 +72,8 @@ do_start()
   command rsync --archive "${MUNIN_DBDIR}" "${MUNIN_CACHEDIR}"
 
   # Setup munin to use cache storage.
-  echo "# Store RRD files in tmpfs.
-dbdir ${MUNIN_CACHEDIR}" \
-    > '/etc/munin/munin-conf.d/000-rrd-cache.conf'
+  echo "dbdir ${MUNIN_CACHEDIR}" \
+    >> '/etc/munin/munin.conf'
 
   return 0
 }
@@ -100,7 +99,9 @@ do_stop()
   [ -z "$(command mount | command grep "${MUNIN_CACHEDIR}")" ] \
     || return 2
 
-  command rm '/etc/munin/munin-conf.d/000-rrd-cache.conf'
+  # restore default munin dbdir.
+  command sed -i -e "/^dbdir ${MUNIN_CACHEDIR//\//\/}\$/d" \
+        '/etc/munin/munin.conf'
 
   return 0
 }
