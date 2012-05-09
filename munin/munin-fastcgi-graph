@@ -55,6 +55,8 @@ my $log = new IO::Handle;
 my $scale = "day";
 my $host  = "";
 my $serv  = "";
+my $full_serv  = "";
+my $main_serv = "";
 my $dom   = "";
 my $lock  = "";
 my $IPC_KEY = 9340;
@@ -71,8 +73,10 @@ sem_setup();
 while (new CGI::Fast) {
     my $path = $ENV{PATH_INFO} || "";
     $path =~ s/^\///;
-    ($dom, $host, $serv) = split /\//, $path;
-    ($serv, $scale) = split /-/, $serv, 2;
+    ($dom, $host, $serv) = split /\//, $path, 3;
+    ($full_serv, $scale) = split /-(?!.*-)/, $serv, 2;
+    ($main_serv, $serv) = split /\//, $full_serv, 2;
+    $serv = $serv || $main_serv;
     $scale =~ s/\.png$//;
   
     if (! &verify_parameters ($dom, $host, $serv, $scale)) {
@@ -83,8 +87,7 @@ while (new CGI::Fast) {
 	next;
     }
   
-    my $filename = get_picture_filename ($config, $dom, $host, $serv, $scale);
-  
+    my $filename = get_picture_filename ($config, $dom, $host, $full_serv, $scale);
     my $time = time;
   
     # If a "Cache-Control: no-cache" header gets send, we regenerate the image in every case:
@@ -311,6 +314,7 @@ sub draw_graph {
     my $file = "/dev/null";
     my $IN;
     sem_get();
+
 
     # Note: This open is an implicit fork
     if (! open ($IN, "-|")) { 
