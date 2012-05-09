@@ -1,0 +1,152 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          skeleton
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Example initscript
+# Description:       This file should be used to construct scripts to be
+#                    placed in /etc/init.d.
+### END INIT INFO
+
+# Author: Foo Bar <foobar@baz.org>
+#
+# Please remove the "Author" lines above and replace them
+# with your own name if you copy and modify this script.
+
+# Do NOT "set -e"
+
+# PATH should only include /usr/* if it runs after the mountnfs.sh script
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+DESC="Backup and restore Munin RRD files from and to tmpfs"
+NAME="munin-rrd-cache"
+DAEMON=/usr/share/munin/munin-update
+SCRIPTNAME=/etc/init.d/$NAME
+
+MUNIN_DBDIR="/var/lib/munin"
+MUNIN_CACHEDIR="/var/cache/munin/db"
+
+# Exit if the package is not installed
+[ -x "$DAEMON" ] || exit 0
+
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
+# Load the VERBOSE setting and other rcS variables
+. /lib/init/vars.sh
+
+# Define LSB log_* functions.
+# Depend on lsb-base (>= 3.2-14) to ensure that this file is present
+# and status_of_proc is working.
+. /lib/lsb/init-functions
+
+#
+# Function that starts the daemon/service
+#
+do_start()
+{
+   #   0 if daemon has been started
+  #   1 if daemon was already started
+  #   2 if daemon could not be started
+  #   other if a failure occurred
+
+  # Check if cache dir already mounted.
+  [ -z "$(command mount | command grep "${MUNIN_CACHEDIR}")" ] \
+    || return 1
+
+  # Compute actual munin db size.
+  TMPFS_SIZE=$(( $(command du --summarize  "${MUNIN_DBDIR}" \
+      | command tr "\t" " " \
+      | command cut --delimiter=" " --field=1) \
+      * 120 / 100  ))
+
+  command mkdir --parent "${MUNIN_CACHEDIR}"
+  command mount -t "tmpfs" -o "size=${TMPFS_SIZE}k,nr_inodes=1m,mode=755,uid=munin,gid=munin,noatime" tmpfs "${MUNIN_CACHEDIR}"
+
+  # Check if cache dir mounted.
+  [ -n "$(command mount | command grep "${MUNIN_CACHEDIR}")" ] \
+    || return 2
+
+  # Copy munin files to cache.
+  command rsync --archive "${MUNIN_DBDIR}" "${MUNIN_CACHEDIR}"
+
+  # Setup munin to use cache storage.
+  echo "# Store RRD files in tmpfs.
+dbdir ${MUNIN_CACHEDIR}" \
+    > '/etc/munin/munin-conf.d/000-rrd-cache.conf'
+
+  return 0
+}
+
+#
+# Function that stops the daemon/service
+#
+do_stop()
+{
+  #   0 if daemon has been stopped
+  #   1 if daemon was already stopped
+  #   2 if daemon could not be stopped
+  #   other if a failure occurred
+
+  # Check if cache dir mounted.
+  [ -n "$(command mount | command grep "${MUNIN_CACHEDIR}")" ] \
+    || return 1
+
+  command rsync --archive "${MUNIN_CACHEDIR}" "${MUNIN_DBDIR}"
+  command umount "${MUNIN_CACHEDIR}"
+
+  # Check if cache dir mounted.
+  [ -z "$(command mount | command grep "${MUNIN_CACHEDIR}")" ] \
+    || return 2
+
+  command rm '/etc/munin/munin-conf.d/000-rrd-cache.conf'
+
+  return 0
+}
+
+case "$1" in
+  start)
+  [ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+  do_start
+  case "$?" in
+    0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+    2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+  esac
+  ;;
+  stop)
+  [ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+  do_stop
+  case "$?" in
+    0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+    2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+  esac
+  ;;
+  status)
+       status_of_proc "$DAEMON" "$NAME" && exit 0 || exit $?
+       ;;
+  restart)
+  log_daemon_msg "Restarting $DESC" "$NAME"
+  do_stop
+  case "$?" in
+    0|1)
+    do_start
+    case "$?" in
+      0) log_end_msg 0 ;;
+      1) log_end_msg 1 ;; # Old process is still running
+      *) log_end_msg 1 ;; # Failed to start
+    esac
+    ;;
+    *)
+      # Failed to stop
+    log_end_msg 1
+    ;;
+  esac
+  ;;
+  *)
+  echo "Usage: $SCRIPTNAME {start|stop|restart}" >&2
+  exit 3
+  ;;
+esac
+
+:
