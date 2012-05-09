@@ -327,13 +327,15 @@ class Memcached_MySQL_SessionHandler
             self::FIELD_PREFIX, self::TABLE_PREFIX));
     $stmt->bind_param("i", time());
     $stmt->execute();
-    $stmt->bind_result($session_id);
-    while($stmt->fetch())
-    {
-      $this->destroy($session_id);
-    }
-    $stmt->free_result();
+    $result = $stmt->get_result();
+    $session_ids = $result->fetch_all();
+    $result->free();
     $stmt->close();
+
+    foreach($session_ids as $session_id)
+    {
+      $this->destroy($session_id[0]);
+    }
 
     return true;
   } // gc()
