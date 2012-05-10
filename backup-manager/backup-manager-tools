@@ -14,10 +14,12 @@ This tool ease Backup Manager administration from command line.
 
 Usage :
 
+  ${SCRIPT_NAME} list
   ${SCRIPT_NAME} cleanup
   ${SCRIPT_NAME} add path
   ${SCRIPT_NAME} remove path
 
+  * list : List current backup targets.
   * cleanup : Remove invalid backup targets.
   * add path : Add the given path to backup targets.
   * remove path : Remove the given path from backup targets.
@@ -88,6 +90,14 @@ command test ! -e '/etc/backup-manager.conf' && exit 1
 command test ${#} -eq 0 && usage
 
 case "${1}" in
+
+  list )
+    command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
+        | command sed -e 's/^.*TARGETS\[\([^\]]*\)\]="\([^"]*\)".*$/\1 : \2/'
+    exit 0
+    ;;
+
+
 
   cleanup )
     command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
