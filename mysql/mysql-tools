@@ -352,7 +352,7 @@ while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e a
       ACTION="drop"
       ;;
 
-    emtpy | e )
+    empty | e )
       ACTION="empty"
       ;;
 
