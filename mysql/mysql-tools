@@ -2,7 +2,7 @@
 #
 # MySQL Tools.
 #
-# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
+# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
 
 
 SCRIPT_NAME="$(command basename ${0})"
