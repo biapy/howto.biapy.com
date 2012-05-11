@@ -8,7 +8,7 @@ MAILTO=root
 0 */4 * * *   munin   [ -n "$(/bin/mount | /bin/grep "/var/cache/munin/db")" -a -x "/usr/bin/rsync" ] && /usr/bin/rsync --archive /var/cache/munin/db/ /var/lib/munin/
 
 # Cleanup inactive rrd and png files.
-@daily        munin   [ -d "/var/lib/munin" ] /usr/bin/find "/var/lib/munin/" -type f -mtime +7 -name '*.rrd' -delete
-@daily        munin   [ -d "/var/cache/munin/db" ] /usr/bin/find "/var/cache/munin/db" -type f -mtime +7 -name '*.rrd' -delete
-@daily        munin   [ -d "/var/cache/munin/www" ] /usr/bin/find "/var/cache/munin/www" -type f -mtime +7 -name '*.rrd' -delete
+@daily        munin   [ -d "/var/lib/munin" ] && /usr/bin/find "/var/lib/munin/" -type f -mtime +7 -name '*.rrd' -delete
+@daily        munin   [ -d "/var/cache/munin/db" ] && /usr/bin/find "/var/cache/munin/db" -type f -mtime +7 -name '*.rrd' -delete
+@daily        munin   [ -d "/var/cache/munin/www" ] && /usr/bin/find "/var/cache/munin/www" -type f -mtime +7 -name '*.rrd' -delete
 
