@@ -336,10 +336,13 @@ USER_PREFIX=""
 BASE_USER_NAME=""
 USER_HOSTS="localhost"
 MYSQL_USER="root"
-MYSQL_PASSWORD=""
+MANDATORY_PASSWORD="false"
+MYSQL_PASSWORD="false"
+MYSQL_PASSWORD_OPTION=""
+GRANT_PRIVILEGE="ALL PRIVILEGES"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: host: h: user: u: password: p: " "${@}"; do
+while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: host: h: user: u: password. p." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -349,10 +352,12 @@ while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e a
       ;;
 
     drop | d )
+      MANDATORY_PASSWORD="true"
       ACTION="drop"
       ;;
 
     empty | e )
+      MANDATORY_PASSWORD="true"
       ACTION="empty"
       ;;
 
@@ -381,6 +386,13 @@ while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e a
 
     password | p)
       MYSQL_PASSWORD="${OPTARG}"
+
+      if [ -n "${MYSQL_PASSWORD}" ]; then
+        MYSQL_PASSWORD_OPTION="--password=${MYSQL_PASSWORD}"
+      else
+        MYSQL_PASSWORD_OPTION="--password"
+        MYSQL_PASSWORD="false"
+      fi
       ;;
 
     help | h )
@@ -479,6 +491,7 @@ if [ -n "${DB_PREFIX}" ]; then
   if [ -z "${USER_PREFIX}" ]; then
     USER_PREFIX="$(command echo "${DB_PREFIX}" | command cut --bytes=1)"
   fi
+  USER_PREFIX="${USER_PREFIX}_"
 
   DB_NAME="${DB_PREFIX}_"
 fi
@@ -486,12 +499,12 @@ DB_NAME="${DB_NAME}$(command echo "${BASE_DB_NAME}" | command tr '. ' '--' )"
 
 
 if [ -n "${BASE_USER_NAME}" ]; then
-  DB_USER="$(command echo "${USER_PREFIX}_${BASE_USER_NAME}" \
+  DB_USER="$(command echo "${USER_PREFIX}${BASE_USER_NAME}" \
   | command tr '[A-Z]' '[a-z]' \
   | command tr '. ' '--' \
   | command cut --characters=-16)"
 else
-  DB_USER="$(command echo "${USER_PREFIX}_${BASE_DB_NAME}" \
+  DB_USER="$(command echo "${USER_PREFIX}${BASE_DB_NAME}" \
   | command tr '[A-Z]' '[a-z]' \
   | command tr '. ' '--' \
   | command cut --characters=-16)"
@@ -499,9 +512,23 @@ fi
 DB_PASSWORD="$(command apg -q -a  0 -n 1 -M NCL)"
 
 
+
+# Ask for password if none given.
+if [ "${MANDATORY_PASSWORD}" = "true" \
+    -a "${MYSQL_PASSWORD}" = "false" \
+    -a -n "${MYSQL_PASSWORD_OPTION}" ]; then
+
+  echo -n "Enter password: "
+  command read -s MYSQL_PASSWORD
+
+  MYSQL_PASSWORD_OPTION="--password=${MYSQL_PASSWORD}"
+fi
+
+
+
 case "${ACTION}" in
   create )
-    SQL_QUERY="CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`
+    SQL_QUERY="CREATE DATABASE \`${DB_NAME}\`
                     DEFAULT CHARACTER SET utf8
                     DEFAULT COLLATE utf8_unicode_ci;"
     for ALLOWED_HOST in ${USER_HOSTS}; do
@@ -511,66 +538,75 @@ case "${ACTION}" in
             IDENTIFIED BY '${DB_PASSWORD}';"
     done
 
-    if [ -n "${MYSQL_PASSWORD}" ]; then
-      command echo "${SQL_QUERY}" | command mysql --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}"
-    else
-      command echo "${SQL_QUERY}" | command mysql --user="${MYSQL_USER}" --password
-    fi
-
-    command echo "# Database access parameters are :
+    if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+          --execute="${SQL_QUERY}"; then
+      command echo "# Database access parameters are :
 # Database name
 MYSQL_DB=${DB_NAME}
 # Database user
 MYSQL_USER=${DB_USER}
 # Database user password
 MYSQL_PASSWORD=${DB_PASSWORD}"
-    exit 0
+      exit 0
+    fi
+
+    echo "Error: unable to create database '${DB_NAME}'"
+    exit 1
     ;;
 
 
 
   drop )
-    SQL_QUERY="SELECT user, host
-                    FROM mysql.user
-                    WHERE user = '${DB_USER}';"
+    SQL_QUERY="SELECT \`user\`, \`host\`
+                    FROM \`mysql\`.\`user\`
+                    WHERE \`user\` = '${DB_USER}';"
 
-    # Droping users.
-    command echo "${SQL_QUERY}" | command mysql \
-        --batch --skip-column-names \
+    # Dropping users.
+    command mysql --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
-        --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}" \
+        --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+        --execute="${SQL_QUERY}" \
       | command sed -e "s/\(.*\)\t\(.*\)/DROP USER '\1'@'\2';/" \
-      | command mysql --user=root ${PASSWORD}
+      | command mysql --user=root ${MYSQL_PASSWORD_OPTION}
 
     # Dropping database.
-    SQL_QUERY="DROP DATABASE IF EXISTS \`${MYSQL_DB}\`;"
+    SQL_QUERY="DROP DATABASE \`${DB_NAME}\`;"
 
-    command echo "${SQL_QUERY}" | command mysql --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}"
-    exit 0
+    if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+          --execute="${SQL_QUERY}"; then
+      echo "Database '${DB_NAME}' dropped successfully."
+      exit 0
+    fi
+
+    echo "Error: Unable to drop database '${DB_NAME}'."
+    exit 1
     ;;
 
 
 
   empty )
-    SQL="$(command mysql --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}" \
+    SQL_QUERY="$(command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
         "${DB_NAME}" --execute="SHOW TABLES;" \
-        | command sed -e 's/^.*$/drop table &;/')"
+        | command sed -e 's/^.*$/DROP TABLE `&`;/')"
 
-    if [ -n "${SQL}" ]; then
-      SQL="SET FOREIGN_KEY_CHECKS = 0;
-${SQL}
+    if [ -n "${SQL_QUERY}" ]; then
+      SQL_QUERY="SET FOREIGN_KEY_CHECKS = 0;
+${SQL_QUERY}
 SET FOREIGN_KEY_CHECKS = 1;"
 
-      if command mysql --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}" \
-            "${DB_NAME}" --execute="${SQL}"; then
-        echo "Tables dropped successfully."
+      if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+            "${DB_NAME}" --execute="${SQL_QUERY}"; then
+        echo "Tables dropped successfully from database '${DB_NAME}'."
         exit 0
       fi
+
+      echo "Error: unable to drop tables from database '${DB_NAME}'."
+      exit 1
     fi
 
-    echo "Error during dropping tables."
+    echo "Error: unable to fetch database '${DB_NAME}' table list."
     exit 1
     ;;
 
@@ -591,29 +627,33 @@ SET FOREIGN_KEY_CHECKS = 1;"
       fi
     done
 
-    if [ -n "${MYSQL_PASSWORD}" ]; then
-      command echo "${SQL_QUERY}" | command mysql --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}"
-    else
-      command echo "${SQL_QUERY}" | command mysql --user="${MYSQL_USER}" --password
-    fi
-
-    if [ -z "${BASE_DB_NAME}" ]; then
-      command echo "# MySQL User access parameters are :
+    if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+        --execute="${SQL_QUERY}"; then
+      if [ -z "${BASE_DB_NAME}" ]; then
+        command echo "# MySQL User access parameters are :
 # MySQL user
 MYSQL_USER=${DB_USER}
 # MySQL user password
 MYSQL_PASSWORD=${DB_PASSWORD}"
-    else
-      command echo "# Database access parameters are :
+      else
+        command echo "# Database access parameters are :
 # Database name
 MYSQL_DB=${DB_NAME}
 # Database user
 MYSQL_USER=${DB_USER}
 # Database user password
 MYSQL_PASSWORD=${DB_PASSWORD}"
+      fi
+
+      exit 0
     fi
 
-    exit 0
+    if [ -z "${BASE_DB_NAME}" ]; then
+      echo "Error: unable to create user '${DB_USER}'."
+    else
+      echo "Error: unable to create user '${DB_USER}' for database '${DB_NAME}'."
+    fi
+    exit 1
     ;;
 
 
