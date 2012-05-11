@@ -14,13 +14,14 @@ This tool ease MySQL server administration from command line.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --db-prefix=database_prefix ]
-      [ --user-prefix=user_prefix ] [ --host=user_host ]
-      [ --user=mysql_user ] [ --password=mysql_password ]
+  ${SCRIPT_NAME} [ --db-prefix='database_prefix' ]
+      [ --user-prefix='user_prefix' ] [ --host='user_host' ]
+      [ --user='mysql_user' ] [ --password='mysql_password' ]
       [ --create database_name |
         --drop database_name |
         --empty database_name |
-        --adduser=user_name [ database_name ]
+        --adduser=user_name [ --grant='ALL' ] [ database_name ]
+        --deluser=user_name
       ]
 
   Available options are :
@@ -36,6 +37,10 @@ Usage :
     * --empty | -e : Drop all tables of a database.
     * --drop | -d : Destroy the database and its user.
     * --adduser | -a : Create a unprivilegied user, or a user for a database.
+    * --grant | -g : In conjunction with --adduser, set the create user
+        privileges (default to ALL) (multiple occurence allowed).
+        see: https://dev.mysql.com/doc/refman/5.0/fr/grant.html
+    * --deluser : Delete a mysql user.
 "
   exit 1
 } # usage
@@ -193,6 +198,33 @@ function eth0_ip {
 } # eth0_ip
 
 
+
+# Call MySQL.
+#
+# @param string $mysql_user A MySQL user.
+# @param string $mysql_password A MySQL user password.
+# @param mixed $arg1, $arg2 arguments passed to mysql command.
+#
+# @return MySQL command result.
+function mysql_call {
+  command test ${#} -lt 3 && exit 1
+
+  MYSQL_CALL_USER="${1}"
+  MYSQL_CALL_PASSWORD="${2}"
+  shift $[2]
+
+  if [ "${MYSQL_CALL_PASSWORD}" = "false" ]; then
+    command mysql --user="${MYSQL_CALL_USER}" "${@}"
+  elif [ "${MYSQL_CALL_PASSWORD}" = "true" ]; then
+    command mysql --user="${MYSQL_CALL_USER}" --password "${@}"
+  else
+    command mysql --user="${MYSQL_CALL_USER}" --password="${MYSQL_CALL_PASSWORD}" "${@}"
+  fi
+
+  return "${?}"
+} # mysql_call
+
+
 #######################################################################################
 #######################################################################################
 #######################################################################################
@@ -336,13 +368,14 @@ USER_PREFIX=""
 BASE_USER_NAME=""
 USER_HOSTS="localhost"
 MYSQL_USER="root"
-MANDATORY_PASSWORD="false"
 MYSQL_PASSWORD="false"
-MYSQL_PASSWORD_OPTION=""
-GRANT_PRIVILEGE="ALL PRIVILEGES"
+PRIVILEGES=""
+
+MANDATORY_DB="true"
+MANDATORY_PASSWORD="false"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: host: h: user: u: password. p." "${@}"; do
+while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -372,6 +405,19 @@ while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e a
     adduser | a )
       BASE_USER_NAME="${OPTARG}"
       ACTION="adduser"
+      MANDATORY_DB="false"
+      ;;
+
+    grant | g )
+      if [ -n "${OPTARG}" ]; then
+        PRIVILEGES="${PRIVILEGES} ${OPTARG}"
+      fi
+      ;;
+
+    deluser )
+      BASE_USER_NAME="${OPTARG}"
+      ACTION="deluser"
+      MANDATORY_DB="false"
       ;;
 
     host | h )
@@ -387,11 +433,8 @@ while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e a
     password | p)
       MYSQL_PASSWORD="${OPTARG}"
 
-      if [ -n "${MYSQL_PASSWORD}" ]; then
-        MYSQL_PASSWORD_OPTION="--password=${MYSQL_PASSWORD}"
-      else
-        MYSQL_PASSWORD_OPTION="--password"
-        MYSQL_PASSWORD="false"
+      if [ -z "${MYSQL_PASSWORD}" ]; then
+        MYSQL_PASSWORD="true"
       fi
       ;;
 
@@ -406,7 +449,7 @@ shift $[OPTIND-1]
 
 BASE_DB_NAME="${1}"
 
-command test -z "${BASE_DB_NAME}" -a "${ACTION}" != "adduser" && usage
+command test -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" && usage
 
 # Retrocompatibility.
 case "${BASE_DB_NAME}" in
@@ -430,7 +473,7 @@ case "${BASE_DB_NAME}" in
     ALLOWED_HOSTS="${3}"
     ROOT_PASSWORD="${4}"
 
-    MYSQL_DB=$(echo "${DOMAIN}" | command tr '[a-z].-' '[A-Z]__')
+    MYSQL_DB=$(echo "${DOMAIN//[^_0-9A-Za-z]/_}" | command tr '[a-z]' '[A-Z]')
 
     ${0} --host="${ALLOWED_HOSTS}" --password="${ROOT_PASSWORD}" --create "${MYSQL_DB}"
     exit 0
@@ -477,7 +520,7 @@ case "${BASE_DB_NAME}" in
     DOMAIN="${2}"
     ROOT_PASSWORD="${3}"
 
-    MYSQL_DB=$(echo "${DOMAIN}" | command tr '[a-z].-' '[A-Z]__')
+    MYSQL_DB=$(echo "${DOMAIN//[^_0-9A-Za-z]/_}" | command tr '[a-z]' '[A-Z]')
 
     ${0} --password="${ROOT_PASSWORD}" --drop "${MYSQL_DB}"
     exit 0
@@ -486,42 +529,41 @@ esac
 
 
 
+# Compute final db name.
 DB_NAME=""
 if [ -n "${DB_PREFIX}" ]; then
   if [ -z "${USER_PREFIX}" ]; then
     USER_PREFIX="$(command echo "${DB_PREFIX}" | command cut --bytes=1)"
   fi
-  USER_PREFIX="${USER_PREFIX}_"
+  USER_PREFIX="${USER_PREFIX//[^_0-9A-Za-z]/-}_"
 
-  DB_NAME="${DB_PREFIX}_"
+  DB_NAME="${DB_PREFIX//[^_0-9A-Za-z]/-}_"
 fi
-DB_NAME="${DB_NAME}$(command echo "${BASE_DB_NAME}" | command tr '. ' '--' )"
+DB_NAME="${DB_NAME}${BASE_DB_NAME//[^_0-9A-Za-z]/-}"
 
-
+# Compute final db user name.
 if [ -n "${BASE_USER_NAME}" ]; then
-  DB_USER="$(command echo "${USER_PREFIX}${BASE_USER_NAME}" \
+  DB_USER="$(command echo "${USER_PREFIX//[^_0-9A-Za-z]/-}${BASE_USER_NAME//[^_0-9A-Za-z]/-}" \
   | command tr '[A-Z]' '[a-z]' \
-  | command tr '. ' '--' \
   | command cut --characters=-16)"
 else
-  DB_USER="$(command echo "${USER_PREFIX}${BASE_DB_NAME}" \
+  DB_USER="$(command echo "${USER_PREFIX//[^_0-9A-Za-z]/-}${BASE_DB_NAME//[^_0-9A-Za-z]/-}" \
   | command tr '[A-Z]' '[a-z]' \
-  | command tr '. ' '--' \
   | command cut --characters=-16)"
 fi
 DB_PASSWORD="$(command apg -q -a  0 -n 1 -M NCL)"
 
-
+# set default grant privileges.
+if [ -z "${PRIVILEGES}" ]; then
+  PRIVILEGES="ALL"
+fi
 
 # Ask for password if none given.
 if [ "${MANDATORY_PASSWORD}" = "true" \
-    -a "${MYSQL_PASSWORD}" = "false" \
-    -a -n "${MYSQL_PASSWORD_OPTION}" ]; then
+    -a "${MYSQL_PASSWORD}" = "true" ]; then
 
   echo -n "Enter password: "
   command read -s MYSQL_PASSWORD
-
-  MYSQL_PASSWORD_OPTION="--password=${MYSQL_PASSWORD}"
 fi
 
 
@@ -538,7 +580,7 @@ case "${ACTION}" in
             IDENTIFIED BY '${DB_PASSWORD}';"
     done
 
-    if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
           --execute="${SQL_QUERY}"; then
       command echo "# Database access parameters are :
 # Database name
@@ -562,30 +604,33 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
                     WHERE \`user\` = '${DB_USER}';"
 
     # Dropping users.
-    command mysql --batch --skip-column-names \
-        --skip-line-numbers --skip-pager \
-        --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
-        --execute="${SQL_QUERY}" \
-      | command sed -e "s/\(.*\)\t\(.*\)/DROP USER '\1'@'\2';/" \
-      | command mysql --user=root ${MYSQL_PASSWORD_OPTION}
+    SQL_QUERY="$(mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" --batch --skip-column-names \
+          --skip-line-numbers --skip-pager \
+          --execute="${SQL_QUERY}" \
+        | command sed -e "s/\(.*\)\t\(.*\)/DROP USER '\1'@'\2';/")"
+    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+        --execute="${SQL_QUERY}"; then
+      # Dropping database.
+      SQL_QUERY="DROP DATABASE \`${DB_NAME}\`;"
 
-    # Dropping database.
-    SQL_QUERY="DROP DATABASE \`${DB_NAME}\`;"
+      if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --execute="${SQL_QUERY}"; then
+        echo "Database '${DB_NAME}' dropped successfully."
+        exit 0
+      fi
 
-    if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
-          --execute="${SQL_QUERY}"; then
-      echo "Database '${DB_NAME}' dropped successfully."
-      exit 0
+      echo "Error: Unable to drop database '${DB_NAME}'."
+      exit 1
     fi
 
-    echo "Error: Unable to drop database '${DB_NAME}'."
+    echo "Error: unable to delete user '${DB_USER}'."
     exit 1
     ;;
 
 
 
   empty )
-    SQL_QUERY="$(command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+    SQL_QUERY="$(mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
         "${DB_NAME}" --execute="SHOW TABLES;" \
@@ -596,7 +641,7 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 ${SQL_QUERY}
 SET FOREIGN_KEY_CHECKS = 1;"
 
-      if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+      if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
             "${DB_NAME}" --execute="${SQL_QUERY}"; then
         echo "Tables dropped successfully from database '${DB_NAME}'."
         exit 0
@@ -621,13 +666,13 @@ SET FOREIGN_KEY_CHECKS = 1;"
                 IDENTIFIED BY '${DB_PASSWORD}';"
       else
         SQL_QUERY="${SQL_QUERY}
-            GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.*
+            GRANT ${PRIVILEGES} ON \`${DB_NAME}\`.*
                 TO \`${DB_USER}\`@\`${ALLOWED_HOST}\`
                 IDENTIFIED BY '${DB_PASSWORD}';"
       fi
     done
 
-    if command mysql --user="${MYSQL_USER}" ${MYSQL_PASSWORD_OPTION} \
+    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --execute="${SQL_QUERY}"; then
       if [ -z "${BASE_DB_NAME}" ]; then
         command echo "# MySQL User access parameters are :
@@ -655,6 +700,30 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
     fi
     exit 1
     ;;
+
+
+
+  deluser )
+    SQL_QUERY="SELECT \`user\`, \`host\`
+                    FROM \`mysql\`.\`user\`
+                    WHERE \`user\` = '${DB_USER}';"
+
+    # Dropping users.
+    SQL_QUERY="$(mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" --batch --skip-column-names \
+          --skip-line-numbers --skip-pager \
+          --execute="${SQL_QUERY}" \
+        | command sed -e "s/\(.*\)\t\(.*\)/DROP USER '\1'@'\2';/")"
+    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+        --execute="${SQL_QUERY}"; then
+
+      echo "User '${DB_USER}' successfully deleted."
+      exit 1
+    fi
+
+    echo "Error: unable to delete user '${DB_USER}'."
+    exit 1
+    ;;
+
 
 
   * )
