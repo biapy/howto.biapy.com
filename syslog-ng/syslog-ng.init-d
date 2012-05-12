@@ -68,7 +68,9 @@ create_conffile()
   if [ -d '/etc/syslog-ng/syslog-ng.conf.d' ]; then
     echo '' > '/etc/syslog-ng/syslog-ng.conf'
     command find '/etc/syslog-ng/syslog-ng.conf.d' -type f -name '*.conf' \
-      | command sort | command xargs -iFILE /bin/cat "FILE" \
+      | command sort | command xargs -iFILE /bin/sh -c "echo '##
+## Included from FILE
+##'; /bin/cat 'FILE'" \
         > '/etc/syslog-ng/syslog-ng.conf'
   fi
 }
