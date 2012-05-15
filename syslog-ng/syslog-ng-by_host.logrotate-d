@@ -1,0 +1,136 @@
+/var/log/by-host/*/auth.log {
+   rotate 4
+   missingok
+   notifempty
+   weekly
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/cron.log {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/daemon.log {
+   rotate 7
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/debug {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/kern.log {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/lpr.log {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/mail.err {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/mail.info {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/mail.log {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/mail.warn {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/error {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/messages {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+
+/var/log/by-host/*/user.log {
+   rotate 4
+   weekly
+   missingok
+   notifempty
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/uucp.log {
+   rotate 4
+   missingok
+   notifempty
+   weekly
+   compress
+   delaycompress
+}
+
+/var/log/by-host/*/syslog {
+   rotate 7
+   daily
+   compress
+   delaycompress
+   postrotate
+      /usr/sbin/invoke-rc.d syslog-ng reload >/dev/null
+   endscript
+}
