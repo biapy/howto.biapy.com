@@ -7,5 +7,5 @@ These files are used by the guide
 
 * __openerp-web.init-d__ : OpenERP web user interface init.d script.
 * __openerp-server.init-d__ : OpenERP server init.d script.
-* __server.conf__ : OpenERP server configuration file template.
+* __server.cfg__ : OpenERP server configuration file template.
 
