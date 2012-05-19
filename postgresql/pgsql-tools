@@ -104,7 +104,7 @@ function host_ipv4 {
 
   command test ${#} -ne 1 && exit 1
 
-  HOST_IPV4="$(command ping -c 1 "$1" \
+  HOST_IPV4="$(command ping -c 1 "${1}" 2>'/dev/null' \
         | command head -n 1 \
         | command sed -e 's/[^(]*(\([^)]*\).*/\1/')"
 } # host_ipv4
@@ -122,7 +122,7 @@ function host_ipv6 {
 
   command test ${#} -ne 1 && exit 1
 
-  HOST_IPV6="$(command ping6 -c 1 "$1" \
+  HOST_IPV6="$(command ping6 -c 1 "$1" 2>'/dev/null' \
         | command head -n 1 \
         | command sed -e 's/[^(]*(\([^)]*\).*/\1/')"
 } # host_ipv6
@@ -225,7 +225,7 @@ case "${1}" in
 
     COMMAND="command createuser --no-superuser \\
           --no-createdb --no-createrole --login '${PGSQL_USER}';
-        command psql -c \"ALTER USER ${PGSQL_USER} PASSWORD '${PGSQL_PASSWORD}'\";
+        command psql -c \"ALTER ROLE \\\"${PGSQL_USER}\\\" PASSWORD '${PGSQL_PASSWORD}'\";
         command createdb --encoding UTF8 \\
           --owner '${PGSQL_USER}' '${PGSQL_DB}';"
 
@@ -287,7 +287,7 @@ PGSQL_PASSWORD=${PGSQL_PASSWORD}"
 
     COMMAND="command createuser --no-superuser \\
           --createdb --no-createrole --login '${PGSQL_USER}';
-        command psql -c \"ALTER USER ${PGSQL_USER} PASSWORD '${PGSQL_PASSWORD}'\";"
+        command psql -c \"ALTER ROLE \\\"${PGSQL_USER}\\\" PASSWORD '${PGSQL_PASSWORD}'\";"
 
     command su 'postgres' -c "${COMMAND}"
 
@@ -346,7 +346,7 @@ PGSQL_PASSWORD=${PGSQL_PASSWORD}"
 
     COMMAND="command createuser --no-superuser \\
           --no-createdb --no-createrole --login '${PGSQL_USER}';
-        command psql -c \"ALTER USER ${PGSQL_USER} PASSWORD '${PGSQL_PASSWORD}'\";"
+        command psql -c \"ALTER ROLE \\\"${PGSQL_USER}\\\" PASSWORD '${PGSQL_PASSWORD}'\";"
 
     command su 'postgres' -c "${COMMAND}"
 
