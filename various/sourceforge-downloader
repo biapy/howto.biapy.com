@@ -1,0 +1,454 @@
+#!/bin/bash
+#
+# Sourceforge Downloader.
+# Automates the download of software latest version from sourceforge.
+#
+# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
+
+
+SCRIPT_NAME="$(command basename ${0})"
+
+# Print this script help.
+function usage {
+  command echo "
+This tool automates the download of software latest version from sourceforge.
+
+Usage :
+
+  ${SCRIPT_NAME} [ --download | --zip | --tgz | --tbz2 | --version ] project-name file-name-template
+
+  Mandatory arguments are :
+    * project-name : The sourceforge project name as
+          in http://sourceforge.net/projects/project-name/ .
+    * file-name-template : The template of the filename to download with the
+          version replaced by VERSION.
+          Example : To download 'xmlrpc-c-1.16.41.tgz',
+             use this template: 'xml-rpc-c-VERSION.tgz'.
+
+  Available options are :
+    * --help | -h : Display this message.
+    * --download : Download the project sources archive.
+    * --tgz : Download the sources archive and decompress it as tar.gz.
+    * --tbz2 : Download the sources archive and decompress it as tar.bz2.
+    * --zip : Download the sources archive and decompress it as zip.
+    * --version : Print the detected sources version.
+"
+} # usage
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH="$(/bin/readlink -f "${1}")"
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=""
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_binary
+
+
+
+# Check if a patckage file is present
+#
+# @param string $file The file to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the file is missing.
+function check_package_file {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the file presence.
+  if [ ! -e "${1}" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_package_file
+
+
+
+# Download a file from the given URL.
+#
+# @param string $url The URL of the file to download.
+#
+# @return ${DOWNLOAD_FILE} The path to the downloaded file.
+DOWNLOAD_FILE=""
+function download_file {
+  command test ${#} -lt 1 && exit 1
+
+  # Download a file.
+  if [ -n "${2}" ]; then
+    DOWNLOAD_FILE="/tmp/${2}"
+  else
+    DOWNLOAD_FILE="$(command mktemp)"
+  fi
+  command wget --quiet --no-check-certificate "${1}" \
+      --output-document="${DOWNLOAD_FILE}"
+
+  if [ ! -s "${DOWNLOAD_FILE}" ]; then
+    command rm "${DOWNLOAD_FILE}"
+    echo "Error : Unable to download file from '${1}'." >&2
+    exit 1
+  fi
+} # download_file
+
+
+
+# Download and uncompress a tgz file from the given URL.
+#
+# @param string $url The URL of the file to download.
+#
+# @return ${DOWNLOAD_TGZ} The path to the extracted content.
+DOWNLOAD_TGZ=""
+function download_tgz {
+  command test ${#} -ne 1 && exit 1
+
+  download_file "${1}"
+
+
+  # Untar the downloaded file and place it at its final location.
+  DOWNLOAD_TGZ="$(command mktemp -d)"
+  command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
+  command rm "${DOWNLOAD_FILE}"
+
+  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc --lines) -eq 0 ]; then
+    echo "Error : unable to untar file downloaded from '${1}'." >&2
+    exit 1
+  fi
+
+  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc --lines) -eq 1 ]; then
+    DOWNLOAD_TGZ="${DOWNLOAD_TGZ}/$(command ls -1 "${DOWNLOAD_TGZ}")"
+  fi
+} # download_tgz
+
+
+
+# Download and uncompress a tar.bzip2 file from the given URL.
+#
+# @param string $url The URL of the file to download.
+#
+# @return ${DOWNLOAD_TBZ2} The path to the extracted content.
+DOWNLOAD_TBZ2=""
+function download_tbz2 {
+  check_binary "bzip2" "bzip2"
+  command test ${#} -ne 1 && exit 1
+
+  download_file "${1}"
+
+  # Untar the downloaded file and place it at its final location.
+  DOWNLOAD_TBZ2="$(command mktemp -d)"
+  command tar --directory "${DOWNLOAD_TGZ}" -xjf "${DOWNLOAD_FILE}"
+  command rm "${DOWNLOAD_FILE}"
+
+  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc --lines) -eq 0 ]; then
+    echo "Error : unable to untar file downloaded from '${1}'." >&2
+    exit 1
+  fi
+
+  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc --lines) -eq 1 ]; then
+    DOWNLOAD_TBZ2="${DOWNLOAD_TBZ2}/$(command ls -1 "${DOWNLOAD_TBZ2}")"
+  fi
+} # download_tbz2
+
+
+
+# Download and uncompress a zip file from the given URL.
+#
+# @param string $url The URL of the file to download.
+#
+# @return ${DOWNLOAD_ZIP} The path to the extracted content.
+DOWNLOAD_ZIP=""
+function download_zip {
+  check_binary "unzip" "unzip"
+  command test ${#} -ne 1 && exit 1
+
+  download_file "${1}"
+
+  # Untar the downloaded file and place it at its final location.
+  DOWNLOAD_ZIP="$(command mktemp -d)"
+  command unzip -d "${DOWNLOAD_ZIP}" -qq "${DOWNLOAD_FILE}"
+  command rm "${DOWNLOAD_FILE}"
+
+  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc --lines) -eq 0 ]; then
+    echo "Error : unable to unzip file downloaded from '${1}'." >&2
+    exit 1
+  fi
+
+  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc --lines) -eq 1 ]; then
+    DOWNLOAD_ZIP="${DOWNLOAD_ZIP}/$(command ls -1 "${DOWNLOAD_ZIP}")"
+  fi
+} # download_zip
+
+
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let OPTIND || OPTIND=1
+  [ $OPTIND -lt $# ] || return 1
+  shift $OPTIND
+  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
+  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
+  then
+    local o
+    o="-${1#-$OPTOFS}"
+    for opt in ${optlist#;}
+    do
+      OPTOPT="${opt%[;.:]}"
+      unset OPTARG
+      local opttype="${opt##*[^;:.]}"
+      [ -z "$opttype" ] && opttype=";"
+      if [ ${#OPTOPT} -gt 1 ]
+      then # long-named option
+        case $o in
+          "--$OPTOPT")
+            if [ "$opttype" != ":" ]; then return 0; fi
+            OPTARG="$2"
+            if [ -z "$OPTARG" ];
+            then # error: must have an agrument
+              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT";
+              OPTOPT="?"
+              return 1;
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "--$OPTOPT="*)
+            if [ "$opttype" = ";" ];
+            then  # error: must not have arguments
+              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTARG=${o#"--$OPTOPT="}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-$OPTOPT")
+            unset OPTOFS
+            [ "$opttype" != ":" ] && return 0
+            OPTARG="$2"
+            if [ -z "$OPTARG" ]
+            then
+              echo "$0: error: -$OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "-$OPTOPT"*)
+            if [ $opttype = ";" ]
+            then # an option with no argument is in a chain of options
+              OPTOFS="$OPTOFS?" # move to the next option in the chain
+              OPTIND=$[OPTIND-1] # the chain still has other options
+              return 0
+            else
+              unset OPTOFS
+              OPTARG="${o#-$OPTOPT}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage
+    exit 1
+  fi; fi
+  OPTOPT="?"
+  unset OPTARG
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
+  while [ -n "$l" ]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [ -n "${l%%[^:.;]*}" ]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo $r
+}
+function getopt()
+{
+  local optlist=`optlistex "$1"`
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "sed" "sed"
+check_binary "wget" "wget"
+
+
+BASE_DB_NAME=""
+ACTION=""
+DB_PREFIX=""
+USER_PREFIX=""
+BASE_USER_NAME=""
+USER_HOSTS="localhost"
+MYSQL_USER="root"
+MYSQL_PASSWORD="false"
+PRIVILEGES=""
+
+MANDATORY_DB="true"
+MANDATORY_PASSWORD="false"
+
+
+ACTION="download"
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h version v download tgz tbz2 zip" "${@}"; do
+  # Options debuging.
+  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+
+  case "${OPTOPT}" in
+    version | v )
+      ACTION="print-version"
+      ;;
+    tgz )
+      ACTION="untar-ungzip"
+      ;;
+    tbz2 )
+      ACTION="untar-unbzip2"
+      ;;
+    zip )
+      ACTION="unzip"
+      ;;
+    help | h )
+      usage
+      exit 0
+      ;;
+    * )
+      echo "Error: unsupported option '${OPTOPT}'." >&2
+      exit 1
+      ;;
+  esac
+done
+
+shift $[OPTIND-1]
+
+if [ ${#} -ne 2 ]; then
+  echo "Error: project name and/or filename template missing."
+  exit 1
+fi
+
+PROJECT_NAME="${1}"
+FILENAME_TEMPLATE="${2}"
+
+##
+## This is where the source download URL and version detection is done.
+## It is frequently broken by sourceforge updates.
+##
+SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
+VERSION="$(command wget --quiet --output-document=- \
+    "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+  | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
+  | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g"
+  )"
+
+if [ -z "${SOURCE_URL}" ]; then
+  echo "Error: unable to detect download URL." >&2
+  exit 1
+elif [ -z "${VERSION}" ]; then
+  echo "Error: unable to detect software version." >&2
+  exit 1
+fi
+
+case "${ACTION}" in
+  "print-version" )
+    echo "${VERSION}"
+    ;;
+  "untar-ungzip" )
+    download_tgz "${SOURCE_URL}"
+    echo "${DOWNLOAD_TGZ}"
+    ;;
+  "untar-unbzip2" )
+    download_tbz2 "${SOURCE_URL}"
+    echo "${DOWNLOAD_TBZ2}"
+    ;;
+  "unzip" )
+    download_zip "${SOURCE_URL}"
+    echo "${DOWNLOAD_ZIP}"
+    ;;
+  "download" | *)
+    download_file "${SOURCE_URL}" "${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+    echo "${DOWNLOAD_FILE}"
+    ;;
+esac
+
+exit 0
+
