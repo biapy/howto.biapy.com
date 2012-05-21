@@ -1,0 +1,206 @@
+#!/bin/bash
+#
+# Google calendar backup tool.
+#
+# Created by: Pierre-Yves Landuré <pierre dash yves dot landure at biapy dot fr>
+# Based on a work by Graham van der Wielen
+# Created on: 20111213
+
+### System Setup ###
+CONFIGURATION_FILE="/etc/backup-google-agenda.conf"
+LOCK_FILE="/var/lock/backup-google-agenda.pid"
+BACKUP_KEEPALIVE="30"
+
+
+
+### Detect backup-manager backup path if possible.
+BACKUP_PATH=""
+if [ -e '/etc/backup-manager.conf' ]; then
+  BACKUP_PATH="$(command grep 'BM_REPOSITORY_ROOT=' '/etc/backup-manager.conf' \
+      | command sed -e 's/^.*=\(.*\)$/\1/' \
+                    -e "s/^[ \t\"\']*//g" \
+                    -e "s/[ \t\"\']*$//g")"
+fi
+
+if [ -z "${BACKUP_PATH}" -o ! -d "${BACKUP_PATH}" ]; then
+  BACKUP_PATH="/var/archives"
+fi
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH=$(/bin/readlink -f "${1}")
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=""
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_binary
+
+
+
+# Check if a package file is present
+#
+# @param string $file The file to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the file is missing.
+function check_package_file {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the file presence.
+  if [ ! -e "${1}" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_package_file
+
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "tar" "tar"
+check_binary "mktemp" "mktemp"
+check_binary "sed" "sed"
+check_binary "flock" "util-linux"
+
+if [ ! -e "${CONFIGURATION_FILE}" ]; then
+  echo "Error : '${CONFIGURATION_FILE}' does not exists.
+
+Please create it with:
+
+echo '# $(command basename "${CONFIGURATION_FILE}")
+# backup-google-agenda configuration file
+# Add one calendar by line, private URLs can be found in 
+# each Google calendar agenda parameters.
+# 
+# Calendar name must be unique: it is used to name the calendar backup  file.
+# There is no check of this.
+#
+# Calendar name = https://private-url
+# My agenda = https://www.google.com/calendar/feeds/biapy%40gmail.com/private-a5fsqdhvcx39450fdsdtjk8c12df32ee/basic' \\
+    > '${CONFIGURATION_FILE}'
+
+" >&2
+  exit 1
+fi
+
+
+(
+  # Try to get lock
+  flock -x -n 200
+
+  if [ ! -e "${BACKUP_PATH}" ]; then
+    command mkdir --parent "${BACKUP_PATH}"
+  fi
+
+  BACKUP_DATE="$(command date '+%Y%m%d')"
+  BACKUP_TIME="$(command date '+%H%M')"
+
+  command grep -v '^[^ \t]*#' "${CONFIGURATION_FILE}" \
+      | while read AGENDA_LINE; do
+        AGENDA_NAME="$(command echo "${AGENDA_LINE}" \
+          | command cut --delimiter="=" --field=1 \
+          | command sed -e 's/^[ \t]*//g' -e 's/[ \t]*$//g' \
+          | command tr ' /|;:' '_____')"
+        AGENDA_URL="$(command echo "${AGENDA_LINE}" \
+          | command cut --delimiter="=" --field=2 \
+          | command sed -e 's/^[ \t]*//g' -e 's/[ \t]*$//g')"
+
+        AGENDA_USER="$(command echo "${AGENDA_URL}" \
+          | command sed -e 's:^.*calendar/\(feeds\|ical\)/\([^/]*\)/.*$:\2:')"
+        AGENDA_CODE="$(command echo "${AGENDA_URL}" \
+          | command sed -e 's|^.*/private-\([^/]*\)/basic.*$|\1|')"
+
+        if [ "${AGENDA_CODE}" = "${AGENDA_URL}" -o "${AGENDA_USER}" = "${AGENDA_URL}" ]; then
+          echo "Warning : This is not a valid agenda private URL : '${AGENDA_URL}'." >&2
+          continue;
+        fi
+
+
+
+        AGENDA_CLEAN_USER="$(echo "${AGENDA_USER}" | command sed -e 's/%40/_at_/g')"
+        AGENDA_BASE_FILE="${HOSTNAME}-google_agenda-${AGENDA_CLEAN_USER}-${AGENDA_NAME}-${AGENDA_CODE}"
+        AGENDA_FILE="${BACKUP_PATH}/${AGENDA_BASE_FILE}.${BACKUP_DATE}.${BACKUP_TIME}"
+
+        AGENDA_ICS_URL="https://www.google.com/calendar/ical/${AGENDA_USER}/private-${AGENDA_CODE}/basic.ics"
+        AGENDA_ICS_FILE="${AGENDA_FILE}.ics.gz"
+
+        AGENDA_XML_URL="https://www.google.com/calendar/feeds/${AGENDA_USER}/private-${AGENDA_CODE}/basic"
+        AGENDA_XML_FILE="${AGENDA_FILE}.xml.gz"
+
+
+        if command wget --no-check-certificate \
+              --spider --quiet "${AGENDA_XML_URL}"; then
+          # Save XML file.
+          command wget "${AGENDA_XML_URL}" \
+              --quiet --no-check-certificate --output-document=- \
+            | command gzip -9 > "${AGENDA_XML_FILE}"
+        else
+          echo "Error 404 : '${AGENDA_XML_URL}'." >&2
+        fi
+
+        if command wget --no-check-certificate \
+              --spider --quiet "${AGENDA_ICS_URL}"; then
+          # Save ICS file.
+          command wget "${AGENDA_ICS_URL}" \
+              --quiet --no-check-certificate --output-document=- \
+            | command gzip -9 > "${AGENDA_ICS_FILE}"
+        else
+          echo "Error 404 : '${AGENDA_ICS_URL}'." >&2
+        fi
+
+        # Remove archives older than X days.
+        command find "${BACKUP_PATH}" -name "${AGENDA_BASE_FILE}*" -ctime ${BACKUP_KEEPALIVE} -print0 \
+            | command xargs -0 -IFILE rm "FILE"
+      done
+
+) 200> "${LOCK_FILE}"
+
+
+exit 0
