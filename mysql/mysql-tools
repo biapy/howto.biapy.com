@@ -54,7 +54,7 @@ Usage :
 REALPATH=""
 function realpath {
   command test ${#} -ne 1 && exit 1
-  REALPATH=$(/bin/readlink -f "${1}")
+  REALPATH="$(/bin/readlink -f "${1}")"
 } # realpath
 
 
