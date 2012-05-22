@@ -4,7 +4,7 @@
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
 #
-VERSION="1.0.1"
+VERSION="1.0.2"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -33,7 +33,7 @@ Usage :
     * --password | -p : The password of the user running the queries.
 
   Available actions are :
-    * --help | -h : Display this message.
+    * --help : Display this message.
     * --create | -c : Create a database and its user.
     * --empty | -e : Drop all tables of a database.
     * --drop | -d : Destroy the database and its user.
@@ -43,44 +43,9 @@ Usage :
         see: https://dev.mysql.com/doc/refman/5.0/fr/grant.html
     * --deluser : Delete a mysql user.
 "
-  exit 1
+
+  test -n "${1}" && exit ${1}
 } # usage
-
-
-# Get the absolute path for a file or directory.
-#
-# @param string $path A relative path.
-#
-# @return ${REALPATH} A absolute path.
-REALPATH=""
-function realpath {
-  command test ${#} -ne 1 && exit 1
-  REALPATH="$(/bin/readlink -f "${1}")"
-} # realpath
-
-
-
-# Get the absolute path for a file or directory and check the file existance.
-# If the file does not exists, display an error message and exit the script.
-#
-# @param string $path A relative path.
-#
-# @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=""
-function realpath_check {
-  command test ${#} -ne 1 && exit 1
-
-  realpath "${1}"
-
-  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
-    REALPATH=""
-  fi
-
-  if [ -z "${REALPATH}" ]; then
-    echo "Error : File '${1}' does not exists." >&2
-    exit 1
-  fi
-} # realpath_check
 
 
 
@@ -94,29 +59,11 @@ function check_binary {
   command test ${#} -ne 2 && exit 1
 
   # Test the binary presence.
-  if [ -z "$(which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'."
-    exit 1
-  fi
-} # check_binary
-
-
-
-# Check if a patckage file is present
-#
-# @param string $file The file to check.
-# @param string $package The package the binary come from.
-#
-# @return Exit with error if the file is missing.
-function check_package_file {
-  command test ${#} -ne 2 && exit 1
-
-  # Test the file presence.
-  if [ ! -e "${1}" ]; then
+  if [ -z "$(command which "${1}")" ]; then
     echo "Error : '${1}' is missing. Please install package '${2}'." >&2
     exit 1
   fi
-} # check_package_file
+} # check_binary
 
 
 
@@ -139,64 +86,6 @@ function check_mysql {
     exit 1
   fi
 } # check_mysql
-
-
-
-# Download a file from the given URL.
-#
-# @param string $url The URL of the file to download.
-#
-# @return ${DOWNLOAD_FILE} The path to the downloaded file.
-DOWNLOAD_FILE=""
-function download_file {
-  command test ${#} -ne 1 && exit 1
-
-  # Download a file.
-  DOWNLOAD_FILE="$(command mktemp)"
-  command wget --quiet "${1}" \
-      --output-document="${DOWNLOAD_FILE}"
-
-  if [ ! -s "${DOWNLOAD_FILE}" ]; then
-    command rm "${DOWNLOAD_FILE}"
-    echo "Error : Unable to download file from '${1}'." >&2
-    exit 1
-  fi
-} # download_file
-
-
-
-# Download and uncompress a tgz file from the given URL.
-#
-# @param string $url The URL of the file to download.
-#
-# @return ${DOWNLOAD_TGZ} The path to the extracted content.
-DOWNLOAD_TGZ=""
-function download_tgz {
-  command test ${#} -ne 1 && exit 1
-
-  download_file "${1}"
-
-  # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TGZ="$(command mktemp -d)"
-  command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
-  command rm "${DOWNLOAD_FILE}"
-
-  if [ $(command ls -1 --all "${DOWNLOAD_TGZ}" | command wc --lines) -eq 0 ]; then
-    echo "Error : unable to untar file downloaded from '${1}'." >&2
-    exit 1
-  fi
-} # download_tgz
-
-
-
-# Read the eth0 IP.
-#
-# @return A IP address.
-function eth0_ip {
-  command ifconfig eth0 \
-            | command grep "inet adr" \
-            | command sed -e 's/.*inet adr:\([^ ]*\).*/\1/'
-} # eth0_ip
 
 
 
@@ -224,6 +113,7 @@ function mysql_call {
 
   return "${?}"
 } # mysql_call
+
 
 
 #######################################################################################
@@ -358,7 +248,6 @@ check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
 check_binary "mysql" "mysql-client"
 check_binary "apg" "apg"
-check_binary "wget" "wget"
 
 
 
@@ -376,7 +265,7 @@ MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p." "${@}"; do
+while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -439,7 +328,7 @@ while getoptex "help h create c db-prefix: dp: user-prefix: up: drop d empty e a
       fi
       ;;
 
-    help | h )
+    help | * )
       usage
       exit 0
       ;;
@@ -450,13 +339,16 @@ shift $[OPTIND-1]
 
 BASE_DB_NAME="${1}"
 
-command test -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" && usage
+if [ -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" ]; then
+  echo "Error: Database name is missing." >&2
+  exit 1
+fi
 
 # Retrocompatibility.
 case "${BASE_DB_NAME}" in
   create-db )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     MYSQL_DB="${2}"
     ALLOWED_HOSTS="${3}"
@@ -468,7 +360,7 @@ case "${BASE_DB_NAME}" in
 
   create-domain-db )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     DOMAIN="${2}"
     ALLOWED_HOSTS="${3}"
@@ -482,7 +374,7 @@ case "${BASE_DB_NAME}" in
 
   create-user )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     MYSQL_USER="${2}"
     MYSQL_PASSWORD="${3}"
@@ -493,7 +385,7 @@ case "${BASE_DB_NAME}" in
 
   clear-db )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     MYSQL_DB="${2}"
     MYSQL_USER="${3}"
@@ -505,7 +397,7 @@ case "${BASE_DB_NAME}" in
 
   drop-db )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     MYSQL_DB="${2}"
     ROOT_PASSWORD="${3}"
@@ -516,7 +408,7 @@ case "${BASE_DB_NAME}" in
 
   drop-domain-db )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     DOMAIN="${2}"
     ROOT_PASSWORD="${3}"
@@ -593,7 +485,7 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
       exit 0
     fi
 
-    echo "Error: unable to create database '${DB_NAME}'"
+    echo "Error: unable to create database '${DB_NAME}'" >&2
     exit 1
     ;;
 
@@ -620,11 +512,11 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
         exit 0
       fi
 
-      echo "Error: Unable to drop database '${DB_NAME}'."
+      echo "Error: Unable to drop database '${DB_NAME}'." >&2
       exit 1
     fi
 
-    echo "Error: unable to delete user '${DB_USER}'."
+    echo "Error: unable to delete user '${DB_USER}'." >&2
     exit 1
     ;;
 
@@ -648,11 +540,11 @@ SET FOREIGN_KEY_CHECKS = 1;"
         exit 0
       fi
 
-      echo "Error: unable to drop tables from database '${DB_NAME}'."
+      echo "Error: unable to drop tables from database '${DB_NAME}'." >&2
       exit 1
     fi
 
-    echo "Error: unable to fetch database '${DB_NAME}' table list."
+    echo "Error: unable to fetch database '${DB_NAME}' table list." >&2
     exit 1
     ;;
 
@@ -695,9 +587,9 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
     fi
 
     if [ -z "${BASE_DB_NAME}" ]; then
-      echo "Error: unable to create user '${DB_USER}'."
+      echo "Error: unable to create user '${DB_USER}'." >&2
     else
-      echo "Error: unable to create user '${DB_USER}' for database '${DB_NAME}'."
+      echo "Error: unable to create user '${DB_USER}' for database '${DB_NAME}'." >&2
     fi
     exit 1
     ;;
@@ -718,18 +610,19 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
         --execute="${SQL_QUERY}"; then
 
       echo "User '${DB_USER}' successfully deleted."
-      exit 1
+      exit 0
     fi
 
-    echo "Error: unable to delete user '${DB_USER}'."
+    echo "Error: unable to delete user '${DB_USER}'." >&2
     exit 1
     ;;
 
 
 
   * )
-    echo "Error : '${1}' is not a valid action."
+    echo "Error : '${1}' is not a valid action." >&2
     usage
+    exit 1
     ;;
 esac
 
