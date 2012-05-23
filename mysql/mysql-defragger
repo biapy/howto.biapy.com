@@ -19,7 +19,7 @@
 #  * InnoDB real row count can trigger heavy ressource load on large tables.
 #  * Aria engine is untested and provided as is.
 #
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -41,8 +41,8 @@ Usage :
         [ --verbose ] [ -log='/tmp/mysql-defragger.log' ]
 
   Available options are :
-    * --help          : Display this message.
-    * --host | -h     : The MySQL server host.
+    * --help | -h     : Display this message.
+    * --host | --remote | -r : The MySQL server host.
     * --user | -u     : The user used to run the SQL queries (default to root).
     * --password | -p : The password of the user running the queries.
     * --database | --db | -d : use specified database as target
@@ -64,6 +64,22 @@ Usage :
                         (use -q -q to completly disable output).
     * --verbose | -v  : Additionnaly list fragmented tables, overide --quiet.
     * --log | l       : Specify the log file (default to /dev/null).
+
+  Typical usage:
+    Run this two commands monthly at a late hour to keep your tables
+    responsive :
+     - Optimize all fragmented MyISAM tables on server:
+
+        ${SCRIPT_NAME} --myisam --optimize
+
+     - Analyze all InnoDB tables on server (can trigger heavy system load):
+
+        ${SCRIPT_NAME} --innodb --analyze
+
+    You can optionnaly force InnoDB optimization for a particularly usage intensive
+    database:
+
+        ${SCRIPT_NAME} --innodb --optimize --db='some_database'
 "
 
   test -n "${1}" && exit ${1}
@@ -356,12 +372,12 @@ OPTIMIZE_ROW_LIMIT=1000000
 ANALYZE_TRIGGER=0
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help host: h: user: u: password. p. database: db: d: mysql: m: check c optimize o analyze a quiet q verbose v log: l: all innodb myisam aria optimize-trigger: analyze-trigger: optimize-row-limit:" "${@}"; do
+while getoptex "help h host: remote: r: user: u: password. p. database: db: d: mysql: m: check c optimize o analyze a quiet q verbose v log: l: all innodb myisam aria optimize-trigger: analyze-trigger: optimize-row-limit:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
   case "${OPTOPT}" in
-    host | h )
+    host | remote | r )
       if [ -n "${OPTARG}" ]; then
         MYSQL_HOST="${OPTARG}"
       fi
@@ -456,7 +472,7 @@ while getoptex "help host: h: user: u: password. p. database: db: d: mysql: m: c
       ENGINE_MYISAM="true"
       ;;
 
-    help | * )
+    help | -h | * )
       usage
       exit 0
       ;;
