@@ -257,7 +257,7 @@ DB_PREFIX=""
 USER_PREFIX=""
 BASE_USER_NAME=""
 USER_HOSTS="localhost"
-MYSQL_USER="root"
+MYSQL_USER="false"
 MYSQL_PASSWORD="false"
 PRIVILEGES=""
 
@@ -341,8 +341,42 @@ BASE_DB_NAME="${1}"
 
 if [ -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" ]; then
   echo "Error: Database name is missing." >&2
-  exit 1
+  usage 1
 fi
+
+
+
+# prevent overwriting the commandline args with the ones in .my.cnf,
+# and check that .my.cnf exists
+if [ -f "${HOME}/.my.cnf" ]; then
+
+  if [ "${MYSQL_HOST}" = "localhost" \
+      -a -n "$(command grep --max-count=1 \
+          -e "^host=" "${HOME}/.my.cnf")" ]; then
+    MYSQL_HOST="$(command grep --max-count=1 -e "^host=" "${HOME}/.my.cnf" \
+                | command cut --delimiter="=" --fields=2-)"
+  fi
+
+  if [ "${MYSQL_USER}" = "false" \
+      -a -n "$(command grep --max-count=1 \
+          -e "^user=" "${HOME}/.my.cnf")" ]; then
+    MYSQL_USER="$(command grep --max-count=1 -e "^user=" "${HOME}/.my.cnf" \
+                | command cut --delimiter="=" --fields=2-)"
+
+    if [ -n "$(command grep --max-count=1 \
+          -e "^pass\(word\)\{0,1\}=" "${HOME}/.my.cnf")" ]; then
+      MYSQL_PASSWORD="$(command grep --max-count=1 \
+                    -e "^pass\(word\)\{0,1\}=" "${HOME}/.my.cnf" \
+                | command cut --delimiter="=" --fields=2-)"
+    fi
+  fi
+fi
+
+if [ "${MYSQL_USER}" = "false" ]; then
+  MYSQL_USER="root"
+fi
+
+
 
 # Retrocompatibility.
 case "${BASE_DB_NAME}" in
