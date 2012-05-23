@@ -1,0 +1,863 @@
+#!/bin/bash
+#
+# MySQL Defragger
+# ===============
+# List, Analyze, Optimize MySQL fragmented InnoDB, MyISAM and Aria tables.
+# By default, try to report fragmented tables for each databases.
+#
+# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
+#
+# This tool is forked from Phil Dufault <phil@dufault.info> mysqlfragfinder.sh v1.0.0
+# https://github.com/pdufault/mysqlfragfinder
+#
+# Known bugs
+# ----------
+#  * InnoDB fragmentation detection is broken with MySQL 5.1.
+#    data_free column in SHOW TABLE STATUS does not provide sensible data
+#    on fragmentation. Do not run --optimize on InnoDB tables if they have
+#    many rows since it can lead to a disk space shortage.
+#  * InnoDB real row count can trigger heavy ressource load on large tables.
+#  * Aria engine is untested and provided as is.
+#
+VERSION="1.0.0"
+
+SCRIPT_NAME="$(command basename ${0})"
+
+# Print this script help.
+function usage {
+  command echo "MySQL Defragger v${VERSION}
+List, Analyze, Optimize MySQL fragmented InnoDB, MyISAM and Aria tables.
+By default, try to report fragmented tables for each databases.
+
+Usage :
+
+  ${SCRIPT_NAME} [ --host='localhost' ]
+        [ --user='mysql_user' ] [ --password[='mysql_password'] ]
+        [ --database='database_name' ] [ --mysql='mysql' ]
+        [ --optimize ] [ --analyze ]
+        [ --optimize-trigger=10 ] [ --analyze-trigger=0 ]
+        [ --optimize-row-limit=1000000 ]
+        [ --all | [ --innodb ] [ --myisam ] [ --aria ] ]
+        [ --verbose ] [ -log='/tmp/mysql-defragger.log' ]
+
+  Available options are :
+    * --help          : Display this message.
+    * --host | -h     : The MySQL server host.
+    * --user | -u     : The user used to run the SQL queries (default to root).
+    * --password | -p : The password of the user running the queries.
+    * --database | --db | -d : use specified database as target
+                        if this option is not used, all databases are targeted.
+    * --mysql | -m    : Specify the mysql client command to use
+                        (default to mysql).
+    * --optimize | -o : Optimize fragmented tables.
+    * --analyze | -a  : Analyze tables, but don't run full optimization.
+    * --optimize-trigger : Fragmentation level triggering optimization
+                        (default to 10%).
+    * --optimize-row-limit : Prevent optimize if row count is over this value.
+    * --analyze-trigger : Fragmentation level triggering analyze
+                        (default to 0%, aka. always).
+    * --myisam        : Run on MyISAM tables.
+    * --innodb        : Run on InnoDB tables.
+    * --aria          : Run on Aria tables.
+    * --all           : Run on MyISAM, InnoDB and Aria tables (default).
+    * --quiet | -q    : Reduce output on stdout
+                        (use -q -q to completly disable output).
+    * --verbose | -v  : Additionnaly list fragmented tables, overide --quiet.
+    * --log | l       : Specify the log file (default to /dev/null).
+"
+
+  test -n "${1}" && exit ${1}
+} # usage
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH="$(/bin/readlink -f "${1}")"
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=""
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(command which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_binary
+
+
+
+# Call MySQL.
+#
+# @param string $mysql_host The MySQL server host.
+# @param string $mysql_user A MySQL user.
+# @param string $mysql_password A MySQL user password.
+# @param mixed $arg1, $arg2 arguments passed to mysql command.
+#
+# @return MySQL command result.
+function mysql_call {
+  command test ${#} -lt 5 && exit 1
+
+  MYSQL_CALL_CLIENT="${1}"
+  MYSQL_CALL_HOST="${2}"
+  MYSQL_CALL_USER="${3}"
+  MYSQL_CALL_PASSWORD="${4}"
+  shift $[4]
+
+  if [ "${MYSQL_CALL_PASSWORD}" = "false" ]; then
+    "${MYSQL_CALL_CLIENT}" --host="${MYSQL_CALL_HOST}" \
+        --user="${MYSQL_CALL_USER}" "${@}"
+  elif [ "${MYSQL_CALL_PASSWORD}" = "true" ]; then
+    "${MYSQL_CALL_CLIENT}" --host="${MYSQL_CALL_HOST}" \
+        --user="${MYSQL_CALL_USER}" --password "${@}"
+  else
+    "${MYSQL_CALL_CLIENT}" --host="${MYSQL_CALL_HOST}" \
+        --user="${MYSQL_CALL_USER}" --password="${MYSQL_CALL_PASSWORD}" "${@}"
+  fi
+
+  return "${?}"
+} # mysql_call
+
+
+
+# Check if MySQL connection is working
+#
+# @param string $mysql_host The MySQL host.
+# @param string $mysql_user The MySQL user.
+# @param string $mysql_password The MySQL password.
+# @param string $mysql_db The MySQL database (optional).
+#
+# @return Exit with error if connection to MySQL fail.
+function check_mysql {
+  command test ${#} -ne 5 && exit 1
+
+  MYSQL_CHECK_CLIENT="${1}"
+  MYSQL_CHECK_HOST="${2}"
+  MYSQL_CHECK_USER="${3}"
+  MYSQL_CHECK_PASSWORD="${4}"
+  MYSQL_CHECK_DB="${5}"
+
+  # Test the MySQL connection.
+  if [ -n "${MYSQL_CHECK_DB}" ]; then
+    if ! mysql_call "${MYSQL_CHECK_CLIENT}" "${MYSQL_CHECK_HOST}" \
+          "${MYSQL_CHECK_USER}" "${MYSQL_CHECK_PASSWORD}" \
+          --execute="SELECT 1" "${MYSQL_CHECK_DB}" 1>"/dev/null"; then
+      echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
+      exit 1
+    fi
+  else
+    if ! mysql_call "${MYSQL_CHECK_CLIENT}" "${MYSQL_CHECK_HOST}" \
+          "${MYSQL_CHECK_USER}" "${MYSQL_CHECK_PASSWORD}" \
+          --execute="SHOW STATUS" 1>"/dev/null"; then
+      echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
+      exit 1
+    fi
+  fi
+} # check_mysql
+
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+# Include /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+# from package bash-doc.
+###############################################################################
+###############################################################################
+###############################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let OPTIND || OPTIND=1
+  [ $OPTIND -lt $# ] || return 1
+  shift $OPTIND
+  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
+  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
+  then
+    local o
+    o="-${1#-$OPTOFS}"
+    for opt in ${optlist#;}
+    do
+      OPTOPT="${opt%[;.:]}"
+      unset OPTARG
+      local opttype="${opt##*[^;:.]}"
+      [ -z "$opttype" ] && opttype=";"
+      if [ ${#OPTOPT} -gt 1 ]
+      then # long-named option
+        case $o in
+          "--$OPTOPT")
+            if [ "$opttype" != ":" ]; then return 0; fi
+            OPTARG="$2"
+            if [ -z "$OPTARG" ];
+            then # error: must have an agrument
+              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT";
+              OPTOPT="?"
+              return 1;
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "--$OPTOPT="*)
+            if [ "$opttype" = ";" ];
+            then  # error: must not have arguments
+              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTARG=${o#"--$OPTOPT="}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-$OPTOPT")
+            unset OPTOFS
+            [ "$opttype" != ":" ] && return 0
+            OPTARG="$2"
+            if [ -z "$OPTARG" ]
+            then
+              echo "$0: error: -$OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "-$OPTOPT"*)
+            if [ $opttype = ";" ]
+            then # an option with no argument is in a chain of options
+              OPTOFS="$OPTOFS?" # move to the next option in the chain
+              OPTIND=$[OPTIND-1] # the chain still has other options
+              return 0
+            else
+              unset OPTOFS
+              OPTARG="${o#-$OPTOPT}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage
+    exit 1
+  fi; fi
+  OPTOPT="?"
+  unset OPTARG
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
+  while [ -n "$l" ]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [ -n "${l%%[^:.;]*}" ]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo $r
+}
+function getopt()
+{
+  local optlist=`optlistex "$1"`
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+###############################################################################
+###############################################################################
+###############################################################################
+
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "mktemp" "mktemp"
+check_binary "sed" "sed"
+check_binary "grep" "grep"
+#check_binary "mysql" "mysql-client"
+
+
+# Application defaults
+LOG_FILE="/dev/null"
+MYSQL_CLIENT="mysql"
+
+MYSQL_HOST="localhost"
+MYSQL_USER="false"
+MYSQL_PASSWORD="false"
+MYSQL_DB=""
+
+OPTIMIZE="false"
+ANALYZE="false"
+
+VERBOSE="false"
+QUIET="false"
+ULTRA_QUIET="false"
+
+ENGINE_ARIA="false"
+ENGINE_INNODB="false"
+ENGINE_MYISAM="false"
+
+OPTIMIZE_TRIGGER=10
+OPTIMIZE_ROW_LIMIT=1000000
+ANALYZE_TRIGGER=0
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help host: h: user: u: password. p. database: db: d: mysql: m: check c optimize o analyze a quiet q verbose v log: l: all innodb myisam aria optimize-trigger: analyze-trigger: optimize-row-limit:" "${@}"; do
+  # Options debuging.
+  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+
+  case "${OPTOPT}" in
+    host | h )
+      if [ -n "${OPTARG}" ]; then
+        MYSQL_HOST="${OPTARG}"
+      fi
+      ;;
+
+    user | u )
+      MYSQL_USER="${OPTARG}"
+      ;;
+
+    password | p )
+      MYSQL_PASSWORD="${OPTARG}"
+
+      if [ -z "${MYSQL_PASSWORD}" ]; then
+        MYSQL_PASSWORD="true"
+      fi
+
+      if [ "${MYSQL_USER}" = "false" ]; then
+        MYSQL_USER="root"
+      fi
+      ;;
+
+    database | db | d )
+      if [ -n "${OPTARG}" ]; then
+        MYSQL_DB="${OPTARG}"
+      fi
+      ;;
+
+    mysql | m )
+      if [ -n "${OPTARG}" ]; then
+        MYSQL_CLIENT="${OPTARG}"
+      fi
+      ;;
+
+    optimize | o )
+      OPTIMIZE="true"
+      ;;
+
+    analyze | a )
+      ANALYZE="true"
+      ;;
+
+    optimize-trigger )
+      if [ -n "${OPTARG}" ]; then
+        OPTIMIZE_TRIGGER="${OPTARG}"
+      fi
+      ;;
+
+    optimize-row-limit )
+      if [ -n "${OPTARG}" ]; then
+        OPTIMIZE_ROW_LIMIT="${OPTARG}"
+      fi
+      ;;
+
+    analyze-trigger )
+      if [ -n "${OPTARG}" ]; then
+        ANALYZE_TRIGGER="${OPTARG}"
+      fi
+      ;;
+
+    quiet | q )
+      if [ "${QUIET}" = "true" ]; then
+        ULTRA_QUIET="true"
+      fi
+      QUIET="true"
+      ;;
+
+    verbose | v )
+      VERBOSE="true"
+      ;;
+
+    log | l )
+      if [ -n "${OPTARG}" ]; then
+        LOG_FILE="${OPTARG}"
+      fi
+      ;;
+
+    aria )
+      ENGINE_ARIA="true"
+      ;;
+
+    innodb )
+      ENGINE_INNODB="true"
+      ;;
+
+    myisam )
+      ENGINE_MYISAM="true"
+      ;;
+
+    all )
+      ENGINE_ARIA="true"
+      ENGINE_INNODB="true"
+      ENGINE_MYISAM="true"
+      ;;
+
+    help | * )
+      usage
+      exit 0
+      ;;
+  esac
+done
+
+shift $[OPTIND-1]
+
+if [ ${#} -gt 0 ]; then
+  usage
+  exit 1
+fi
+
+# Check MYSQL_CLIENT existance.
+if [[ "${MYSQL_CLIENT}" =~ "/" ]]; then
+  # MYSQL_CLIENT is a path.
+  realpath_check "${MYSQL_CLIENT}"
+  MYSQL_CLIENT="${REALPATH}"
+else
+  # MYSQL_CLIENT is a command.
+  MYSQL_CLIENT_PATH="$(command which "${MYSQL_CLIENT}")"
+  if [ -z "${MYSQL_CLIENT_PATH}" ]; then
+    echo "Error: can not find '${MYSQL_CLIENT}'." >&2
+    exit 1
+  fi
+  MYSQL_CLIENT="${MYSQL_CLIENT_PATH}"
+fi
+
+# Check log file validity.
+LOG_ERROR="\nUse --log option for more information."
+if [ "${LOG_FILE}" != "/dev/null" ]; then
+  if ! command touch --no-create "${LOG_FILE}"; then
+    echo "Error: can not create log file '${LOG_FILE}'." >&2
+    exit 1
+  fi
+
+  # Empty the log file.
+  echo "" > "${LOG_FILE}"
+  LOG_ERROR="\nCheck '${LOG_FILE}' for more information."
+fi
+
+# Check verbose vs quiet
+if [ "${VERBOSE}" = "true" ]; then
+  QUIET="false"
+  ULTRA_QUIET="false"
+fi
+
+# Check selected engines
+if [ "${ENGINE_ARIA}" = "false" \
+      -a "${ENGINE_INNODB}" = "false" \
+      -a "${ENGINE_MYISAM}" = "false" ]; then
+  ENGINE_ARIA="true"
+  ENGINE_INNODB="true"
+  ENGINE_MYISAM="true"
+fi
+
+# prevent overwriting the commandline args with the ones in .my.cnf,
+# and check that .my.cnf exists
+if [ -f "${HOME}/.my.cnf" ]; then
+
+  if [ "${MYSQL_HOST}" = "localhost" \
+      -a -n "$(command grep --max-count=1 \
+          -e "^host=" "${HOME}/.my.cnf")" ]; then
+    MYSQL_HOST="$(command grep --max-count=1 -e "^host=" "${HOME}/.my.cnf" \
+                | command cut --delimiter="=" --fields=2-)"
+  fi
+
+  if [ "${MYSQL_USER}" = "false" \
+      -a -n "$(command grep --max-count=1 \
+          -e "^user=" "${HOME}/.my.cnf")" ]; then
+    MYSQL_USER="$(command grep --max-count=1 -e "^user=" "${HOME}/.my.cnf" \
+                | command cut --delimiter="=" --fields=2-)"
+
+    if [ -n "$(command grep --max-count=1 \
+          -e "^pass\(word\)\{0,1\}=" "${HOME}/.my.cnf")" ]; then
+      MYSQL_PASSWORD="$(command grep --max-count=1 \
+                    -e "^pass\(word\)\{0,1\}=" "${HOME}/.my.cnf" \
+                | command cut --delimiter="=" --fields=2-)"
+    fi
+  fi
+fi
+
+if [ "${MYSQL_USER}" = "false" ]; then
+  MYSQL_USER="root"
+fi
+
+
+if [ "${MYSQL_PASSWORD}" = "true" ]; then
+  echo -n "Enter password: "
+  read -s MYSQL_PASSWORD
+fi
+
+# Check MySQL connection
+check_mysql "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" "${MYSQL_DB}"
+
+# Retrieve the listing of databases:
+if [ -z "${MYSQL_DB}" ]; then
+  DATABASES=( $(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+      "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+      --skip-column-names --batch \
+      --execute "SHOW DATABASES" 2>>"${LOG_FILE}") )
+  if [ ${?} -gt 0 ]; then
+    echo -e "Error: can not fetch database listing.${LOG_ERROR}" >&2
+    exit 1
+  fi
+
+  [ "${QUIET}" = "false" ] && echo "Found ${#DATABASES[@]} databases"
+else
+  DATABASES=( "${MYSQL_DB}" )
+fi
+
+# Create temporary files to compute tables listing.
+TABLES_FILE="$(command mktemp)"
+ENGINE_FILE="$(command mktemp)"
+
+GREAT_TOTAL_INNODB_TABLES=0
+GREAT_TOTAL_MYISAM_TABLES=0
+GREAT_TOTAL_ARIA_TABLES=0
+
+GREAT_TOTAL_INNODB_OPTIMIZED=0
+GREAT_TOTAL_MYISAM_OPTIMIZED=0
+GREAT_TOTAL_ARIA_OPTIMIZED=0
+
+GREAT_TOTAL_INNODB_ANALYZED=0
+GREAT_TOTAL_MYISAM_ANALYZED=0
+GREAT_TOTAL_ARIA_ANALYZED=0
+
+# For each database.
+for MYSQL_DB in ${DATABASES[@]}; do
+  [ "${QUIET}" = "false" ] && echo "Checking database '${MYSQL_DB}'..."
+
+  TOTAL_INNODB_TABLES=0
+  TOTAL_MYISAM_TABLES=0
+  TOTAL_ARIA_TABLES=0
+
+  TOTAL_INNODB_OPTIMIZED=0
+  TOTAL_MYISAM_OPTIMIZED=0
+  TOTAL_ARIA_OPTIMIZED=0
+
+  TOTAL_INNODB_ANALYZED=0
+  TOTAL_MYISAM_ANALYZED=0
+  TOTAL_ARIA_ANALYZED=0
+
+  # List current database tables
+  mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+      "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+      --skip-column-names --batch \
+      --execute "SHOW TABLE STATUS FROM \`${MYSQL_DB}\`" \
+    | command egrep "MyISAM|InnoDB|Aria" \
+    | command cut --fields=1,2,6,7,10 > "${TABLES_FILE}" 2>>"${LOG_FILE}"
+  if [ ${?} -gt 0 ]; then
+    echo -e "Error: can not fetch '${MYSQL_DB}' table listing.${LOG_ERROR}" >&2
+    command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+    exit 1
+  fi
+
+  # Count MyISAM tables
+  TOTAL_MYISAM_TABLES="$(command grep "MyISAM" "${TABLES_FILE}" | command wc --lines)"
+  TOTAL_MYISAM_FRAGMENTED=0
+  if [ ${TOTAL_MYISAM_TABLES} -gt 0 ]; then
+    TOTAL_MYISAM_FRAGMENTED="$(command grep "MyISAM" "${TABLES_FILE}" | command egrep -v "$(echo -ne '\t')0$" | command wc --lines)"
+    MYISAM_FRAGMENTATION_RATIO="$((${TOTAL_MYISAM_FRAGMENTED} * 100 / ${TOTAL_MYISAM_TABLES}))"
+    [ "${VERBOSE}" = "true" -a "${ENGINE_MYISAM}" = "true" ] && echo -e "\tFragmented MyISAM tables : ${TOTAL_MYISAM_FRAGMENTED} / ${TOTAL_MYISAM_TABLES} (${MYISAM_FRAGMENTATION_RATIO}%)"
+  fi
+
+  # Count InnoDB tables
+  TOTAL_INNODB_TABLES="$(command grep "InnoDB" "${TABLES_FILE}" | command wc --lines)"
+  TOTAL_INNODB_FRAGMENTED=0
+  if [ ${TOTAL_INNODB_TABLES} -gt 0 ]; then
+    TOTAL_INNODB_FRAGMENTED="$(command grep "InnoDB" "${TABLES_FILE}" | command egrep -v "$(echo -ne '\t')0$" | command wc --lines)"
+    INNODB_FRAGMENTATION_RATIO="$((${TOTAL_INNODB_FRAGMENTED} * 100 / ${TOTAL_INNODB_TABLES}))"
+    [ "${VERBOSE}" = "true" -a "${ENGINE_INNODB}" = "true" ] && echo -e "\tFragmented InnoDB tables : ${TOTAL_INNODB_FRAGMENTED} / ${TOTAL_INNODB_TABLES} (${INNODB_FRAGMENTATION_RATIO}%)"
+  fi
+
+  # Count Aria tables
+  TOTAL_ARIA_TABLES="$(command grep "Aria" "${TABLES_FILE}" | command wc --lines)"
+  TOTAL_ARIA_FRAGMENTED=0
+  if [ ${TOTAL_ARIA_TABLES} -gt 0 ]; then
+    TOTAL_ARIA_FRAGMENTED="$(command grep "Aria" "${TABLES_FILE}" | command egrep -v "$(echo -ne '\t')0$" | command wc --lines)"
+    ARIA_FRAGMENTATION_RATIO="$((${TOTAL_ARIA_FRAGMENTED} * 100 / ${TOTAL_ARIA_TABLES}))"
+    [ "${VERBOSE}" = "true" -a "${ENGINE_ARIA}" = "true" ] && echo -e "\tFragmented Aria tables : ${TOTAL_ARIA_FRAGMENTED} / ${TOTAL_ARIA_TABLES} (${ARIA_FRAGMENTATION_RATIO}%)"
+  fi
+
+  ##################################
+  # Process MyISAM tables
+  if [ ${TOTAL_MYISAM_TABLES} -gt 0 -a "${ENGINE_MYISAM}" = "true" ]; then
+    [ "${VERBOSE}" = "true" ] && echo -e "\t * Processing MyISAM tables..."
+    command grep "MyISAM" "${TABLES_FILE}" > "${ENGINE_FILE}"
+    while read TABLE_NAME ENGINE TABLE_ROWS DATA_LENGTH DATA_FREE; do
+      if [ ${DATA_LENGTH} -ne 0 ]; then
+        FRAGMENTATION="$((${DATA_FREE} * 100 / ${DATA_LENGTH}))"
+      else
+        FRAGMENTATION="0"
+      fi
+      [ "${VERBOSE}" = "true" ] && echo -ne "\t\t - ${TABLE_NAME} (${DATA_FREE} / ${DATA_LENGTH}, ${FRAGMENTATION}% fragmented, ${TABLE_ROWS} rows)"
+
+      [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n " ..."
+
+      if [ "${OPTIMIZE}" = "true" -a ${FRAGMENTATION} -ge ${OPTIMIZE_TRIGGER} \
+          -a ${TABLE_ROWS} -le ${OPTIMIZE_ROW_LIMIT} ]; then
+        [ "${VERBOSE}" = "true" ] && echo -n "Optimize..."
+        mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --execute "OPTIMIZE TABLE \`${TABLE_NAME}\`" "${MYSQL_DB}" \
+            >"/dev/null" 2>>"${LOG_FILE}"
+        if [ ${?} -gt 0 ]; then
+          [ "${VERBOSE}" = "true" ] && echo "Error"
+          echo -e "Error: fail to optimize MyISAM table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+          command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+          exit 1
+        fi
+        TOTAL_MYISAM_OPTIMIZED=$((${TOTAL_MYISAM_OPTIMIZED} + 1))
+      fi
+
+      if [ "${ANALYZE}" = "true" -a ${FRAGMENTATION} -ge ${ANALYZE_TRIGGER} ]; then
+        [ "${VERBOSE}" = "true" ] && echo -n "Analyze..."
+        mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --execute "ANALYZE TABLE \`${TABLE_NAME}\`" "${MYSQL_DB}" \
+            >"/dev/null" 2>>"${LOG_FILE}"
+        if [ ${?} -gt 0 ]; then
+          [ "${VERBOSE}" = "true" ] && echo "Error"
+          echo -e "Error: fail to analyze MyISAM table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+          command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+          exit 1
+        fi
+        TOTAL_MYISAM_ANALYZED=$((${TOTAL_MYISAM_ANALYZED} + 1))
+      fi
+
+      [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n "Ok"
+      [ "${VERBOSE}" = "true" ] && echo
+
+    done < "${ENGINE_FILE}"
+  fi
+
+  ##################################
+  # Process InnoDB tables
+  if [ ${TOTAL_INNODB_TABLES} -gt 0 -a "${ENGINE_INNODB}" = "true" ]; then
+    [ "${VERBOSE}" = "true" ] && echo -e "\t * Processing InnoDB tables..."
+    command grep "InnoDB" "${TABLES_FILE}" > "${ENGINE_FILE}"
+    while read TABLE_NAME ENGINE TABLE_ROWS DATA_LENGTH DATA_FREE; do
+      if [ ${DATA_LENGTH} -ne 0 ]; then
+        FRAGMENTATION="$((${DATA_FREE} * 100 / ${DATA_LENGTH}))"
+      else
+        FRAGMENTATION="0"
+      fi
+
+      if [ "${OPTIMIZE}" = "true" -o "${VERBOSE}" = "true" ]; then
+        # Fetch real table rows count for InnoDB.
+        TABLE_ROWS_REAL="$(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --skip-column-names --batch \
+            --execute "SELECT COUNT(*) FROM \`${TABLE_NAME}\`" "${MYSQL_DB}" \
+            2>>"${LOG_FILE}")"
+        if [ ${?} -gt 0 ]; then
+          echo -e "Error: fail to count rows of InnoDB table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+          command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+          exit 1
+        fi
+
+        [ "${VERBOSE}" = "true" ] && echo -ne "\t\t - ${TABLE_NAME} (${DATA_FREE} / ${DATA_LENGTH}, ${FRAGMENTATION}% fragmented, ${TABLE_ROWS} estimated rows, ${TABLE_ROWS_REAL} rows)"
+      fi
+
+      [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n " ..."
+
+      if [ "${OPTIMIZE}" = "true" -a ${FRAGMENTATION} -ge ${OPTIMIZE_TRIGGER} ]; then
+        if [ -a ${TABLE_ROWS_REAL} -le ${OPTIMIZE_ROW_LIMIT} ]; then
+          [ "${VERBOSE}" = "true" ] && echo -n "Optimize..."
+          mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+              "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+              --execute "ALTER TABLE \`${TABLE_NAME}\` TYPE=InnoDB" "${MYSQL_DB}" \
+              >"/dev/null" 2>>"${LOG_FILE}"
+          if [ ${?} -gt 0 ]; then
+            [ "${VERBOSE}" = "true" ] && echo "Error"
+            echo -e "Error: fail to optimize InnoDB table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+            command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+            exit 1
+          fi
+          TOTAL_INNODB_OPTIMIZED=$((${TOTAL_INNODB_OPTIMIZED} + 1))
+        fi
+      fi
+
+      if [ \( "${ANALYZE}" = "true" -a ${FRAGMENTATION} -ge ${ANALYZE_TRIGGER} \) \
+          -o \( "${OPTIMIZE}" = "true" -a ${FRAGMENTATION} -ge ${OPTIMIZE_TRIGGER} \) ]; then
+        [ "${VERBOSE}" = "true" ] && echo -n "Analyze..."
+        mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --execute "ANALYZE TABLE \`${TABLE_NAME}\`" "${MYSQL_DB}" \
+            >"/dev/null" 2>>"${LOG_FILE}"
+        if [ ${?} -gt 0 ]; then
+          [ "${VERBOSE}" = "true" ] && echo "Error"
+          echo -e "Error: fail to analyze InnoDB table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+          command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+          exit 1
+        fi
+        TOTAL_INNODB_ANALYZED=$((${TOTAL_INNODB_ANALYZED} + 1))
+      fi
+
+      [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n "Ok"
+      [ "${VERBOSE}" = "true" ] && echo
+
+    done < "${ENGINE_FILE}"
+  fi
+
+  ##################################
+  # Process Aria tables
+  if [ ${TOTAL_ARIA_TABLES} -gt 0 -a "${ENGINE_ARIA}" = "true" ]; then
+    [ "${VERBOSE}" = "true" ] && echo -e "\t * Processing Aria tables..."
+    command grep "Aria" "${TABLES_FILE}" > "${ENGINE_FILE}"
+    while read TABLE_NAME ENGINE TABLE_ROWS DATA_LENGTH DATA_FREE; do
+      if [ ${DATA_LENGTH} -ne 0 ]; then
+        FRAGMENTATION="$((${DATA_FREE} * 100 / ${DATA_LENGTH}))"
+      else
+        FRAGMENTATION="0"
+      fi
+      [ "${VERBOSE}" = "true" ] && echo -ne "\t\t - ${TABLE_NAME} (${DATA_FREE} / ${DATA_LENGTH}, ${FRAGMENTATION}% fragmented, ${TABLE_ROWS} rows)"
+
+      [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n " ..."
+
+      if [ "${OPTIMIZE}" = "true" -a ${FRAGMENTATION} -ge ${OPTIMIZE_TRIGGER} \
+          -a ${TABLE_ROWS} -le ${OPTIMIZE_ROW_LIMIT} ]; then
+        [ "${VERBOSE}" = "true" ] && echo -n "Optimize..."
+        mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --execute "OPTIMIZE TABLE \`${TABLE_NAME}\`" "${MYSQL_DB}" \
+            >"/dev/null" 2>>"${LOG_FILE}"
+        if [ ${?} -gt 0 ]; then
+          [ "${VERBOSE}" = "true" ] && echo "Error"
+          echo -e "Error: fail to optimize Aria table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+          command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+          exit 1
+        fi
+        TOTAL_ARIA_OPTIMIZED=$((${TOTAL_ARIA_OPTIMIZED} + 1))
+      fi
+
+      if [ "${ANALYZE}" = "true" -a ${FRAGMENTATION} -ge ${ANALYZE_TRIGGER} ]; then
+        [ "${VERBOSE}" = "true" ] && echo -n "Analyze..."
+        mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            --execute "ANALYZE TABLE \`${TABLE_NAME}\`" "${MYSQL_DB}" \
+            >"/dev/null" 2>>"${LOG_FILE}"
+        if [ ${?} -gt 0 ]; then
+          [ "${VERBOSE}" = "true" ] && echo "Error"
+          echo -e "Error: fail to analyze Aria table '${TABLE_NAME}' in '${MYSQL_DB}'.${LOG_ERROR}" >&2
+          command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+          exit 1
+        fi
+        TOTAL_ARIA_ANALYZED=$((${TOTAL_ARIA_ANALYZED} + 1))
+      fi
+
+      [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n "Ok"
+      [ "${VERBOSE}" = "true" ] && echo
+
+    done < "${ENGINE_FILE}"
+  fi
+
+  # Compute total for all tables engines.
+  TOTAL_TABLES=$((${TOTAL_INNODB_TABLES} + ${TOTAL_MYISAM_TABLES} + ${TOTAL_ARIA_TABLES}))
+  TOTAL_FRAGMENTED=$((${TOTAL_INNODB_FRAGMENTED} + ${TOTAL_MYISAM_FRAGMENTED} + ${TOTAL_ARIA_FRAGMENTED}))
+  TOTAL_OPTIMIZED=$((${TOTAL_INNODB_OPTIMIZED} + ${TOTAL_MYISAM_OPTIMIZED} + ${TOTAL_ARIA_OPTIMIZED}))
+  TOTAL_ANALYZED=$((${TOTAL_INNODB_ANALYZED} + ${TOTAL_MYISAM_ANALYZED} + ${TOTAL_ARIA_ANALYZED}))
+
+  if [ "${QUIET}" = "false" ]; then
+    echo -e "\t${MYSQL_DB} summary : ${TOTAL_TABLES} tables, ${TOTAL_FRAGMENTED} fragmented, ${TOTAL_OPTIMIZED} optimized, ${TOTAL_ANALYZED} analyzed."
+    [ "${ENGINE_MYISAM}" = "true" ] && echo -e "\t\t - MyISAM : ${TOTAL_MYISAM_TABLES} tables, ${TOTAL_MYISAM_FRAGMENTED} fragmented, ${TOTAL_MYISAM_OPTIMIZED} optimized, ${TOTAL_MYISAM_ANALYZED} analyzed."
+    [ "${ENGINE_INNODB}" = "true" ] && echo -e "\t\t - InnoDB : ${TOTAL_INNODB_TABLES} tables, ${TOTAL_INNODB_FRAGMENTED} fragmented, ${TOTAL_INNODB_OPTIMIZED} optimized, ${TOTAL_INNODB_ANALYZED} analyzed."
+    [ "${ENGINE_ARIA}" = "true" ] && echo -e "\t\t - Aria   : ${TOTAL_ARIA_TABLES} tables, ${TOTAL_ARIA_FRAGMENTED} fragmented, ${TOTAL_ARIA_OPTIMIZED} optimized, ${TOTAL_ARIA_ANALYZED} analyzed."
+  fi
+
+  # Compute great total for all databases.
+  GREAT_TOTAL_INNODB_TABLES=$((${GREAT_TOTAL_INNODB_TABLES} + ${TOTAL_INNODB_TABLES}))
+  GREAT_TOTAL_INNODB_FRAGMENTED=$((${GREAT_TOTAL_INNODB_FRAGMENTED} + ${TOTAL_INNODB_FRAGMENTED}))
+  GREAT_TOTAL_INNODB_OPTIMIZED=$((${GREAT_TOTAL_INNODB_OPTIMIZED} + ${TOTAL_INNODB_OPTIMIZED}))
+  GREAT_TOTAL_INNODB_ANALYZED=$((${GREAT_TOTAL_INNODB_ANALYZED} + ${TOTAL_INNODB_ANALYZED}))
+
+  GREAT_TOTAL_MYISAM_TABLES=$((${GREAT_TOTAL_MYISAM_TABLES} + ${TOTAL_MYISAM_TABLES}))
+  GREAT_TOTAL_MYISAM_FRAGMENTED=$((${GREAT_TOTAL_MYISAM_FRAGMENTED} + ${TOTAL_MYISAM_FRAGMENTED}))
+  GREAT_TOTAL_MYISAM_OPTIMIZED=$((${GREAT_TOTAL_MYISAM_OPTIMIZED} + ${TOTAL_MYISAM_OPTIMIZED}))
+  GREAT_TOTAL_MYISAM_ANALYZED=$((${GREAT_TOTAL_MYISAM_ANALYZED} + ${TOTAL_MYISAM_ANALYZED}))
+
+  GREAT_TOTAL_ARIA_TABLES=$((${GREAT_TOTAL_ARIA_TABLES} + ${TOTAL_ARIA_TABLES}))
+  GREAT_TOTAL_ARIA_FRAGMENTED=$((${GREAT_TOTAL_ARIA_FRAGMENTED} + ${TOTAL_ARIA_FRAGMENTED}))
+  GREAT_TOTAL_ARIA_OPTIMIZED=$((${GREAT_TOTAL_ARIA_OPTIMIZED} + ${TOTAL_ARIA_OPTIMIZED}))
+  GREAT_TOTAL_ARIA_ANALYZED=$((${GREAT_TOTAL_ARIA_ANALYZED} + ${TOTAL_ARIA_ANALYZED}))
+done
+command rm "${TABLES_FILE}" "${ENGINE_FILE}"
+
+if [ \( ${#DATABASES[@]} -gt 1 -a "${ULTRA_QUIET}" = "false" \) \
+    -o \( ${#DATABASES[@]} -eq 1 -a "${ULTRA_QUIET}" = "false" \
+        -a "${QUIET}" = "true" \) ]; then
+  GREAT_TOTAL_TABLES=$((${GREAT_TOTAL_INNODB_TABLES} + ${GREAT_TOTAL_MYISAM_TABLES} + ${GREAT_TOTAL_ARIA_TABLES}))
+  GREAT_TOTAL_FRAGMENTED=$((${GREAT_TOTAL_INNODB_FRAGMENTED} + ${GREAT_TOTAL_MYISAM_FRAGMENTED} + ${GREAT_TOTAL_ARIA_FRAGMENTED}))
+  GREAT_TOTAL_OPTIMIZED=$((${GREAT_TOTAL_INNODB_OPTIMIZED} + ${GREAT_TOTAL_MYISAM_OPTIMIZED} + ${GREAT_TOTAL_ARIA_OPTIMIZED}))
+  GREAT_TOTAL_ANALYZED=$((${GREAT_TOTAL_INNODB_ANALYZED} + ${GREAT_TOTAL_MYISAM_ANALYZED} + ${GREAT_TOTAL_ARIA_ANALYZED}))
+
+  echo -e "Summary : ${GREAT_TOTAL_TABLES} tables, ${GREAT_TOTAL_FRAGMENTED} fragmented, ${GREAT_TOTAL_OPTIMIZED} optimized, ${GREAT_TOTAL_ANALYZED} analyzed."
+  [ "${ENGINE_MYISAM}" = "true" ] && echo -e " - MyISAM : ${GREAT_TOTAL_MYISAM_TABLES} tables, ${GREAT_TOTAL_MYISAM_FRAGMENTED} fragmented, ${GREAT_TOTAL_MYISAM_OPTIMIZED} optimized, ${GREAT_TOTAL_MYISAM_ANALYZED} analyzed."
+  [ "${ENGINE_INNODB}" = "true" ] && echo -e " - InnoDB : ${GREAT_TOTAL_INNODB_TABLES} tables, ${GREAT_TOTAL_INNODB_FRAGMENTED} fragmented, ${GREAT_TOTAL_INNODB_OPTIMIZED} optimized, ${GREAT_TOTAL_INNODB_ANALYZED} analyzed."
+  [ "${ENGINE_ARIA}" = "true" ] && echo -e " - Aria   : ${GREAT_TOTAL_ARIA_TABLES} tables, ${GREAT_TOTAL_ARIA_FRAGMENTED} fragmented, ${GREAT_TOTAL_ARIA_OPTIMIZED} optimized, ${GREAT_TOTAL_ARIA_ANALYZED} analyzed."
+fi
+
+exit 0
+

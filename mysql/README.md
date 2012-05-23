@@ -9,4 +9,4 @@ These files are used by:
 Contents
 --------
 * __mysql-tools__ : Command-line tool to manage MySQL databases.
-
+* __mysql-defragger__ : Command-line tool to analyze and optimize (aka. defragment) MySQL databases.
