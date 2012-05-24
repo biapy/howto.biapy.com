@@ -4,4 +4,4 @@ CREATE TABLE `php_session` (
   `session_data` text NOT NULL,
   PRIMARY KEY (`session_id`),
   KEY `expiration` (`session_expiration`)
-) ENGINE=MyISAM;
+) ENGINE=InnoDB;

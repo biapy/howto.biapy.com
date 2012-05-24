@@ -277,7 +277,7 @@ class Memcached_MySQL_SessionHandler
     $result = $this->memcached->set($session_id, $data, $this->lifeTime);
 
     if ($this->initSessionData !== $data) {
-     $stmt = $this->mysqli->prepare(sprintf('INSERT DELAYED INTO
+     $stmt = $this->mysqli->prepare(sprintf('INSERT INTO
               %2$s_session(%1$s_id, %1$s_expiration, %1$s_data)
               VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE
               %1$s_expiration = ?, %1$s_data = ?',
