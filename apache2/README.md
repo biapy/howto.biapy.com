@@ -9,4 +9,4 @@ These files are used by:
 Contents
 --------
 * __a2tools__ : Command-line tool to manage Apache 2 VirtualHosts.
-
+* __security-hardened.conf__ : Hardened Apache 2 security configuration file, to be placed in /etc/apache2/conf.d (see [Durcir la sécurité d'un serveur Apache 2 (fr)](http://howto.biapy.com/fr/debian-gnu-linux/serveurs/http/durcir-la-securite-dun-serveur-apache-2/)).
