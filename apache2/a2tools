@@ -1,0 +1,954 @@
+#!/bin/bash
+#
+# Apache 2 Tools.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+VERSION=2.0.1
+
+SCRIPT_NAME="$(command basename ${0})"
+
+# Print this script help.
+function usage {
+  command echo "Apache 2 Tools v${VERSION}
+This tool ease Apache 2 HTTP server administration from command line.
+
+Usage :
+
+  ${SCRIPT_NAME} --template={ vhost | virtual-host } [ options ]
+                  domain.name /path/to/www
+        Setup a named virtualhost using domain.name as ServerName
+        and /path/to/www as DocumentRoot.
+  ${SCRIPT_NAME} --template={ rproxy | reverse-proxy } [ options ]
+                  domain.name http://server.local/
+        Setup a reverse proxy using domain.name as ServerName
+        and http://server.local/ proxied server.
+  ${SCRIPT_NAME} --template=redirect [ options ]
+                  domain.name http://domain.com/
+        Setup a permanent redirection from http://domain.name/
+        to http://domain.com/ as target url.
+  ${SCRIPT_NAME} --template=custom [ options ]
+                 domain.name '# Custom Apache 2 configuration chunck.'
+        Setup a customized virtual host using domain.name as ServerName.
+  ${SCRIPT_NAME} --remove domain.name
+        Remove all virtualhosts for the given domain.
+
+Available options are:
+  * --help | -h
+        Display this message.
+  * --template= | -t { virtual-host | reverse-proxy | redirect | custom }
+        Set the template to use to create the Apache 2 configuration.
+        Available templates are:
+          * vhost | virtual-host : A standard VirtualHost with a DocumentRoot.
+          * rproxy | reverse-proxy : A reverse proxy VirtualHost.
+          * redirect : A VirtualHost that performs a permanent redirection.
+          * custom : A customized VirtualHost for specific configurations.
+        If template option is not used, the 'virtual-host' template is
+        used by default.
+  * --remove | -d
+        Remove all virtualhosts for the given domain.
+  * --alias= | -a other-domain.name
+        Set ServerAlias directive. You can provide a list of domain names
+        separated by spaces. This option can be used more than once.
+  * --overrides= | -o All
+        Set AllowOverride directive (only for 'virtual-host' template).
+  * --ssl | -s
+        Create a HTTP virtual host with mod_ssl. Require --private-key and --public-key
+  * --private-key= | --key= | -k /etc/ssl/private/domain.com.key
+        Set the SSL private key (mandatory with --ssl).
+  * --public-key= | --cert= | -p /etc/ssl/certificates/domain.com.crt
+        Set the SSL public key (mandatory with --ssl).
+  * --root-ca= | --root= | -r /etc/ssl/authority-roots/domain.com.ca
+        Set the SSL root certificate (with --ssl only).
+  * --chain-ca= | --chain= | -c /etc/ssl/intermediates/domain.com.ca
+        Set the SSL intermediate certificate (with --ssl only).
+  * --bind-ip= | --ip= | -i xx.xx.xx.xx
+        Set the bind IP for a SSL virtual host (with --ssl only).
+"
+  exit 1
+} # usage
+
+
+
+# Common Apache 2 Vhost template
+VHOST_TEMPLATE[0]="<VirtualHost *:80>
+  # Uncomment this line and set it up with your actual webmaster email
+  # or with your real email.
+  #ServerAdmin webmaster@my-domain.com
+
+  # Your actual domain name, on witch this virtual host is available.
+  ServerName SITE_HOSTNAME
+
+  # You may want your site to be available on other domain names, this is
+  # what alias are for.
+  # You can use the * wildcard caracter to match multiple sub-domains.
+  #ServerAlias SERVER_ALIAS
+
+  # Theses lines only apply of the rewrite module is enabled.
+  # This is a security enhancement recommanded by the nessus tool.
+  <IfModule mod_rewrite.c>
+    RewriteEngine on
+    RewriteCond %{REQUEST_METHOD} ^(TRACE|TRACK)
+    RewriteRule .* - [F]
+  </IfModule>
+
+  # These section tel Apache 2 that it can follow symbolic links (cf. ln -s)
+  # on your system. This can avoid a lot of problems... as well at
+  # it can be a security issue if the links points to /etc...
+  # be carefull at what you link :)
+  <Directory />
+    Options FollowSymLinks
+    AllowOverride None
+  </Directory>
+"
+
+VHOST_TEMPLATE[1]="
+</VirtualHost>"
+
+
+
+LOGS_TEMPLATE="
+  # The error log and access log. This can be used by awstats
+  # Note : since we keed theses logs in /var/log/apache2, they are
+  # automaticaly rotated by logrotate :D.
+  ErrorLog \${APACHE_LOG_DIR}/SITE_HOSTNAME-error.log
+  LogLevel warn
+  CustomLog \${APACHE_LOG_DIR}/SITE_HOSTNAME-access.log combined
+"
+
+
+
+SSL_TEMPLATE="
+  <IfModule mod_ssl.c>
+    #
+    # SSL magic
+    #
+
+    # We enable the SSL engine. Without this line, we use HTTP, not HTTPS.
+    SSLEngine On
+
+    # Mitigating the BEAST attack on TLS
+    # see https://community.qualys.com/blogs/securitylabs/2011/10/17/mitigating-the-beast-attack-on-tls
+    SSLHonorCipherOrder On
+    SSLCipherSuite ECDHE-RSA-AES256-SHA384:AES256-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH:!AESGCM
+
+    # We allow SSLv3 and TLSv1 only, we reject the old SSLv2.
+    # TLSv1 is needed to support SNI (Server Name Indication).
+    # SNI allow to have multiple SSL certificates on one IP address.
+    SSLProtocol All +TLSv1 -SSLv2
+
+    # Server public and private certificate files:
+    SSLCertificateFile \"CERTIFICATE_FILE\"
+    SSLCertificateKeyFile \"KEY_FILE\"
+
+    #   Server Certificate Chain:
+    #   Point SSLCertificateChainFile at a file containing the
+    #   concatenation of PEM encoded CA certificates which form the
+    #   certificate chain for the server certificate. Alternatively
+    #   the referenced file can be the same as SSLCertificateFile
+    #   when the CA certificates are directly appended to the server
+    #   certificate for convinience.
+    # SSLCertificateChainFile \"CHAIN_FILE\"
+
+    #   Certificate Authority (CA):
+    #   Set the CA certificate verification path where to find CA
+    #   certificates for client authentication or alternatively one
+    #   huge file containing all of them (file must be PEM encoded)
+    #   Note: Inside SSLCACertificatePath you need hash symlinks
+    #         to point to the certificate files. Use the provided
+    #         Makefile to update the hash symlinks after changes.
+    # SSLCACertificatePath \"/etc/ssl/certs\"
+    # SSLCACertificateFile \"ROOT_CA_FILE\"
+
+    #   Certificate Revocation Lists (CRL):
+    #   Set the CA revocation path where to find CA CRLs for client
+    #   authentication or alternatively one huge file containing all
+    #   of them (file must be PEM encoded)
+    #   Note: Inside SSLCARevocationPath you need hash symlinks
+    #         to point to the certificate files. Use the provided
+    #         Makefile to update the hash symlinks after changes.
+    #SSLCARevocationPath /etc/apache2/ssl.crl/
+    #SSLCARevocationFile /etc/apache2/ssl.crl/ca-bundle.crl
+
+    #   Client Authentication (Type):
+    #   Client certificate verification type and depth.  Types are
+    #   none, optional, require and optional_no_ca.  Depth is a
+    #   number which specifies how deeply to verify the certificate
+    #   issuer chain before deciding the certificate is not valid.
+    #SSLVerifyClient require
+    #SSLVerifyDepth  10
+
+    #   Access Control:
+    #   With SSLRequire you can do per-directory access control based
+    #   on arbitrary complex boolean expressions containing server
+    #   variable checks and other lookup directives.  The syntax is a
+    #   mixture between C and Perl.  See the mod_ssl documentation
+    #   for more details.
+    #<Location />
+    #SSLRequire (    %{SSL_CIPHER} !~ m/^(EXP|NULL)/ \
+    #            and %{SSL_CLIENT_S_DN_O} eq \"Snake Oil, Ltd.\" \
+    #            and %{SSL_CLIENT_S_DN_OU} in {\"Staff\", \"CA\", \"Dev\"} \
+    #            and %{TIME_WDAY} >= 1 and %{TIME_WDAY} <= 5 \
+    #            and %{TIME_HOUR} >= 8 and %{TIME_HOUR} <= 20       ) \
+    #           or %{REMOTE_ADDR} =~ m/^192\.76\.162\.[0-9]+$/
+    #</Location>
+
+    #   SSL Engine Options:
+    #   Set various options for the SSL engine.
+    #   o FakeBasicAuth:
+    #     Translate the client X.509 into a Basic Authorisation.  This means that
+    #     the standard Auth/DBMAuth methods can be used for access control.  The
+    #     user name is the 'one line' version of the client's X.509 certificate.
+    #     Note that no password is obtained from the user. Every entry in the user
+    #     file needs this password: 'xxj31ZMTZzkVA'.
+    #   o ExportCertData:
+    #     This exports two additional environment variables: SSL_CLIENT_CERT and
+    #     SSL_SERVER_CERT. These contain the PEM-encoded certificates of the
+    #     server (always existing) and the client (only existing when client
+    #     authentication is used). This can be used to import the certificates
+    #     into CGI scripts.
+    #   o StdEnvVars:
+    #     This exports the standard SSL/TLS related 'SSL_*' environment variables.
+    #     Per default this exportation is switched off for performance reasons,
+    #     because the extraction step is an expensive operation and is usually
+    #     useless for serving static content. So one usually enables the
+    #     exportation for CGI and SSI requests only.
+    #   o StrictRequire:
+    #     This denies access when 'SSLRequireSSL' or 'SSLRequire' applied even
+    #     under a 'Satisfy any' situation, i.e. when it applies access is denied
+    #     and no other module can change it.
+    #   o OptRenegotiate:
+    #     This enables optimized SSL connection renegotiation handling when SSL
+    #     directives are used in per-directory context.
+    #SSLOptions +FakeBasicAuth +ExportCertData +StrictRequire
+    <FilesMatch \"\.(cgi|shtml|phtml|php)$\">
+      SSLOptions +StdEnvVars
+    </FilesMatch>
+    <Directory /usr/lib/cgi-bin>
+      SSLOptions +StdEnvVars
+    </Directory>
+
+    #   SSL Protocol Adjustments:
+    #   The safe and default but still SSL/TLS standard compliant shutdown
+    #   approach is that mod_ssl sends the close notify alert but doesn't wait for
+    #   the close notify alert from client. When you need a different shutdown
+    #   approach you can use one of the following variables:
+    #   o ssl-unclean-shutdown:
+    #     This forces an unclean shutdown when the connection is closed, i.e. no
+    #     SSL close notify alert is send or allowed to received.  This violates
+    #     the SSL/TLS standard but is needed for some brain-dead browsers. Use
+    #     this when you receive I/O errors because of the standard approach where
+    #     mod_ssl sends the close notify alert.
+    #   o ssl-accurate-shutdown:
+    #     This forces an accurate shutdown when the connection is closed, i.e. a
+    #     SSL close notify alert is send and mod_ssl waits for the close notify
+    #     alert of the client. This is 100% SSL/TLS standard compliant, but in
+    #     practice often causes hanging connections with brain-dead browsers. Use
+    #     this only for browsers where you know that their SSL implementation
+    #     works correctly.
+    #   Notice: Most problems of broken clients are also related to the HTTP
+    #   keep-alive facility, so you usually additionally want to disable
+    #   keep-alive for those clients, too. Use variable \"nokeepalive\" for this.
+    #   Similarly, one has to force some clients to use HTTP/1.0 to workaround
+    #   their broken HTTP/1.1 implementation. Use variables \"downgrade-1.0\" and
+    #   \"force-response-1.0\" for this.
+    BrowserMatch \"MSIE [2-6]\" \\
+      nokeepalive ssl-unclean-shutdown \\
+      downgrade-1.0 force-response-1.0
+    # MSIE 7 and newer should be able to use keepalive
+    BrowserMatch \"MSIE [17-9]\" ssl-unclean-shutdown
+  </IfModule>
+"
+
+
+
+# Apache 2 standard Virtual Host template.
+PATH_TEMPLATE="
+  # The root folder of this virtual host.
+  DocumentRoot TARGET_VALUE
+
+  # Some options for the root folder.
+  # Read Apache 2 documentation to know exactly what is done.
+  <Directory TARGET_VALUE>
+    Options Indexes FollowSymLinks MultiViews
+
+    # If you want to enable overrides, you should read:
+    # http://httpd.apache.org/docs/2.0/mod/core.html#allowoverride
+    AllowOverride ALLOW_OVERRIDE
+
+    Order allow,deny
+    Allow from all
+  </Directory>
+"
+
+
+
+REVERSE_PROXY_TEMPLATE="
+  <IfModule mod_rewrite.c>
+    <IfModule mod_proxy.c>
+      # Do not ever never comment this line !
+      # This line prevent your web server to be used
+      # as a proxy server by lurkers and other lamers.
+      ProxyRequests   Off
+
+      # This little option pass the hostname to the proxyfied server.
+      # This allow you to setup virtual hosts on the proxyfied server.
+      # Yay ! This can be a life saver, so trust me, you want this option On.
+      ProxyPreserveHost On
+
+      # Fix IE problem (http error 408/409)
+      SetEnv proxy-nokeepalive 1
+
+      <IfModule mod_ssl.c>
+        # Turn this on if the site behind the reverse proxy is on HTTPS.
+        SSLProxyEngine Off
+      </IfModule>
+
+      # Declare the current request protocol.
+      RequestHeader set X-Forwarded-Proto \"http\"
+
+      # Here is the magic that proxyfy the LAN server. 
+      # The first line is .... i don't remember what...
+      # but trust me, it is usefull ;p.
+      # The second line is a rewrite rule that do the proxy
+      # magic. I was used to use a ProxyPass rule to do this work, but it
+      # turned out that sometimes ProxyPass give you a 503 error when under
+      # heavy load. The RewriteRule does not have this flow.
+      ProxyPassReverse  /       TARGET_VALUE
+      RewriteRule       ^/(.*)  TARGET_VALUE\$1  [P,L]
+
+      # This Location directives allow users to access to the proxyfied contents.
+      # Do not remove this if you want your site to work.
+      <Location />
+        Order deny,allow
+        Allow from all
+      </Location>
+
+    </IfModule>
+  </IfModule>
+"
+
+
+
+REDIRECT_TEMPLATE="
+  # Redirect every body to the HTTPS site.
+  # This make sure that all users use secure version of the site.
+  # Note the \"permanent\" : It is good for search engine optimization :D.
+  Redirect permanent / TARGET_VALUE
+
+  # This Location directives allow users to access the redirection.
+  # Do not remove this if you want your site to work.
+  <Location />
+    Order deny,allow
+    Allow from all
+  </Location>"
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH=$(/bin/readlink -f "${1}")
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=""
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_binary
+
+
+
+# Check if a patckage file is present
+#
+# @param string $file The file to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the file is missing.
+function check_package_file {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the file presence.
+  if [ ! -e "${1}" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_package_file
+
+
+
+# Check if MySQL connection is working
+#
+# @param string $mysql_host The MySQL host.
+# @param string $mysql_user The MySQL user.
+# @param string $mysql_password The MySQL password.
+# @param string $mysql_db The MySQL DB.
+#
+# @return Exit with error if connection to MySQL fail.
+function check_mysql {
+  command test ${#} -ne 4 && exit 1
+
+  # Test the MySQL connection.
+  if ! command mysql --execute="SELECT 1" \
+            --host="${1}" --user="${2}" --password="${3}" \
+            "${4}" 2>&1 > /dev/null; then
+    echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
+    exit 1
+  fi
+} # check_mysql
+
+
+
+# Download a file from the given URL.
+#
+# @param string $url The URL of the file to download.
+#
+# @return ${DOWNLOAD_FILE} The path to the downloaded file.
+DOWNLOAD_FILE=""
+function download_file {
+  command test ${#} -ne 1 && exit 1
+
+  # Download a file.
+  DOWNLOAD_FILE="$(command mktemp)"
+  command wget --quiet "${1}" \
+      --output-document="${DOWNLOAD_FILE}"
+
+  if [ ! -s "${DOWNLOAD_FILE}" ]; then
+    command rm "${DOWNLOAD_FILE}"
+    echo "Error : Unable to download file from '${1}'." >&2
+    exit 1
+  fi
+} # download_file
+
+
+
+# Download and uncompress a tgz file from the given URL.
+#
+# @param string $url The URL of the file to download.
+#
+# @return ${DOWNLOAD_TGZ} The path to the extracted content.
+DOWNLOAD_TGZ=""
+function download_tgz {
+  command test ${#} -ne 1 && exit 1
+
+  download_file "${1}"
+
+  # Untar the downloaded file and place it at its final location.
+  DOWNLOAD_TGZ="$(command mktemp -d)"
+  command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
+  command rm "${DOWNLOAD_FILE}"
+
+  if [ $(command ls -1 --all "${DOWNLOAD_TGZ}" | command wc --lines) -eq 0 ]; then
+    echo "Error : unable to untar file downloaded from '${1}'." >&2
+    exit 1
+  fi
+} # download_tgz
+
+
+
+# Read the eth0 IP.
+#
+# @return A IP address.
+function eth0_ip {
+  command ifconfig eth0 \
+            | command grep "inet " \
+            | command sed -e 's/.*inet [^:]*:\([^ ]*\).*/\1/'
+} # eth0_ip
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let OPTIND || OPTIND=1
+  [ $OPTIND -lt $# ] || return 1
+  shift $OPTIND
+  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
+  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
+  then
+    local o
+    o="-${1#-$OPTOFS}"
+    for opt in ${optlist#;}
+    do
+      OPTOPT="${opt%[;.:]}"
+      unset OPTARG
+      local opttype="${opt##*[^;:.]}"
+      [ -z "$opttype" ] && opttype=";"
+      if [ ${#OPTOPT} -gt 1 ]
+      then # long-named option
+        case $o in
+          "--$OPTOPT")
+            if [ "$opttype" != ":" ]; then return 0; fi
+            OPTARG="$2"
+            if [ -z "$OPTARG" ];
+            then # error: must have an agrument
+              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT";
+              OPTOPT="?"
+              return 1;
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "--$OPTOPT="*)
+            if [ "$opttype" = ";" ];
+            then  # error: must not have arguments
+              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTARG=${o#"--$OPTOPT="}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-$OPTOPT")
+            unset OPTOFS
+            [ "$opttype" != ":" ] && return 0
+            OPTARG="$2"
+            if [ -z "$OPTARG" ]
+            then
+              echo "$0: error: -$OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "-$OPTOPT"*)
+            if [ $opttype = ";" ]
+            then # an option with no argument is in a chain of options
+              OPTOFS="$OPTOFS?" # move to the next option in the chain
+              OPTIND=$[OPTIND-1] # the chain still has other options
+              return 0
+            else
+              unset OPTOFS
+              OPTARG="${o#-$OPTOPT}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage
+    exit 1
+  fi; fi
+  OPTOPT="?"
+  unset OPTARG
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
+  while [ -n "$l" ]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [ -n "${l%%[^:.;]*}" ]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo $r
+}
+function getopt()
+{
+  local optlist=`optlistex "$1"`
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+
+
+
+# Reload Apache 2 configuration only if valid.
+#
+# @return void
+function apache2_reload {
+  if command apache2ctl -t > /dev/null 2>&1; then
+    /etc/init.d/apache2 reload
+  else
+    echo "Error in Apache 2 configuration : reload cancelled."
+    exit 1
+  fi
+  exit 0
+} # apache2_reload
+
+
+
+# Force Apache 2 configuration reload only if valid.
+#
+# @return void
+function apache2_force_reload {
+  if command apache2ctl -t > /dev/null 2>&1; then
+    /etc/init.d/apache2 force-reload
+  else
+    echo "Error in Apache 2 configuration : forced reload cancelled."
+    exit 1
+  fi
+
+  exit 0
+} # apache2_force_reload
+
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "tar" "tar"
+check_binary "mktemp" "mktemp"
+check_binary "sed" "sed"
+check_binary "apache2ctl" "apache2"
+#check_binary "wget" "wget"
+#check_binary "unzip" "unzip"
+#check_binary "apg" "apg"
+#check_binary "mysql" "mysql-client"
+
+
+
+# Setup defaults
+CURRENT_TEMPLATE="${PATH_TEMPLATE}"
+TARGET_VALUE_IS_PATH="1"
+SERVER_ALIAS=""
+SSL_ENABLED="0"
+SSL_BIND_IP="$(eth0_ip)"
+ALLOW_OVERRIDE="None"
+IS_REMOVAL="0"
+
+TYPE_PREFIX=""
+PROTOCOL="http"
+
+APACHE_MODULES="rewrite"
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h template: t: ssl s alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: remove d" "${@}"; do
+  # Options debuging.
+  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+
+  case "${OPTOPT}" in
+    template | t )
+
+      case "${OPTARG}" in
+        vhost | virtual-host )
+          CURRENT_TEMPLATE="${PATH_TEMPLATE}"
+          TARGET_VALUE_IS_PATH="1"
+          ;;
+        rproxy | reverse-proxy )
+          CURRENT_TEMPLATE="${REVERSE_PROXY_TEMPLATE}"
+          TARGET_VALUE_IS_PATH="0"
+          APACHE_MODULES="${APACHE_MODULES} proxy_http headers"
+          ;;
+        redirect )
+          CURRENT_TEMPLATE="${REDIRECT_TEMPLATE}"
+          TARGET_VALUE_IS_PATH="0"
+          TYPE_PREFIX="redirect-"
+          ;;
+        custom )
+          CURRENT_TEMPLATE="CUSTOM"
+          TARGET_VALUE_IS_PATH="0"
+          ;;
+      esac
+
+      ;;
+    ssl | s )
+      SSL_ENABLED="1"
+      PROTOCOL="https"
+      APACHE_MODULES="${APACHE_MODULES} ssl"
+      ;;
+    alias | a )
+      if [ -n "${OPTARG}" ]; then
+        SERVER_ALIAS="${SERVER_ALIAS} ${OPTARG}"
+      fi
+      ;;
+    private-key | key | k )
+      realpath_check "${OPTARG}"
+      SSL_PRIVATE_KEY="${REALPATH}"
+      ;;
+    public-key | crt | p )
+      realpath_check "${OPTARG}"
+      SSL_PUBLIC_KEY="${REALPATH}"
+      ;;
+    root-ca | root | r )
+      realpath_check "${OPTARG}"
+      SSL_ROOT_CA="${REALPATH}"
+      ;;
+    chain-ca | chain | c )
+      realpath_check "${OPTARG}"
+      SSL_CHAIN_CA="${REALPATH}"
+      ;;
+    bind-ip | ip | i )
+      if [ -n "${OPTARG}" ]; then
+        SSL_BIND_IP="${OPTARG}"
+      fi
+      ;;
+    overrides | o )
+      if [ -n "${OPTARG}" ]; then
+        ALLOW_OVERRIDE="${OPTARG}"
+      fi
+      ;;
+    remove | d )
+      IS_REMOVAL="1"
+      ;;
+
+    help | h )
+      usage
+      exit 0
+      ;;
+  esac
+done
+
+# Discard processed options.
+shift $((${OPTIND}-1))
+
+# Fetch script path.
+realpath "${0}"
+SCRIPT_PATH="${REALPATH}"
+
+# Process retro-compatibility.
+case "${1}" in
+  add-virtual-host|add-vhost )
+    ${SCRIPT_PATH} --template="virtual-host" \
+                    --overrides="${4}" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-reverse-proxy|add-reverse )
+    ${SCRIPT_PATH} --template="reverse-proxy" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-ssl-virtual-host|add-ssl-vhost )
+    ${SCRIPT_PATH} --template="virtual-host" --ssl \
+                    --private-key="${4}" --public-key="${5}" \
+                    --bind-ip="${6}" --overrides="${7}" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-ssl-reverse-proxy )
+    ${SCRIPT_PATH} --template="reverse-proxy" --ssl \
+                    --private-key="${4}" --public-key="${5}" \
+                    --bind-ip="${6}" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-redirect )
+    ${SCRIPT_PATH} --template="redirect" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-ssl-redirect )
+    ${SCRIPT_PATH} --template="redirect" --ssl \
+                    --private-key="${4}" --public-key="${5}" \
+                    --bind-ip="${6}" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-custom )
+    ${SCRIPT_PATH} --template="custom" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  add-ssl-custom )
+    ${SCRIPT_PATH} --template="custom" --ssl \
+                    --private-key="${4}" --public-key="${5}" \
+                    --bind-ip="${6}" \
+                    "${2}" "${3}"
+    exit 0
+    ;;
+  remove )
+    ${SCRIPT_PATH} --remove "${2}"
+    exit 0
+    ;;
+esac
+
+SITE_HOSTNAME=${1}
+
+if [ -z "${SITE_HOSTNAME}" ]; then
+  echo "Error : no domain name has been provided." >&2
+  usage
+  exit 1
+fi
+
+if [ "${IS_REMOVAL}" = "1" ]; then
+  # The --remove option has been given.
+  # Process the virtualhosts removal.
+
+  declare -a CONFIG_FILES
+  CONFIG_FILES[0]="http-${SITE_HOSTNAME}"
+  CONFIG_FILES[1]="https-${SITE_HOSTNAME}"
+  CONFIG_FILES[2]="redirect-http-${SITE_HOSTNAME}"
+  CONFIG_FILES[3]="redirect-https-${SITE_HOSTNAME}"
+
+  for FILE in ${CONFIG_FILES[@]}; do
+    if [ -e "/etc/apache2/sites-available/${FILE}" ]; then
+      command a2dissite ${FILE}
+      command rm "/etc/apache2/sites-available/${FILE}"
+    fi
+  done
+
+  if command apache2ctl -t; then
+    apache2_reload
+  fi
+
+else
+  TARGET_VALUE="${2}"
+
+  # Compute the VirtualHost filename.
+  VHOST_FILE="${TYPE_PREFIX}${PROTOCOL}-${SITE_HOSTNAME}"
+
+  # Setup defaults.
+  SSL_PROXY_ENGINE="Off"
+
+  # For custom template, the target value is used as template.
+  if [ "${CURRENT_TEMPLATE}" = "CUSTOM" ]; then
+    CURRENT_TEMPLATE="${TARGET_VALUE}"
+    TARGET_VALUE=""
+  else
+    # Check for target value existence if it is supposed to be a path.
+    if [ "${TARGET_VALUE_IS_PATH}" = "1" ]; then
+      realpath_check "${TARGET_VALUE}"
+      TARGET_VALUE="${REALPATH}"
+    else
+      TARGET_VALUE=$(command echo "${TARGET_VALUE}/" \
+               | command sed -e 's|//$|/|')
+      TARGET_VALUE_URI=$(command echo "${TARGET_VALUE}" \
+               | command sed -e 's|[^:]*://[^/]*\(/.*\)/$|\1|')
+
+      if [ -n "$(echo ${TARGET_VALUE_URI} | command grep "^https")" ]; then
+        SSL_PROXY_ENGINE="On"
+      fi
+    fi
+  fi
+
+  # Disable SSL template if not needed
+  if [ "${SSL_ENABLED}" = "0" ]; then
+    SSL_TEMPLATE=""
+  else
+    if [ -z "${SSL_PRIVATE_KEY}" -o -z "${SSL_PUBLIC_KEY}" ]; then
+      echo "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
+      usage
+      exit 1
+    fi
+  fi
+
+  echo "Creating /etc/apache2/sites-available/${VHOST_FILE}..."
+
+  VHOST_CONTENT="${VHOST_TEMPLATE[0]}
+${LOGS_TEMPLATE}
+${SSL_TEMPLATE}
+${CURRENT_TEMPLATE}
+${VHOST_TEMPLATE[1]}"
+
+  VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
+    | command sed -e "s|SITE_HOSTNAME|${SITE_HOSTNAME}|g" \
+                  -e "s|SERVER_ALIAS|${SERVER_ALIAS}|g" \
+                  -e "s|TARGET_VALUE|${TARGET_VALUE}|g" \
+                  -e "s|ALLOW_OVERRIDE|${ALLOW_OVERRIDE}|g" \
+                  -e "s|SSLProxyEngine.*|SSLProxyEngine ${SSL_PROXY_ENGINE}|")"
+
+  # Setup sed rules to enable ServerAlias if needed.
+  if [ -n "${SERVER_ALIAS}" ]; then
+    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
+      | command sed -e 's|#ServerAlias|ServerAlias|')"
+  fi
+
+  # Apply SSL specific transforms.
+  if [ "${SSL_ENABLED}" = "1" ]; then
+    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
+      | command sed -e "s|*:80|${SSL_BIND_IP}:443|g" \
+        -e "s|CERTIFICATE_FILE|${SSL_PUBLIC_KEY}|g" \
+        -e "s|KEY_FILE|${SSL_PRIVATE_KEY}|g" \
+        -e "s|X-Forwarded-Proto \"http|X-Forwarded-Proto \"${PROTOCOL}|")"
+
+    if [ -n "${SSL_ROOT_CA}" ]; then
+    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
+      | command sed -e "s|ROOT_CA_FILE|${SSL_ROOT_CA}|g" \
+          -e "s|# SSLCACertificateFile|SSLCACertificateFile|g")"
+    fi
+
+    if [ -n "${SSL_CHAIN_CA}" ]; then
+    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
+      | command sed -e "s|CHAIN_FILE|${SSL_CHAIN_CA}|g" \
+          -e "s|# SSLCertificateChainFile|SSLCertificateChainFile|g")"
+    fi
+  fi
+
+
+  echo "${VHOST_CONTENT}" > "/etc/apache2/sites-available/${VHOST_FILE}"
+
+  command a2enmod "${APACHE_MODULES}" > /dev/null
+
+  command a2ensite "${VHOST_FILE}"
+
+  # Disable the site if there is a configuration error.
+  if command apache2ctl -t; then
+    apache2_reload
+  else
+    command a2dissite "${VHOST_FILE}"
+  fi
+fi
+
+exit 0
+
