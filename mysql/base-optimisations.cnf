@@ -1,0 +1,18 @@
+# Base MySQL optimisations.
+[mysqld]
+# Enable binary log for point in time recovery.
+# see : https://dev.mysql.com/doc/refman/5.1/en/point-in-time-recovery.html
+log_bin = /var/log/mysql/mysql-bin.log
+sync_binlog = 1
+
+# Limit binary log size to prevent databases lock ups at binary log rotation.
+# see : http://www.mysqlperformanceblog.com/2012/05/24/binary-log-file-size-matters/
+max_binlog_size = 50M
+
+# Enable slow query log for Query debuging:
+log_slow_queries = /var/log/mysql/mysql-slow.log
+long_query_time = 5
+
+# Uncomment this to log unoptimized queries.
+#log-queries-not-using-indexes
+
