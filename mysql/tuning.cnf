@@ -1,0 +1,62 @@
+# MySQL optimisations as proposed by TUNING primer
+# see : http://www.day32.com/MySQL/
+
+[mysqld]
+
+# WORKER THREADS
+# thread_cache_size = 8
+
+# MAX CONNECTIONS
+# max_connections = 151
+
+# INNODB STATUS
+#   Depending on how much space your innodb indexes take up it may be safe
+#   to increase this value to up to 2 / 3 of total system memory.
+#   innodb_buffer_pool_size > 'InnoDB data space' is a good guess.
+# innodb_buffer_pool_size = 8 M
+
+# KEY BUFFER
+#   key_buffer_size > 'MyISAM index space' is a good guess.
+# key_buffer_size = 16 M
+
+# QUERY CACHE
+# query_cache_limit = 2M
+# query_cache_size = 32M
+
+# SORT OPERATIONS
+# sort_buffer_size = 2M
+# read_rnd_buffer_size = 256K
+
+# JOINS
+# 1.0M < join_buffer_size < 4.0M, or always use indexes with joins.
+# join_buffer_size = 2M
+# log-queries-not-using-indexes
+
+# OPEN FILES LIMIT
+#   The open_files_limit should typically be set to at least 2x-3x
+#   that of table_cache if you have heavy MyISAM usage.
+# open_files_limit = 1024
+
+# TABLE CACHE
+#   table_open_cache size >= max_connections * N, where N is the maximum number
+#     of tables per join in queries.
+#   table_definition_cache >= 2x table_open_cache is a good guess.
+#   Note : table_open_cache is table_cache in MySQL 5.1.2 and earlier.
+#
+#   table_definition_cache > number of tables in server.
+# table_open_cache = 64
+# table_definition_cache = 256
+
+# TEMP TABLES
+#  recommended setting : max_heap_table_size == tmp_table_size
+# max_heap_table_size = 16M
+# tmp_table_size = 16M
+
+# TABLE SCANS
+# read_buffer_size = 128K
+
+# TABLE LOCKING
+#  low_priority_updates can slow down applications with high insert rates !
+# low_priority_updates = 1
+# concurrent_insert = 2
+
