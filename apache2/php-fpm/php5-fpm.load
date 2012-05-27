@@ -1,0 +1,2 @@
+# PHP-FPM configuration.
+# dummy file, see /etc/apache2/mods-available/php5-fpm.conf
