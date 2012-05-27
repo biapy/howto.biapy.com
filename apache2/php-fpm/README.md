@@ -8,6 +8,6 @@ These files are used by:
 
 Contents
 --------
-* __php5-fpm.load__ : fd
-* __php5-fpm.conf__ : dd
+* __php5-fpm.load__ : Dummy module load file, to allow use of a2enmod (to be placed in /etc/apache2/mods-available).
+* __php5-fpm.conf__ : PHP-FPM configuration file (to be placed in /etc/apache2/mods-available).
 
