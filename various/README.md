@@ -9,4 +9,8 @@ These files are used by guides at :
 Contents
 --------
 * __sf-downloader__ : Command-line help to download sources from [Sourceforge.net](http://sourceforge.net/).
+* __backup-google-agenda__ : Command-line script to backup Google Agendas (see [Backup Google Agenda on Debian (en)](http://howto.biapy.com/en/debian-gnu-linux/system/software/backup-google-agenda-on-debian))
+* __backup-google-agenda.conf__ : backup-google-agenda configuration file (see [Backup Google Agenda on Debian (en)](http://howto.biapy.com/en/debian-gnu-linux/system/software/backup-google-agenda-on-debian))
+* __ssl-cert-check__ : Command-line tool to check SSL certificate validity (see [Proactively Handling Certificate Expiration With ssl-cert-check (en)](http://prefetch.net/articles/checkcertificate.html))
+* __check-active-certs__ : Cron script using ssl-cert-check to check used certificates validity (see [Setup an email alert on SSL / TLS certificate expiration (en)](http://howto.biapy.com/en/debian-gnu-linux/servers/http/setup-an-email-alert-on-ssl-tls-certificate-expiration))
 
