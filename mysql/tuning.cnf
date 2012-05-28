@@ -34,13 +34,12 @@
 
 # OPEN FILES LIMIT
 #   The open_files_limit should typically be set to at least 2x-3x
-#   that of table_cache if you have heavy MyISAM usage.
+#   that of table_open_cache if you have heavy MyISAM usage.
 # open_files_limit = 1024
 
 # TABLE CACHE
 #   table_open_cache size >= max_connections * N, where N is the maximum number
 #     of tables per join in queries.
-#   table_definition_cache >= 2x table_open_cache is a good guess.
 #   Note : table_open_cache is table_cache in MySQL 5.1.2 and earlier.
 #
 #   table_definition_cache > number of tables in server.
