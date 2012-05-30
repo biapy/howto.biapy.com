@@ -1,0 +1,214 @@
+#!/bin/bash
+# Start / Stop rtorrent
+
+### BEGIN INIT INFO
+# Provides:       rtorrent
+# Required-Start:  $local_fs $network 
+# Required-Stop:   $local_fs $network 
+# Default-Start:   2 3 4 5
+# Default-Stop:    0 1 6
+# Short-Description: Start rtorrent as a daemon
+### END INIT INFO
+
+. /lib/lsb/init-functions
+
+#############
+###<Notes>###
+#############
+# This script depends on dtach.
+# To access to rtorrent, use :
+# dtach -a /var/lib/rtorrent/rtorrent.dtach -r winch
+##############
+###</Notes>###
+##############
+
+#######################
+##Start Configuration##
+#######################
+# You can specify your configuration in a different file 
+# (so that it is saved with upgrades, saved in your home directory,
+# or whateve reason you want to)
+# by commenting out/deleting the configuration lines and placing them
+# in a text file (say /home/user/.rtorrent.init.conf) exactly as you would
+# have written them here (you can leave the comments if you desire
+# and then uncommenting the following line correcting the path/filename 
+# for the one you used. note the space after the ".".
+# . /etc/rtorrent.init.conf
+
+#Do not put a space on either side of the equal signs e.g.
+# user = user 
+# will not work
+# system user to run as
+user="www-data"
+
+# the system group to run as, not implemented, see d_start for beginning implementation
+# group=`id -ng "$user"`
+group="www-data"
+
+# the full path to the filename where you store your rtorrent configuration
+config="/etc/rtorrent.rc"
+
+# default directory for screen, needs to be an absolute path
+#base="/home/${user}"
+base="/var/lib/rtorrent"
+
+# name of screen session
+srnname="rtorrent"
+
+# file to log to (makes for easier debugging if something goes wrong)
+logfile="/var/log/rtorrent.log"
+
+#######################
+###END CONFIGURATION###
+#######################
+PATH=/usr/bin:/usr/local/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin
+DESC="rtorrent"
+NAME=rtorrent
+DAEMON=$NAME
+SCRIPTNAME=/etc/init.d/${NAME}
+RTPIDFILE=/var/run/${NAME}.pid
+DTPIDFILE=/var/run/dtach-${NAME}.pid
+OPTIONS="-n /var/lib/rtorrent/${NAME}.dtach rtorrent -n -o import=${config}"
+
+if [ -d '/usr/local/lib' ]; then
+  export LD_LIBRARY_PATH='/usr/local/lib'
+fi
+
+#Functions
+checkconfig() {
+  exists=0
+
+  for i in `echo "$PATH" | tr ':' '\n'` ; do
+    if [ -f $i/$DAEMON ] ; then
+      exists=1
+      appdir=$i
+      apppath=$i/$DAEMON
+      break
+    fi
+  done
+
+  if ! [ -x "$apppath" ] ; then
+    echo "cannot find executable rtorrent binary in PATH $appdir" | tee -a "$logfile" >&2
+    exit 3
+  fi
+
+  if [ $exists -eq 0 ] ; then
+    echo "cannot find rtorrent binary in PATH $PATH" | tee -a "$logfile" >&2
+    exit 3
+  fi
+
+  if ! [ -r "${config}" ] ; then
+    echo "cannot find readable config ${config}. check that it is there and permissions are appropriate" | tee -a "$logfile" >&2
+    exit 3
+  fi
+
+  session=`getsession "$config"`
+  if ! [ -d "${session}" ] ; then
+    echo "cannot find readable session directory ${session} from config ${config}. check permissions" | tee -a "$logfile" >&2
+    exit 3
+  fi
+}
+
+getsession() {
+  session=`awk '/^session/{print($3)}' "$config"`
+  echo $session
+}
+
+makepidfiles() {
+  #make sure files don't exist before we start
+  if [ -r "$DTPIDFILE" ] ; then
+    rm -f "$DTPIDFILE"
+  fi
+  if [ -r "$RTPIDFILE" ] ; then
+    rm -f "$RTPIDFILE"
+  fi
+  dtpid=`ps -u ${user} | egrep dtach | awk '!/egrep/' | awk '{print($1)}'`
+  rtpid=`ps -u ${user} | egrep ${DAEMON} | awk '!/egrep/' | awk '{print($1)}'`
+  if [ -z $rtpid ] ; then
+    echo "Finding PID(s) failed"
+    exit 3
+  else
+    echo $rtpid > $RTPIDFILE
+    echo $dtpid > $DTPIDFILE
+  fi
+
+}
+
+start() {
+  log_daemon_msg "Starting daemon-ized dtach session for" "$NAME"
+
+  echo "starting daemon-ized dtach session for ${NAME}; command = start-stop-daemon --start --chuid ${user} --pidfile $DTPIDFILE --startas /usr/bin/dtach -- ${OPTIONS}" > "$logfile"
+
+  start-stop-daemon --start --chuid ${user} --pidfile "$DTPIDFILE" --startas /usr/bin/dtach -- $OPTIONS
+  if [ $? != 0 ]; then
+    log_end_msg 1
+    exit 1
+  else
+    makepidfiles
+    log_end_msg 0
+  fi
+
+}
+
+stop() {
+  SIGNAL="TERM"
+  if [ -f "$RTPIDFILE" ]; then
+    log_daemon_msg "Stopping daemon-ized dtach session for" "$NAME"
+    start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$RTPIDFILE"
+    if [ $? = 0 ]; then
+      start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$DTPIDFILE"
+      if [ $? = 0 ]; then
+        rm -f "$DTPIDFILE"
+      fi
+      log_end_msg 0
+      rm -f "$RTPIDFILE"
+    else
+      SIGNAL="KILL"
+      log_daemon_msg "Couldn't stop $NAME daemon gracefully. Trying to $SIGNAL" "$NAME instead"
+      #Trying to find the PIDs again
+      makepidfiles
+      start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$RTPIDFILE"
+      if [ $? = 0 ]; then
+        start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$DTPIDFILE"
+        if [ $? = 0 ]; then
+          rm -f "$DTPIDFILE"
+        fi
+        rm -f "$RTPIDFILE"
+        log_daemon_msg "$NAME has been killed. This is not optimal, so please check if there were failures during session startup."
+        log_end_msg 0
+      else
+        log_daemon_msg "Script could not kill"" $NAME. Please try stopping the dtach session manually"
+        log_end_msg 1
+      fi
+    fi
+  fi
+
+}
+
+#End Functions
+#Script
+
+checkconfig
+
+case "$1" in
+  start)
+    start
+    ;;
+
+  stop)
+    stop
+    ;;
+
+  restart|force-reload)
+    stop
+    sleep 1
+    start
+    ;;
+
+  *)
+    echo "Usage: ${SCRIPTNAME} {start|stop|restart|force-reload}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0
