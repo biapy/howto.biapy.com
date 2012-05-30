@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.0.3"
+VERSION="1.1.0"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -19,6 +19,7 @@ Usage :
   ${SCRIPT_NAME} [ --db-prefix='database_prefix' ]
       [ --user-prefix='user_prefix' ] [ --host='user_host' ]
       [ --user='mysql_user' ] [ --password='mysql_password' ]
+      [ --mysql='mysql' ] [ --server='localhost' ] [ --with-ssh[=root] ]
       [ --create database_name |
         --drop database_name |
         --empty database_name |
@@ -27,26 +28,70 @@ Usage :
       ]
 
   Available options are :
-    * --db-prefix | --dp : The database name prefix.
-    * --user-prefix | --up : The username prefix.
-    * --host | -h : The created user host (multiple occurence allowed).
-    * --user | -u : The user used to run the SQL queries (default to root).
+    * --mysql | -m    : Specify the mysql client command to use
+                        (default to mysql).
+    * --server | -s   : Specify the mysql server to connect to
+                        (default to localhost).
+    * --user | -u     : The user used to run the SQL queries (default to root).
     * --password | -p : The password of the user running the queries.
+    * --with-ssh | -r : If server is remote and mysql connection failed,
+                        try to run mysql-tools on the remote server via ssh.
+                        Optional argument is SSH user to use (default to root).
+    * --host | -h     : The created user host (multiple occurence allowed).
+    * --db-prefix | --dp    : The database name prefix.
+    * --user-prefix | --up  : The username prefix.
 
   Available actions are :
-    * --help : Display this message.
-    * --create | -c : Create a database and its user.
-    * --empty | -e : Drop all tables of a database.
-    * --drop | -d : Destroy the database and its user.
-    * --adduser | -a : Create a unprivilegied user, or a user for a database.
-    * --grant | -g : In conjunction with --adduser, set the create user
-        privileges (default to ALL) (multiple occurence allowed).
-        see: https://dev.mysql.com/doc/refman/5.0/fr/grant.html
-    * --deluser : Delete a mysql user.
+    * --help          : Display this message.
+    * --create | -c   : Create a database and its user.
+    * --empty | -e    : Drop all tables of a database.
+    * --drop | -d     : Destroy the database and its user.
+    * --adduser | -a  : Create a unprivilegied user, or a user for a database.
+    * --grant | -g    : In conjunction with --adduser, set the create user
+                        privileges (default: ALL) (multiple occurence allowed).
+                        see: https://dev.mysql.com/doc/refman/5.0/fr/grant.html
+    * --deluser       : Delete a mysql user.
 "
 
   test -n "${1}" && exit ${1}
 } # usage
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH="$(/bin/readlink -f "${1}")"
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=""
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
 
 
 
@@ -68,52 +113,83 @@ function check_binary {
 
 
 
-# Check if MySQL connection is working
-#
-# @param string $mysql_host The MySQL host.
-# @param string $mysql_user The MySQL user.
-# @param string $mysql_password The MySQL password.
-# @param string $mysql_db The MySQL DB.
-#
-# @return Exit with error if connection to MySQL fail.
-function check_mysql {
-  command test ${#} -ne 4 && exit 1
-
-  # Test the MySQL connection.
-  if ! command mysql --execute="SELECT 1" \
-            --host="${1}" --user="${2}" --password="${3}" \
-            "${4}" 2>&1 > /dev/null; then
-    echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters."
-    exit 1
-  fi
-} # check_mysql
-
-
-
 # Call MySQL.
 #
+# @param string $mysql_host The MySQL server host.
 # @param string $mysql_user A MySQL user.
 # @param string $mysql_password A MySQL user password.
 # @param mixed $arg1, $arg2 arguments passed to mysql command.
 #
 # @return MySQL command result.
 function mysql_call {
-  command test ${#} -lt 3 && exit 1
+  command test ${#} -lt 5 && exit 1
 
-  MYSQL_CALL_USER="${1}"
-  MYSQL_CALL_PASSWORD="${2}"
-  shift $[2]
+  MYSQL_CALL_CLIENT="${1}"
+  MYSQL_CALL_HOST="${2}"
+  MYSQL_CALL_USER="${3}"
+  MYSQL_CALL_PASSWORD="${4}"
+  shift $[4]
 
   if [ "${MYSQL_CALL_PASSWORD}" = "false" ]; then
-    command mysql --user="${MYSQL_CALL_USER}" "${@}"
+    "${MYSQL_CALL_CLIENT}" --host="${MYSQL_CALL_HOST}" \
+        --user="${MYSQL_CALL_USER}" "${@}"
   elif [ "${MYSQL_CALL_PASSWORD}" = "true" ]; then
-    command mysql --user="${MYSQL_CALL_USER}" --password "${@}"
+    "${MYSQL_CALL_CLIENT}" --host="${MYSQL_CALL_HOST}" \
+        --user="${MYSQL_CALL_USER}" --password "${@}"
   else
-    command mysql --user="${MYSQL_CALL_USER}" --password="${MYSQL_CALL_PASSWORD}" "${@}"
+    "${MYSQL_CALL_CLIENT}" --host="${MYSQL_CALL_HOST}" \
+        --user="${MYSQL_CALL_USER}" --password="${MYSQL_CALL_PASSWORD}" "${@}"
   fi
 
   return "${?}"
 } # mysql_call
+
+
+
+# Check if MySQL connection is working
+#
+# @param string $mysql_host The MySQL host.
+# @param string $mysql_user The MySQL user.
+# @param string $mysql_password The MySQL password.
+# @param string $mysql_db The MySQL database (optional).
+# @param string $no_exit "true" to use return values instead of exit (optional).
+#
+# @return Exit with error if connection to MySQL fail.
+function check_mysql {
+  command test ${#} -lt 4 && exit 1
+
+  MYSQL_CHECK_CLIENT="${1}"
+  MYSQL_CHECK_HOST="${2}"
+  MYSQL_CHECK_USER="${3}"
+  MYSQL_CHECK_PASSWORD="${4}"
+  MYSQL_CHECK_DB="${5}"
+  NO_EXIT="${6}"
+
+  # Test the MySQL connection.
+  if [ -n "${MYSQL_CHECK_DB}" ]; then
+    if ! mysql_call "${MYSQL_CHECK_CLIENT}" "${MYSQL_CHECK_HOST}" \
+          "${MYSQL_CHECK_USER}" "${MYSQL_CHECK_PASSWORD}" \
+          --execute="SELECT 1" "${MYSQL_CHECK_DB}" 1>"/dev/null"; then
+      if [ "${NO_EXIT}" = "true" ]; then
+        return 1
+      fi
+      echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
+      exit 1
+    fi
+  else
+    if ! mysql_call "${MYSQL_CHECK_CLIENT}" "${MYSQL_CHECK_HOST}" \
+          "${MYSQL_CHECK_USER}" "${MYSQL_CHECK_PASSWORD}" \
+          --execute="SHOW STATUS" 1>"/dev/null"; then
+      if [ "${NO_EXIT}" = "true" ]; then
+        return 2
+      fi
+      echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
+      exit 1
+    fi
+  fi
+
+  return 0
+} # check_mysql
 
 
 
@@ -247,10 +323,15 @@ check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
-check_binary "mysql" "mysql-client"
 check_binary "apg" "apg"
+check_binary "ssh" "openssh-client"
 
 
+# Application defaults
+MYSQL_CLIENT="mysql"
+MYSQL_HOST="localhost"
+WITH_SSH="false"
+WITH_SSH_USER="root"
 
 BASE_DB_NAME=""
 ACTION=""
@@ -266,7 +347,7 @@ MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p." "${@}"; do
+while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -317,6 +398,25 @@ while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e add
       fi
       ;;
 
+    server | s )
+      if [ -n "${OPTARG}" ]; then
+        MYSQL_HOST="${OPTARG}"
+      fi
+      ;;
+
+    mysql | m )
+      if [ -n "${OPTARG}" ]; then
+        MYSQL_CLIENT="${OPTARG}"
+      fi
+      ;;
+
+    with-ssh | r )
+      WITH_SSH="true"
+      if [ -n "${OPTARG}" ]; then
+        WITH_SSH_USER="${OPTARG}"
+      fi
+      ;;
+
     user | u)
       MYSQL_USER="${OPTARG}"
       ;;
@@ -343,6 +443,23 @@ BASE_DB_NAME="${1}"
 if [ -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" ]; then
   echo "Error: Database name is missing." >&2
   usage 1
+fi
+
+
+
+# Check MYSQL_CLIENT existance.
+if [[ "${MYSQL_CLIENT}" =~ "/" ]]; then
+  # MYSQL_CLIENT is a path.
+  realpath_check "${MYSQL_CLIENT}"
+  MYSQL_CLIENT="${REALPATH}"
+else
+  # MYSQL_CLIENT is a command.
+  MYSQL_CLIENT_PATH="$(command which "${MYSQL_CLIENT}")"
+  if [ -z "${MYSQL_CLIENT_PATH}" ]; then
+    echo "Error: can not find '${MYSQL_CLIENT}'." >&2
+    exit 1
+  fi
+  MYSQL_CLIENT="${MYSQL_CLIENT_PATH}"
 fi
 
 
@@ -490,8 +607,54 @@ fi
 if [ "${MANDATORY_PASSWORD}" = "true" \
     -a "${MYSQL_PASSWORD}" = "true" ]; then
 
-  echo -n "Enter password: "
-  command read -s MYSQL_PASSWORD
+  command read -p "Enter password: " -s MYSQL_PASSWORD
+fi
+
+
+
+# Check MySQL connection
+if [ "${WITH_SSH}" = "true" \
+    -a "${MYSQL_HOST}" != "localhost" \
+    -a "${MYSQL_HOST}" != "127.0.0.1" ]; then
+  # We use SSH access to remote server if mysql access failed.
+  if ! check_mysql "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+                "${MYSQL_USER}" "${MYSQL_PASSWORD}" "" "true"; then
+    if [ "${MYSQL_PASSWORD}" = "false" ]; then
+      command read -p "Enter password: " -s MYSQL_PASSWORD
+    fi
+
+    # Building remote mysql-tools arguments list.
+    ACTION_ARGUMENT=""
+    case "${ACTION}" in
+      adduser | deluser )
+        ACTION_ARGUMENT="--${ACTION}='${BASE_USER_NAME}'"
+        ;;
+      * )
+        if [ -n "${ACTION}" ]; then
+          ACTION_ARGUMENT="--${ACTION}"
+        fi
+        ;;
+    esac
+
+    ARGUMENTS=" --mysql='${MYSQL_CLIENT}' --server='localhost' \\
+--user='${MYSQL_USER}' --password='${MYSQL_PASSWORD}' \\
+--db-prefix='${DB_PREFIX}' --user-prefix='${USER_PREFIX}' \\
+--grant='${PRIVILEGES}' ${ACTION_ARGUMENT} '${BASE_DB_NAME}'"
+
+    # Running mysql-tools on remote server.
+    echo "
+Failed to connect to remove MySQL server using ${MYSQL_CLIENT} client.
+Establishing SSH connection to '${WITH_SSH_USER}@${MYSQL_HOST}'..." >&2
+    if command ssh "${WITH_SSH_USER}"@"${MYSQL_HOST}" \
+        "command mysql-tools ${ARGUMENTS}"; then
+      exit 0
+    else
+      exit 1
+    fi
+  fi
+else
+  check_mysql "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+              "${MYSQL_USER}" "${MYSQL_PASSWORD}"
 fi
 
 
@@ -508,7 +671,8 @@ case "${ACTION}" in
             IDENTIFIED BY '${DB_PASSWORD}';"
     done
 
-    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+    if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+          "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
           --execute="${SQL_QUERY}"; then
       command echo "# Database access parameters are :
 # Database name
@@ -532,16 +696,20 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
                     WHERE \`user\` = '${DB_USER}';"
 
     # Dropping users.
-    SQL_QUERY="$(mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" --batch --skip-column-names \
+    SQL_QUERY="$(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+          "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+          --batch --skip-column-names \
           --skip-line-numbers --skip-pager \
           --execute="${SQL_QUERY}" \
         | command sed -e "s/\(.*\)\t\(.*\)/DROP USER '\1'@'\2';/")"
-    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+    if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+        "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --execute="${SQL_QUERY}"; then
       # Dropping database.
       SQL_QUERY="DROP DATABASE \`${DB_NAME}\`;"
 
-      if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+      if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
             --execute="${SQL_QUERY}"; then
         echo "Database '${DB_NAME}' dropped successfully."
         exit 0
@@ -558,7 +726,8 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 
 
   empty )
-    SQL_QUERY="$(mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+    SQL_QUERY="$(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+        "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
         "${DB_NAME}" --execute="SHOW TABLES;" \
@@ -569,7 +738,8 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 ${SQL_QUERY}
 SET FOREIGN_KEY_CHECKS = 1;"
 
-      if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+      if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
             "${DB_NAME}" --execute="${SQL_QUERY}"; then
         echo "Tables dropped successfully from database '${DB_NAME}'."
         exit 0
@@ -600,7 +770,8 @@ SET FOREIGN_KEY_CHECKS = 1;"
       fi
     done
 
-    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+    if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+        "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --execute="${SQL_QUERY}"; then
       if [ -z "${BASE_DB_NAME}" ]; then
         command echo "# MySQL User access parameters are :
@@ -637,11 +808,13 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
                     WHERE \`user\` = '${DB_USER}';"
 
     # Dropping users.
-    SQL_QUERY="$(mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" --batch --skip-column-names \
+    SQL_QUERY="$(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+          "${MYSQL_USER}" "${MYSQL_PASSWORD}" --batch --skip-column-names \
           --skip-line-numbers --skip-pager \
           --execute="${SQL_QUERY}" \
         | command sed -e "s/\(.*\)\t\(.*\)/DROP USER '\1'@'\2';/")"
-    if mysql_call "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+    if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+        "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --execute="${SQL_QUERY}"; then
 
       echo "User '${DB_USER}' successfully deleted."
