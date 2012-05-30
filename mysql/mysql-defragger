@@ -19,7 +19,7 @@
 #  * InnoDB real row count can trigger heavy ressource load on large tables.
 #  * Aria engine is untested and provided as is.
 #
-VERSION="1.0.1"
+VERSION="1.0.2"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -31,7 +31,7 @@ By default, try to report fragmented tables for each databases.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --host='localhost' ]
+  ${SCRIPT_NAME} [ --server='localhost' ]
         [ --user='mysql_user' ] [ --password[='mysql_password'] ]
         [ --database='database_name' ] [ --mysql='mysql' ]
         [ --optimize ] [ --analyze ]
@@ -42,7 +42,7 @@ Usage :
 
   Available options are :
     * --help | -h     : Display this message.
-    * --host | --remote | -r : The MySQL server host.
+    * --host | --server | -s : The MySQL server host.
     * --user | -u     : The user used to run the SQL queries (default to root).
     * --password | -p : The password of the user running the queries.
     * --database | --db | -d : use specified database as target
@@ -181,22 +181,27 @@ function mysql_call {
 # @param string $mysql_user The MySQL user.
 # @param string $mysql_password The MySQL password.
 # @param string $mysql_db The MySQL database (optional).
+# @param string $no_exit "true" to use return values instead of exit (optional).
 #
 # @return Exit with error if connection to MySQL fail.
 function check_mysql {
-  command test ${#} -ne 5 && exit 1
+  command test ${#} -lt 4 && exit 1
 
   MYSQL_CHECK_CLIENT="${1}"
   MYSQL_CHECK_HOST="${2}"
   MYSQL_CHECK_USER="${3}"
   MYSQL_CHECK_PASSWORD="${4}"
   MYSQL_CHECK_DB="${5}"
+  NO_EXIT="${6}"
 
   # Test the MySQL connection.
   if [ -n "${MYSQL_CHECK_DB}" ]; then
     if ! mysql_call "${MYSQL_CHECK_CLIENT}" "${MYSQL_CHECK_HOST}" \
           "${MYSQL_CHECK_USER}" "${MYSQL_CHECK_PASSWORD}" \
           --execute="SELECT 1" "${MYSQL_CHECK_DB}" 1>"/dev/null"; then
+      if [ "${NO_EXIT}" = "true" ]; then
+        return 1
+      fi
       echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
       exit 1
     fi
@@ -204,10 +209,15 @@ function check_mysql {
     if ! mysql_call "${MYSQL_CHECK_CLIENT}" "${MYSQL_CHECK_HOST}" \
           "${MYSQL_CHECK_USER}" "${MYSQL_CHECK_PASSWORD}" \
           --execute="SHOW STATUS" 1>"/dev/null"; then
+      if [ "${NO_EXIT}" = "true" ]; then
+        return 2
+      fi
       echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
       exit 1
     fi
   fi
+
+  return 0
 } # check_mysql
 
 
@@ -344,7 +354,6 @@ check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
 check_binary "grep" "grep"
-#check_binary "mysql" "mysql-client"
 
 
 # Application defaults
@@ -372,12 +381,12 @@ OPTIMIZE_ROW_LIMIT=1000000
 ANALYZE_TRIGGER=0
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h host: remote: r: user: u: password. p. database: db: d: mysql: m: check c optimize o analyze a quiet q verbose v log: l: all innodb myisam aria optimize-trigger: analyze-trigger: optimize-row-limit:" "${@}"; do
+while getoptex "help h host: server: s: remote: r: user: u: password. p. database: db: d: mysql: m: check c optimize o analyze a quiet q verbose v log: l: all innodb myisam aria optimize-trigger: analyze-trigger: optimize-row-limit:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
   case "${OPTOPT}" in
-    host | remote | r )
+    host | server | s | remote | r )
       if [ -n "${OPTARG}" ]; then
         MYSQL_HOST="${OPTARG}"
       fi
@@ -561,8 +570,7 @@ fi
 
 
 if [ "${MYSQL_PASSWORD}" = "true" ]; then
-  echo -n "Enter password: "
-  read -s MYSQL_PASSWORD
+  command read -p "Enter password: " -s MYSQL_PASSWORD
 fi
 
 # Check MySQL connection
@@ -574,7 +582,8 @@ if [ -z "${MYSQL_DB}" ]; then
   DATABASES=( $(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
       "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
       --skip-column-names --batch \
-      --execute "SHOW DATABASES" 2>>"${LOG_FILE}") )
+      --execute "SHOW DATABASES" \
+      | command grep -v "information_schema" 2>>"${LOG_FILE}") )
   if [ ${?} -gt 0 ]; then
     echo -e "Error: can not fetch database listing.${LOG_ERROR}" >&2
     exit 1
