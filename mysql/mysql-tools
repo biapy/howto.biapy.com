@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -335,6 +335,8 @@ WITH_SSH_USER="root"
 
 BASE_DB_NAME=""
 ACTION=""
+BASE_DB_PREFIX=""
+BASE_USER_PREFIX=""
 DB_PREFIX=""
 USER_PREFIX=""
 BASE_USER_NAME=""
@@ -367,11 +369,11 @@ while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e add
       ;;
 
     db-prefix | dp )
-      DB_PREFIX="${OPTARG}"
+      BASE_DB_PREFIX="${OPTARG}"
       ;;
 
     user-prefix | up )
-      USER_PREFIX="${OPTARG}"
+      BASE_USER_PREFIX="${OPTARG}"
       ;;
 
     adduser | a )
@@ -576,15 +578,18 @@ esac
 
 # Compute final db name.
 DB_NAME=""
-if [ -n "${DB_PREFIX}" ]; then
-  if [ -z "${USER_PREFIX}" ]; then
-    USER_PREFIX="$(command echo "${DB_PREFIX}" | command cut --bytes=1)"
+if [ -n "${BASE_DB_PREFIX}" ]; then
+  if [ -z "${BASE_USER_PREFIX}" ]; then
+    BASE_USER_PREFIX="$(command echo "${BASE_DB_PREFIX}" | command cut --bytes=1)"
   fi
-  USER_PREFIX="${USER_PREFIX//[^_0-9A-Za-z]/-}_"
 
-  DB_NAME="${DB_PREFIX//[^_0-9A-Za-z]/-}_"
+  DB_PREFIX="${BASE_DB_PREFIX//[^_0-9A-Za-z]/-}_"
 fi
-DB_NAME="${DB_NAME}${BASE_DB_NAME//[^_0-9A-Za-z]/-}"
+if [ -n "${BASE_USER_PREFIX}" ]; then
+  USER_PREFIX="${BASE_USER_PREFIX//[^_0-9A-Za-z]/-}_"
+fi
+
+DB_NAME="${DB_PREFIX}${BASE_DB_NAME//[^_0-9A-Za-z]/-}"
 
 # Compute final db user name.
 if [ -n "${BASE_USER_NAME}" ]; then
@@ -638,7 +643,7 @@ if [ "${WITH_SSH}" = "true" \
 
     ARGUMENTS=" --mysql='${MYSQL_CLIENT}' --server='localhost' \\
 --user='${MYSQL_USER}' --password='${MYSQL_PASSWORD}' \\
---db-prefix='${DB_PREFIX}' --user-prefix='${USER_PREFIX}' \\
+--db-prefix='${BASE_DB_PREFIX}' --user-prefix='${BASE_USER_PREFIX}' \\
 --grant='${PRIVILEGES}' ${ACTION_ARGUMENT} '${BASE_DB_NAME}'"
 
     # Running mysql-tools on remote server.
