@@ -1,0 +1,13 @@
+## Defaults for Tiny Tiny RSS update daemon init.d script
+
+# Set DISABLED to 1 to prevent the daemon from starting.
+DISABLED=0
+
+# Emplacement of your Tiny Tiny RSS installation.
+TTRSS_PATH="/var/www/tt-rss"
+
+# Set FORKING to 1 to use the forking daemon (update_daemon2.php) in stead of
+# the standard one.
+# This option is only available for Tiny Tiny RSS 1.2.20 and over.
+FORKING=0
+
