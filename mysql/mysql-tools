@@ -17,7 +17,7 @@ This tool ease MySQL server administration from command line.
 Usage :
 
   ${SCRIPT_NAME} [ --db-prefix='database_prefix' ]
-      [ --user-prefix='user_prefix' ] [ --host='user_host' ]
+      [ --user-prefix='user_prefix' ] [ --host='user_host' ] [ --auto-hosts ]
       [ --user='mysql_user' ] [ --password='mysql_password' ]
       [ --mysql='mysql' ] [ --server='localhost' ] [ --with-ssh[=root] ]
       [ --create database_name |
@@ -38,6 +38,7 @@ Usage :
                         try to run mysql-tools on the remote server via ssh.
                         Optional argument is SSH user to use (default to root).
     * --host | -h     : The created user host (multiple occurence allowed).
+    * --auto-hosts     : Automaticaly compute created user hosts.
     * --db-prefix | --dp    : The database name prefix.
     * --user-prefix | --up  : The username prefix.
 
@@ -92,6 +93,24 @@ function realpath_check {
     exit 1
   fi
 } # realpath_check
+
+
+
+# Read the interface IP.
+#
+# @param string $interface The network interface (for example: eth0).
+#
+# @return A IP address.
+INTERFACE_IP=""
+function interface_ip {
+  command test ${#} -ne 1 && exit 1
+
+  INTERFACE="${1}"
+
+  INTERFACE_IP="$(command ifconfig "${INTERFACE}" \
+            | command grep "inet " \
+            | command sed -e 's/.*inet [^:]*:\([^ ]*\).*/\1/')"
+} # interface_ip
 
 
 
@@ -340,6 +359,7 @@ BASE_USER_PREFIX=""
 DB_PREFIX=""
 USER_PREFIX=""
 BASE_USER_NAME=""
+AUTO_HOSTS="false"
 USER_HOSTS="localhost"
 MYSQL_USER="false"
 MYSQL_PASSWORD="false"
@@ -349,7 +369,7 @@ MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r." "${@}"; do
+while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r. auto-hosts" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -398,6 +418,10 @@ while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e add
       if [ -n "${OPTARG}" ]; then
         USER_HOSTS="${USER_HOSTS} ${OPTARG}"
       fi
+      ;;
+
+    auto-hosts )
+      AUTO_HOSTS="true"
       ;;
 
     server | s )
@@ -617,6 +641,19 @@ fi
 
 
 
+# Compute user hosts for remote access.
+if [ "${AUTO_HOSTS}" = "true" \
+    -a "${MYSQL_HOST}" != "localhost" \
+    -a "${MYSQL_HOST}" != "127.0.0.1" ]; then
+  USER_HOSTS="${USER_HOSTS} $(command hostname) $(command hostname --fqdn)"
+  interface_ip "eth0"
+  if [ -n "${INTERFACE_IP}" ]; then
+    USER_HOSTS="${USER_HOSTS} ${INTERFACE_IP}"
+  fi
+fi
+
+
+
 # Check MySQL connection
 if [ "${WITH_SSH}" = "true" \
     -a "${MYSQL_HOST}" != "localhost" \
@@ -642,7 +679,7 @@ if [ "${WITH_SSH}" = "true" \
     esac
 
     ARGUMENTS=" --mysql='${MYSQL_CLIENT}' --server='localhost' \\
---user='${MYSQL_USER}' --password='${MYSQL_PASSWORD}' \\
+--user='${MYSQL_USER}' --password='${MYSQL_PASSWORD}' --host='${USER_HOSTS}' \\
 --db-prefix='${BASE_DB_PREFIX}' --user-prefix='${BASE_USER_PREFIX}' \\
 --grant='${PRIVILEGES}' ${ACTION_ARGUMENT} '${BASE_DB_NAME}'"
 
