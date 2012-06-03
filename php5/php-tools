@@ -428,7 +428,10 @@ ${INI_RULE} = ${CURRENT_VALUE}" \
     # Add the "for" information as comment.
     if [ "${FOR}" != "false" -a -n "${FOR}" ]; then
       FOR_TEXT="; - for '${FOR}' : ${VALUE}"
-      if [ -z "$(command grep "${FOR_TEXT}" "${PHP_CONFIG_FILE}")" ]; then
+      if [ -z "$(command sed -e "0,/; === ${INI_RULE} ===/d" \
+                  -e "/^[\t ]*${INI_RULE}[\t ]*/,10000d" \
+                  "${PHP_CONFIG_FILE}" \
+                | command grep "${FOR_TEXT}")" ]; then
         command sed -i -e "/^[\t ]*${INI_RULE}[\t ]*=/i\\
 ${FOR_TEXT}" \
           "${PHP_CONFIG_FILE}"
@@ -467,7 +470,10 @@ ${INI_RULE} = ${VALUE}" \
     # Add the "for" information as comment.
     if [ "${FOR}" != "false" -a -n "${FOR}" ]; then
       FOR_TEXT="; - for '${FOR}' : ${VALUE}"
-      if [ -z "$(command grep "${FOR_TEXT}" "${PHP_CONFIG_FILE}")" ]; then
+      if [ -z "$(command sed -e "0,/; === ${INI_RULE} ===/d" \
+                  -e "/^[\t ]*${INI_RULE}[\t ]*/,10000d" \
+                  "${PHP_CONFIG_FILE}" \
+                | command grep "${FOR_TEXT}")" ]; then
         command sed -i -e "/^[\t ]*${INI_RULE}[\t ]*=/i\\
 ${FOR_TEXT}" \
           "${PHP_CONFIG_FILE}"
