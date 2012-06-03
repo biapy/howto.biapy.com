@@ -15,4 +15,4 @@ Contents
 * __check-active-certs__ : Cron script using ssl-cert-check to check used certificates validity (see [Setup an email alert on SSL / TLS certificate expiration (en)](http://howto.biapy.com/en/debian-gnu-linux/servers/http/setup-an-email-alert-on-ssl-tls-certificate-expiration))
 * __rtorrent.rc__ : rtorrent sample configuration file (see [Install rTorrent latest version on Debian (en)](http://howto.biapy.com/en/debian-gnu-linux/system/software/install-rtorrent-latest-version-on-debian))
 * __rtorrent.init-d__ : rtorrent as daemon init.d script (see [Install rTorrent latest version on Debian (en)](http://howto.biapy.com/en/debian-gnu-linux/system/software/install-rtorrent-latest-version-on-debian))
-
+* __6to4.sh__ : Modified 6to4.sh from OpenWRT Backfire 6to4 package for usage with 6rd tunnel (cancelled try to use Free french SP 6rd tunnel).

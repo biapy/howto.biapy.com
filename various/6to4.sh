@@ -1,6 +1,18 @@
 # 6to4.sh - IPv6-in-IPv4 tunnel backend
 # Copyright (c) 2010-2011 OpenWrt.org
 
+# Changes by Pierre-Yves Landuré for howto.biapy.com
+# add defaultroute_ip option (default: 192.88.99.1
+# add prefix6 option (default: '') to force prefix
+# add prefix6_template option (default: 2002:????:????)
+#         (? are replated by IPv4 hexadecimal notation)
+# add suffix6 option (default: '::1/16') to for suffix.
+
+# For Free french SP, use:
+# option defaultroute_ip 192.88.99.101 (or 102).
+# option prefix6_template 2a01:e3?:????:???0
+# option suffix6 ::1/128
+
 find_6to4_wanif() {
 	local if=$(ip -4 r l e 0.0.0.0/0); if="${if#default* dev }"; if="${if%% *}"
 	[ -n "$if" ] && grep -qs "^ *$if:" /proc/net/dev && echo "$if"
@@ -13,9 +25,20 @@ find_6to4_wanip() {
 
 find_6to4_prefix() {
 	local ip4="$1"
-	local oIFS="$IFS"; IFS="."; set -- $ip4; IFS="$oIFS"
+	local template="$2"
 
-	printf "2002:%02x%02x:%02x%02x\n" $1 $2 $3 $4
+	[ -z "$template" ] && {
+		template="2002:????:????"
+	}
+
+	local oIFS="$IFS"; IFS="."; set -- $ip4; IFS="$oIFS"
+	local hex_ip4=$(printf "%02x%02x%02x%02x" $1 $2 $3 $4 | sed -e 's/\(.\)/\1 /g')
+
+  for i in $hex_ip4; do
+    template=$(echo $template | sed -e "s/?/$i/")
+  done
+
+  echo $template
 }
 
 test_6to4_rfc1918()
@@ -128,6 +151,13 @@ setup_interface_6to4() {
 	local defaultroute
 	config_get_bool defaultroute "$cfg" defaultroute 1
 
+
+		local defaultroute_ip
+		config_get defaultroute_ip "$cfg" defaultroute_ip
+		[ -z "$defaultroute_ip" ] && {
+			defaultroute_ip="192.88.99.1"
+		}
+
 	local wanif=$(find_6to4_wanif)
 	[ -z "$wanif" ] && {
 		logger -t "$link" "Cannot find wan interface - aborting"
@@ -163,8 +193,22 @@ setup_interface_6to4() {
 		uci_set_state network "$cfg" auto 0
 
 		# find our local prefix
-		local prefix6=$(find_6to4_prefix "$local4")
-		local local6="$prefix6::1/16"
+		local prefix6
+		config_get prefix6 "$cfg" prefix6
+
+		[ -z "$prefix6" ] && {
+			local prefix6_template
+			config_get prefix6_template "$cfg" prefix6_template
+			prefix6=$(find_6to4_prefix "$local4" "$prefix6_template")
+		}
+
+		local suffix6
+		config_get suffix6 "$cfg" suffix6
+		[ -z "$suffix6" ] && {
+			suffix6="::1/16"
+		}
+
+		local local6="$prefix6$suffix6"
 
 		logger -t "$link" " * IPv4 address is $local4"
 		logger -t "$link" " * IPv6 address is $local6"
@@ -178,7 +222,7 @@ setup_interface_6to4() {
 
 		[ "$defaultroute" = 1 ] && {
 			logger -t "$link" " * Adding default route"
-			ip -6 route add 2000::/3 via ::192.88.99.1 metric ${metric:-1} dev $link
+			ip -6 route add 2000::/3 via ::$defaultroute_ip metric ${metric:-1} dev $link
 			uci_set_state network "$cfg" defaultroute 1
 		}
 
@@ -241,6 +285,12 @@ stop_interface_6to4() {
 	local local6=$(uci_get_state network "$cfg" ip6addr)
 	local defaultroute=$(uci_get_state network "$cfg" defaultroute)
 
+		local defaultroute_ip
+		config_get defaultroute_ip "$cfg" defaultroute_ip
+		[ -z "$defaultroute_ip" ] && {
+			defaultroute_ip="192.88.99.1"
+		}
+
 	local adv_subnets=$(uci_get_state network "$cfg" adv_subnets)
 
 	grep -qs "^ *$link:" /proc/net/dev && {
@@ -262,7 +312,7 @@ stop_interface_6to4() {
 		}
 
 		[ "$defaultroute" = "1" ] && \
-			ip -6 route del 2000::/3 via ::192.88.99.1 dev $link
+			ip -6 route del 2000::/3 via ::$defaultroute_ip dev $link
 
 		ip addr del $local6 dev $link
 		ip link set $link down
