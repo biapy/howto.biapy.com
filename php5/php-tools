@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="0.1.1"
+VERSION="0.1.2"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -429,7 +429,7 @@ ${INI_RULE} = ${CURRENT_VALUE}" \
     if [ "${FOR}" != "false" -a -n "${FOR}" ]; then
       FOR_TEXT="; - for '${FOR}' : ${VALUE}"
       if [ -z "$(command grep "${FOR_TEXT}" "${PHP_CONFIG_FILE}")" ]; then
-        command sed -i -e "/${INI_RULE}[\t ]*=/i\\
+        command sed -i -e "/^[\t ]*${INI_RULE}[\t ]*=/i\\
 ${FOR_TEXT}" \
           "${PHP_CONFIG_FILE}"
       fi
@@ -468,7 +468,7 @@ ${INI_RULE} = ${VALUE}" \
     if [ "${FOR}" != "false" -a -n "${FOR}" ]; then
       FOR_TEXT="; - for '${FOR}' : ${VALUE}"
       if [ -z "$(command grep "${FOR_TEXT}" "${PHP_CONFIG_FILE}")" ]; then
-        command sed -i -e "/${INI_RULE}[\t ]*=/i\\
+        command sed -i -e "/^[\t ]*${INI_RULE}[\t ]*=/i\\
 ${FOR_TEXT}" \
           "${PHP_CONFIG_FILE}"
       fi
