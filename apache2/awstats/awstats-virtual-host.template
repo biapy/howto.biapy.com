@@ -1,0 +1,98 @@
+  # Theses lines only apply of the rewrite module is enabled.
+  <IfModule mod_rewrite.c>
+
+    # If you have no default configuration for AWstats,
+    # you me want to redirect the unusable root to your web site :D
+    # In order to do this, replace http://howto.landure.fr/ URL by the
+    # URL to your site, and uncomment this line:
+    #RewriteRule ^/$ http://howto.biapy.com/ [R,L]
+
+    # Awstats images.
+    Alias /awstats-icon /usr/share/awstats/icon
+    <Directory "/usr/share/awstats/icon">
+      AllowOverride None
+    </Directory>
+
+    # Allow CGI execution for awstats.pl.
+    # Thanks to Sébastien for reporting the error and finding the fix.
+    <Directory "/usr/lib/cgi-bin">
+      <Files "awstats.pl">
+        Options +ExecCGI
+      </Files>
+    </Directory> 
+
+    # We do no rewrite for awstats-icon folder.
+    RewriteRule /awstats-icon - [L]
+
+    #
+    # AwStats URL beautifier
+    #
+
+    # In order to the anchor links to work, we do not rewrite
+    # url with framename defined and not equal to "index":
+    RewriteCond %{QUERY_STRING}  !^(.*&)?framename=index(&.*)?$
+    RewriteCond %{QUERY_STRING}  ^(.*&)?framename=.*(&.*)?$
+    RewriteRule /(.*) /usr/lib/cgi-bin/awstats.pl [L] 
+
+    # , we redirect all urls like /awstats.pl?config=something&name=value
+    # to /something?name=value
+    RewriteCond %{QUERY_STRING}  ^(.*&)?config=([^&]*)(&(.*))?$
+    RewriteRule /.* /%2?%1%4 [R,L]
+
+    # We take the /awstats.pl exact url to the rool of the server.
+    RewriteRule /awstats.pl$ / [R,L]
+
+    # We take a URL like /something?name=value and pass it to: 
+    #   awstats.pl?config=something&name=value.
+    #   
+    # aka: It take a beautiful URL and fetch the awstats content that match it. 
+    RewriteRule /([^/]*)(/.*)? /usr/lib/cgi-bin/awstats.pl?config=$1 [QSA,L]
+
+    ## Restrict access to awstats
+    <Location />
+      SetHandler cgi-script
+
+      # Auth configuration
+      # Allow auth either by user, or by IP
+      Satisfy any
+
+      # Protect default access
+      Order deny,allow
+      Deny from all
+
+      # We enable password authentication
+      AuthType Basic
+      AuthName "Advanced Web Statistics"
+      AuthUserFile /etc/apache2/passwords/awstats-users.pwd
+      Require valid-user
+
+      # Uncomment these lines in order to allow access from this IP without password.
+      #Allow from some.ip.address.here/32
+
+    </Location>
+
+    # By default, only the "admin" user can access all
+    # statistics. Do not remove this, since it avoid
+    # users restricted to only one site statistics to
+    # access alls statistics on your server.
+    <LocationMatch /(?!awstats\.pl$)>
+      Require user admin
+    </LocationMatch>
+
+    <Location /awstats-icon>
+      SetHandler None
+      Allow from all
+    </Location>
+
+    # We allow one (or more) user by site.
+    # This configuration fits a multisite AWstats configuration quite well :)
+
+    # Allow "some-user" to view "www.some-site.com" statistics.
+    #<Location /www.some-site.com>
+    #  Require user some-user
+    #</Location>
+
+    ### End of AWStats sites list. DO NOT REMOVE THIS LINE.
+
+  </IfModule>
+

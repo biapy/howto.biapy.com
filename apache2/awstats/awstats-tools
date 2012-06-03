@@ -1,0 +1,162 @@
+#!/bin/bash
+#
+# AWStats tools.
+#
+# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
+
+
+SCRIPT_NAME="$(command basename ${0})"
+
+# Print this script help.
+function usage {
+  command echo "
+This tool ease AWStats administration from command line.
+
+Usage :
+
+  ${SCRIPT_NAME} stats-domain add-site domain
+  ${SCRIPT_NAME} stats-domain add-site-user domain user
+
+  * add-site :         Add statistics for the given site on the
+                       given AWStats stats domain.
+
+  * add-site-user :    Add user access to the given site on the
+                       given AWStats stats domain. User is created
+                       with a random password if it does not exists.
+"
+  exit 1
+} # usage
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH=$(/bin/readlink -f "${1}")
+} # realpath
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'."
+    exit 1
+  fi
+} # check_binary
+
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "tar" "tar"
+check_binary "mktemp" "mktemp"
+check_binary "sed" "sed"
+check_binary "apg" "apg"
+check_binary "htpasswd" "apache2-utils"
+
+# Check if at least three args given.
+command test ${#} -le 2 && usage
+
+STATS_DOMAIN="${1}"
+
+# Test if given STATS_DOMAIN exists.
+if [ -z "$(command grep 'End of AWStats sites list.' /etc/apache2/sites-available/http*-${STATS_DOMAIN})" ]; then
+  echo "Error : ${STATS_DOMAIN} is not a valid apache2 AWStats virtual host."
+  exit 1
+fi
+
+case "${2}" in
+
+  add-site )
+    # Check if valid number of arguments given (3).
+    command test ${#} -ne 3 && usage
+
+    DOMAIN="${3}"
+
+    # Test if given site domain access log exists.
+    if [ ! -e "/var/log/apache2/${DOMAIN}-access.log" ]; then
+      echo "Error : ${DOMAIN} is not a valid apache2 virtual host."
+      exit 1
+    fi
+
+    # Test if given site domain already configured.
+    if [ -e "/etc/awstats/awstats.${DOMAIN}.conf" ]; then
+      echo "Error : ${DOMAIN} has an existing AWStats configuration."
+      exit 1
+    fi
+
+    # Creating AWStats configuration.
+    command cp "/etc/awstats/awstats.conf.template" "/etc/awstats/awstats.${DOMAIN}.conf"
+
+    command sed -i -e "s/^\(LogFile=\).*/\1\"\/var\/log\/apache2\/${DOMAIN}-access.log\"/" \
+            -e "s/^\(SiteDomain=\).*/\1\"${DOMAIN}\"/" \
+            -e 's/^\(DefaultFile=\).*/\1"index.php index.html"/' \
+            -e 's/^\(URLWithQuery=\).*/URLWithQuery=1/' \
+         "/etc/awstats/awstats.${DOMAIN}.conf"
+
+    command sed -i -e 's/^\(URLWithQuery=\).*/URLReferrerWithQuery=1/' \
+         "/etc/awstats/awstats.${DOMAIN}.conf"
+
+    # Updating Apache2 AWStats VirtualHost.
+    command sed -i -e "/### End of AWStats sites list./i\\
+    <Location /${DOMAIN}>\\
+    </Location>\\
+" /etc/apache2/sites-available/http*-${STATS_DOMAIN}
+    /etc/init.d/apache2 force-reload
+
+    exit 0
+    ;;
+
+  add-site-user )
+    # Check if valid number of arguments given (4).
+    command test ${#} -ne 4 && usage
+
+    DOMAIN="${3}"
+    AWS_USER="${4}"
+
+    # Test if given site domain has AWStats configuration.
+    if [ ! -e "/etc/awstats/awstats.${DOMAIN}.conf" ]; then
+      echo "Error : ${DOMAIN} has no AWStats configuration."
+      exit 1
+    fi
+
+    # Create user if it does not exists.
+    if [ -z "$(command grep "^${AWS_USER}:" "/etc/apache2/passwords/awstats-users.pwd")" ]; then
+      command echo "Creating user '${AWS_USER}'."
+      AWS_PASSWD=$(command apg -q -a 0 -n 1 -M NCL)
+      command htpasswd -b "/etc/apache2/passwords/awstats-users.pwd" "${AWS_USER}" "${AWS_PASSWD}"
+    fi
+
+    command sed -i -e "/<Location \\/${DOMAIN}>/a\\
+      Require user ${AWS_USER}" /etc/apache2/sites-available/http*-${STATS_DOMAIN}
+    /etc/init.d/apache2 force-reload
+
+    if [ -n "${AWS_PASSWD}" ]; then
+      command echo "The password for user '${AWS_USER}' is '${AWS_PASSWD}'."
+    fi
+    exit 0
+    ;;
+
+  * )
+    echo "Error : '${2}' is not a valid action."
+    usage
+    ;;
+esac
+
+exit 0
+
