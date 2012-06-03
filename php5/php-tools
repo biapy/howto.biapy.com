@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -409,7 +409,8 @@ conf.d ini files
       fi
 
       if [ "${SET_DONE}" = "false" ]; then
-        command echo "; ${INI_RULE}
+        command echo "
+; === ${INI_RULE} ===
 ${INI_RULE} = ${VALUE}" \
           >> "${PHP_CONFIG_FILE}"
         SET_DONE="true"
@@ -417,7 +418,8 @@ ${INI_RULE} = ${VALUE}" \
     else
       # Set current value in ini file if it does not exists yet.
       if [ -z "$(command egrep "^[\t ]*${INI_RULE}[\t ]*=" "${PHP_CONFIG_FILE}")" ]; then
-        command echo "; ${INI_RULE}
+        command echo "
+; === ${INI_RULE} ===
 ${INI_RULE} = ${CURRENT_VALUE}" \
           >> "${PHP_CONFIG_FILE}"
       fi
@@ -455,7 +457,8 @@ ${FOR_TEXT}" \
     fi
 
     if [ "${SET_DONE}" = "false" ]; then
-      command echo "; ${INI_RULE}
+      command echo "
+; === ${INI_RULE} ===
 ${INI_RULE} = ${VALUE}" \
         >> "${PHP_CONFIG_FILE}"
       SET_DONE="true"
