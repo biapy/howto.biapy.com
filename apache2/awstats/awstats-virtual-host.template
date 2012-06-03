@@ -19,7 +19,7 @@
       <Files "awstats.pl">
         Options +ExecCGI
       </Files>
-    </Directory> 
+    </Directory>
 
     # We do no rewrite for awstats-icon folder.
     RewriteRule /awstats-icon - [L]
