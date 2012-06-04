@@ -2,14 +2,16 @@
 #
 # Backup Manager tools.
 #
-# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-
+# For suggestion, bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+VERSION="1.2.0"
 
 SCRIPT_NAME="$(command basename ${0})"
 
 # Print this script help.
 function usage {
-  command echo "
+  command echo "Backup Manager tools v${VERSION}
 This tool ease Backup Manager administration from command line.
 
 Usage :
@@ -24,7 +26,8 @@ Usage :
   * add path : Add the given path to backup targets.
   * remove path : Remove the given path from backup targets.
 "
-  exit 1
+
+  test -n "${1}" && exit ${1}
 } # usage
 
 
@@ -53,7 +56,7 @@ function check_binary {
 
   # Test the binary presence.
   if [ -z "$(which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'."
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
     exit 1
   fi
 } # check_binary
@@ -93,7 +96,7 @@ case "${1}" in
 
   list )
     command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
-        | command sed -e 's/^.*TARGETS\[\([^\]]*\)\]="\([^"]*\)".*$/\1 : \2/'
+        | command sed -e 's/^.*TARGETS\[\([^]]*\)\]="\([^"]*\)".*$/\1 : \2/'
     exit 0
     ;;
 
@@ -167,8 +170,8 @@ BM_TARBALL_TARGETS[]=\"${TARGET_PATH}\"" \
 
 
   * )
-    echo "Error : '${1}' is not a valid action."
-    usage
+    echo "Error : '${1}' is not a valid action." >&2
+    usage 1
     ;;
 esac
 
