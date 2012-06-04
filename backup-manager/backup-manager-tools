@@ -5,7 +5,7 @@
 # For suggestion, bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -90,7 +90,7 @@ check_binary "backup-manager" "backup-manager"
 command test ! -e '/etc/backup-manager.conf' && exit 1
 
 # Check if at least one args given.
-command test ${#} -eq 0 && usage
+command test ${#} -eq 0 && usage 1
 
 case "${1}" in
 
