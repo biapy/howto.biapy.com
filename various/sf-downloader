@@ -414,7 +414,7 @@ done
 shift $[OPTIND-1]
 
 if [ ${#} -ne 2 ]; then
-  echo "Error: project name and/or filename template missing."
+  echo "Error: project name and/or filename template missing." >&2
   exit 1
 fi
 
