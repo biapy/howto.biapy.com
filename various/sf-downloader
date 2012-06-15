@@ -28,12 +28,14 @@ Usage :
              use this template: 'xml-rpc-c-VERSION.tgz'.
 
   Available options are :
-    * --help | -h : Display this message.
-    * --download : Download the project sources archive.
-    * --tgz : Download the sources archive and decompress it as tar.gz.
-    * --tbz2 : Download the sources archive and decompress it as tar.bz2.
-    * --zip : Download the sources archive and decompress it as zip.
-    * --version : Print the detected sources version.
+    * --help | -h   : Display this message.
+    * --googlecode  : Fetch files from googlecode.com.
+    * --sourceforge : Fetch files from sourceforge.net (default).
+    * --download    : Download the project sources archive.
+    * --tgz         : Download the sources archive and decompress it as tar.gz.
+    * --tbz2        : Download the sources archive and decompress it as tar.bz2.
+    * --zip         : Download the sources archive and decompress it as zip.
+    * --version     : Print the detected sources version.
 "
 
   test -n "${1}" && exit ${1}
