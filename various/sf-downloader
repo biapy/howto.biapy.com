@@ -1,21 +1,23 @@
 #!/bin/bash
 #
-# Sourceforge Downloader.
-# Automates the download of software latest version from sourceforge.
+# Sourceforge downloader.
+# Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-
+VERSION="1.1.0"
 
 SCRIPT_NAME="$(command basename ${0})"
 
 # Print this script help.
 function usage {
-  command echo "
-This tool automates the download of software latest version from sourceforge.
+  command echo "Sourceforge Downloader v${VERSION}
+This tool automates the download of software latest version from sourceforge or google code.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --download | --zip | --tgz | --tbz2 | --version ] project-name file-name-template
+  ${SCRIPT_NAME} [ --googlecode | --sourceforge ] \\
+        [ --download | --zip | --tgz | --tbz2 | --version ] \\
+        project-name file-name-template
 
   Mandatory arguments are :
     * project-name : The sourceforge project name as
@@ -33,6 +35,8 @@ Usage :
     * --zip : Download the sources archive and decompress it as zip.
     * --version : Print the detected sources version.
 "
+
+  test -n "${1}" && exit ${1}
 } # usage
 
 
@@ -357,6 +361,7 @@ check_binary "wget" "wget"
 
 BASE_DB_NAME=""
 ACTION=""
+FORGE="sourceforge"
 DB_PREFIX=""
 USER_PREFIX=""
 BASE_USER_NAME=""
@@ -368,27 +373,32 @@ PRIVILEGES=""
 MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
-
 ACTION="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip" "${@}"; do
+while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
   case "${OPTOPT}" in
-    version | v )
+    'sourceforge' )
+      FORGE="sourceforge"
+      ;;
+    'googlecode' )
+      FORGE="googlecode"
+      ;;
+    'version' | 'v' )
       ACTION="print-version"
       ;;
-    tgz )
+    'tgz' )
       ACTION="untar-ungzip"
       ;;
-    tbz2 )
+    'tbz2' )
       ACTION="untar-unbzip2"
       ;;
-    zip )
+    'zip' )
       ACTION="unzip"
       ;;
-    help | h )
+    'help' | 'h' )
       usage
       exit 0
       ;;
@@ -411,14 +421,28 @@ FILENAME_TEMPLATE="${2}"
 
 ##
 ## This is where the source download URL and version detection is done.
-## It is frequently broken by sourceforge updates.
+## It is frequently broken by sourceforge and googlecode updates.
 ##
-SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
-VERSION="$(command wget --quiet --output-document=- \
-    "http://sourceforge.net/projects/${PROJECT_NAME}/" \
-  | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
-  | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g"
-  )"
+case "${FORGE}" in
+  'googlecode' )
+    VERSION="$(command wget "http://code.google.com/p/${PROJECT_NAME}/downloads/list" \
+        --quiet --output-document=- \
+        | command grep --max-count=1 "//${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/.*}" \
+        | command sed -e "s|.*href=\"//${PROJECT_NAME}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
+        | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+        )"
+
+    SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+    ;;
+  'sourceforge' | * )
+    SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
+    VERSION="$(command wget --quiet --output-document=- \
+        "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+      | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
+      | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+      )"
+    ;;
+esac
 
 if [ -z "${SOURCE_URL}" ]; then
   echo "Error: unable to detect download URL." >&2
