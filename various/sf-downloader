@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -15,7 +15,7 @@ This tool automates the download of software latest version from sourceforge or 
 
 Usage :
 
-  ${SCRIPT_NAME} [ --googlecode | --sourceforge ] \\
+  ${SCRIPT_NAME} [ --sourceforge | --googlecode | --ckeditor ] \\
         [ --download | --zip | --tgz | --tbz2 | --version ] \\
         project-name file-name-template
 
@@ -29,8 +29,9 @@ Usage :
 
   Available options are :
     * --help | -h   : Display this message.
-    * --googlecode  : Fetch files from googlecode.com.
     * --sourceforge : Fetch files from sourceforge.net (default).
+    * --googlecode  : Fetch files from googlecode.com.
+    * --ckeditor    : Fetch ckeditor files from cksource.com.
     * --download    : Download the project sources archive.
     * --tgz         : Download the sources archive and decompress it as tar.gz.
     * --tbz2        : Download the sources archive and decompress it as tar.bz2.
@@ -377,7 +378,7 @@ MANDATORY_PASSWORD="false"
 
 ACTION="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode" "${@}"; do
+while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ckeditor" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -387,6 +388,9 @@ while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode" "
       ;;
     'googlecode' )
       FORGE="googlecode"
+      ;;
+    'ckeditor' )
+      FORGE="ckeditor"
       ;;
     'version' | 'v' )
       ACTION="print-version"
@@ -435,6 +439,17 @@ case "${FORGE}" in
         )"
 
     SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+    ;;
+  'ckeditor' )
+    SOURCE_URL="$(command wget "http://ckeditor.com/download" \
+        --quiet --output-document=- \
+        | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+        | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+        )"
+
+    VERSION="$(command echo "${SOURCE_URL}" \
+        | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+        )"
     ;;
   'sourceforge' | * )
     SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
