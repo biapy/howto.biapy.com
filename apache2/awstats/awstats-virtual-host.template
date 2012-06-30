@@ -75,7 +75,7 @@
     # statistics. Do not remove this, since it avoid
     # users restricted to only one site statistics to
     # access alls statistics on your server.
-    <LocationMatch /(?!awstats\.pl$)>
+    <LocationMatch /(?!awstats\.pl|robots\.txt)$>
       Require user admin
     </LocationMatch>
 
