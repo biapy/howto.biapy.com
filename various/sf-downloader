@@ -4,9 +4,22 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 SCRIPT_NAME="$(command basename ${0})"
+
+# Detect download command.
+DOWNLOAD_COMMAND="false"
+if [ -n "$(command which "wget")" ]; then
+  DOWNLOAD_COMMAND="wget"
+elif [ -n "$(command which "curl")" ]; then
+  DOWNLOAD_COMMAND="curl"
+fi
+
+if [ "${DOWNLOAD_COMMAND}" = "false" ]; then
+  echo "Error : 'wget' and 'curl' are missing. Please install package 'wget' or 'curl'." 2>&1
+  exit 1
+fi
 
 # Print this script help.
 function usage {
@@ -99,7 +112,7 @@ function check_binary {
 
 
 
-# Check if a patckage file is present
+# Check if a package file is present
 #
 # @param string $file The file to check.
 # @param string $package The package the binary come from.
@@ -130,10 +143,19 @@ function download_file {
   if [ -n "${2}" ]; then
     DOWNLOAD_FILE="/tmp/${2}"
   else
-    DOWNLOAD_FILE="$(command mktemp)"
+    DOWNLOAD_FILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
   fi
-  command wget --quiet --no-check-certificate "${1}" \
-      --output-document="${DOWNLOAD_FILE}"
+
+  case "${DOWNLOAD_COMMAND}" in
+    curl )
+      command curl --silent --location --insecure "${1}" \
+          --output "${DOWNLOAD_FILE}"
+      ;;
+    wget | * )
+      command wget --quiet --no-check-certificate "${1}" \
+          --output-document="${DOWNLOAD_FILE}"
+      ;;
+  esac
 
   if [ ! -s "${DOWNLOAD_FILE}" ]; then
     command rm "${DOWNLOAD_FILE}"
@@ -157,16 +179,16 @@ function download_tgz {
 
 
   # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TGZ="$(command mktemp -d)"
+  DOWNLOAD_TGZ="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
   command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
   command rm "${DOWNLOAD_FILE}"
 
-  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc --lines) -eq 0 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 0 ]; then
     echo "Error : unable to untar file downloaded from '${1}'." >&2
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc --lines) -eq 1 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 1 ]; then
     DOWNLOAD_TGZ="${DOWNLOAD_TGZ}/$(command ls -1 "${DOWNLOAD_TGZ}")"
   fi
 } # download_tgz
@@ -186,16 +208,16 @@ function download_tbz2 {
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TBZ2="$(command mktemp -d)"
+  DOWNLOAD_TBZ2="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
   command tar --directory "${DOWNLOAD_TGZ}" -xjf "${DOWNLOAD_FILE}"
   command rm "${DOWNLOAD_FILE}"
 
-  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc --lines) -eq 0 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 0 ]; then
     echo "Error : unable to untar file downloaded from '${1}'." >&2
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc --lines) -eq 1 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 1 ]; then
     DOWNLOAD_TBZ2="${DOWNLOAD_TBZ2}/$(command ls -1 "${DOWNLOAD_TBZ2}")"
   fi
 } # download_tbz2
@@ -215,16 +237,16 @@ function download_zip {
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_ZIP="$(command mktemp -d)"
+  DOWNLOAD_ZIP="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
   command unzip -d "${DOWNLOAD_ZIP}" -qq "${DOWNLOAD_FILE}"
   command rm "${DOWNLOAD_FILE}"
 
-  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc --lines) -eq 0 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc -l) -eq 0 ]; then
     echo "Error : unable to unzip file downloaded from '${1}'." >&2
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc --lines) -eq 1 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc -l) -eq 1 ]; then
     DOWNLOAD_ZIP="${DOWNLOAD_ZIP}/$(command ls -1 "${DOWNLOAD_ZIP}")"
   fi
 } # download_zip
@@ -359,7 +381,7 @@ function getopt()
 check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "sed" "sed"
-check_binary "wget" "wget"
+#check_binary "wget" "wget"
 
 
 BASE_DB_NAME=""
@@ -431,21 +453,44 @@ FILENAME_TEMPLATE="${2}"
 ##
 case "${FORGE}" in
   'googlecode' )
-    VERSION="$(command wget "http://code.google.com/p/${PROJECT_NAME}/downloads/list" \
-        --quiet --output-document=- \
-        | command grep --max-count=1 "//${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/.*}" \
-        | command sed -e "s|.*href=\"//${PROJECT_NAME}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
-        | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
-        )"
+    case "${DOWNLOAD_COMMAND}" in
+      curl )
+        VERSION="$(command curl "http://code.google.com/p/${PROJECT_NAME}/downloads/list" \
+            --silent --location --output "-" \
+            | command grep --max-count=1 "//${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command sed -e "s|.*href=\"//${PROJECT_NAME}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
+            | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+            )"
+        ;;
+      wget | * )
+        VERSION="$(command wget "http://code.google.com/p/${PROJECT_NAME}/downloads/list" \
+            --quiet --output-document=- \
+            | command grep --max-count=1 "//${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command sed -e "s|.*href=\"//${PROJECT_NAME}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
+            | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+            )"
+        ;;
+    esac
 
     SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/${VERSION}}"
     ;;
   'ckeditor' )
-    SOURCE_URL="$(command wget "http://ckeditor.com/download" \
-        --quiet --output-document=- \
-        | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-        | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
-        )"
+    case "${DOWNLOAD_COMMAND}" in
+      curl )
+        SOURCE_URL="$(command curl "http://ckeditor.com/download" \
+            --silent --location --output "-" \
+            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            )"
+        ;;
+      wget | * )
+        SOURCE_URL="$(command wget "http://ckeditor.com/download" \
+            --quiet --output-document=- \
+            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            )"
+        ;;
+    esac
 
     VERSION="$(command echo "${SOURCE_URL}" \
         | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
@@ -453,11 +498,22 @@ case "${FORGE}" in
     ;;
   'sourceforge' | * )
     SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
-    VERSION="$(command wget --quiet --output-document=- \
-        "http://sourceforge.net/projects/${PROJECT_NAME}/" \
-      | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
-      | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
-      )"
+    case "${DOWNLOAD_COMMAND}" in
+      curl )
+        VERSION="$(command curl --silent --location --output "-" \
+            "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+          | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
+          | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+          )"
+        ;;
+      wget | * )
+        VERSION="$(command wget --quiet --output-document=- \
+            "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+          | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
+          | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+          )"
+        ;;
+    esac
     ;;
 esac
 
