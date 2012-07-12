@@ -5,7 +5,7 @@
 # For suggestion, bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.2.1"
+VERSION="1.2.2"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -144,10 +144,11 @@ BM_TARBALL_TARGETS[]=\"${TARGET_PATH}\"" \
     # Check if valid number of arguments given (1).
     command test ${#} -ne 2 && usage
 
-    realpath "${2}"
+    ORIGINAL_PATH="${2}"
+    realpath "${ORIGINAL_PATH}"
     TARGET_PATH="${REALPATH}"
 
-    if [ -n "$(command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
+    if [ -n "${TARGET_PATH}" -a -n "$(command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
         | command sed -e 's/^.*="\([^"]*\)".*$/\1/' \
         | command grep "${TARGET_PATH}")" ]; then
 
@@ -160,8 +161,22 @@ BM_TARBALL_TARGETS[]=\"${TARGET_PATH}\"" \
       fix_targets_ids
 
       echo "Path '${TARGET_PATH}' removed from backup targets."
+ 
+    elif [ -n "${ORIGINAL_PATH}" -a -n "$(command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
+        | command sed -e 's/^.*="\([^"]*\)".*$/\1/' \
+        | command grep "${ORIGINAL_PATH}")" ]; then
+
+      command grep --line-number "BM_TARBALL_TARGETS\[.*[\"']${ORIGINAL_PATH}[\"']" '/etc/backup-manager.conf' \
+          | command cut --delimiter=':' --fields=1 \
+          | command xargs --no-run-if-empty -iLINE sed -i -e "LINEd" \
+              '/etc/backup-manager.conf'
+
+      # Fix array numbers.
+      fix_targets_ids
+
+      echo "Path '${ORIGINAL_PATH}' removed from backup targets."
     else
-      echo "Path '${TARGET_PATH}' is not a backup target."
+      echo "Path '${ORIGINAL_PATH}' is not a backup target."
     fi
 
     exit 0
