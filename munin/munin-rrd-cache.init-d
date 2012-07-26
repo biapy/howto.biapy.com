@@ -69,7 +69,7 @@ do_start()
     || return 2
 
   # Copy munin files to cache.
-  command rsync --archive "${MUNIN_DBDIR}" "${MUNIN_CACHEDIR}"
+  command rsync --archive "${MUNIN_DBDIR}/" "${MUNIN_CACHEDIR}"
 
   # Setup munin to use cache storage.
   echo "dbdir ${MUNIN_CACHEDIR}" \
@@ -92,7 +92,7 @@ do_stop()
   [ -n "$(command mount | command grep "${MUNIN_CACHEDIR}")" ] \
     || return 1
 
-  command rsync --archive "${MUNIN_CACHEDIR}" "${MUNIN_DBDIR}"
+  command rsync --archive "${MUNIN_CACHEDIR}/" "${MUNIN_DBDIR}"
   command umount "${MUNIN_CACHEDIR}"
 
   # Check if cache dir mounted.
