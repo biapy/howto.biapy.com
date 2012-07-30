@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 
 SCRIPT_NAME="$(command basename ${0})"
@@ -891,7 +891,7 @@ Windows 64bits configuration:
       command apt-get install -y bind9
     fi
 
-    if [ -z "$(command grep 'acl local-networks {' '/etc/bind/named.conf.options')"]; then
+    if [ -z "$(command grep 'acl local-networks {' '/etc/bind/named.conf.options')" ]; then
       command echo -e "
 // Local networks access control list.
 acl local-networks {
@@ -899,7 +899,7 @@ acl local-networks {
 };" >> '/etc/bind/named.conf.options'
     fi
 
-    if [ -z "$(command grep "${SERVER_IP_RANGE}.1/24;" '/etc/bind/named.conf.options')"]; then
+    if [ -z "$(command grep "${SERVER_IP_RANGE}.1/24;" '/etc/bind/named.conf.options')" ]; then
       sed -i -e "/acl local-networks/a\\
 \t${SERVER_IP_RANGE}.1/24;" \
           '/etc/bind/named.conf.options'
