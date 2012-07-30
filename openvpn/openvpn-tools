@@ -1,0 +1,979 @@
+#!/bin/bash
+#
+# OpenVPN tools.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+VERSION="1.0.0"
+
+
+SCRIPT_NAME="$(command basename ${0})"
+
+# Print this script help.
+function usage {
+  command echo "OpenVPN tools v${VERSION}.
+This tool ease OpenVPN administration from command line.
+
+Usage :
+
+  ${SCRIPT_NAME} initialize
+  ${SCRIPT_NAME} create-server domain.vpn server.domain.com
+  ${SCRIPT_NAME} remove-server domain.vpn
+  ${SCRIPT_NAME} build-hosts domain.vpn
+  ${SCRIPT_NAME} add-client domain.vpn client-code
+  ${SCRIPT_NAME} remove-client domain.vpn client-code
+  ${SCRIPT_NAME} build-client-config domain.vpn client-code
+  ${SCRIPT_NAME} toggle-c2c domain.vpn
+  ${SCRIPT_NAME} toggle-nat domain.vpn
+  ${SCRIPT_NAME} toggle-gateway domain.vpn
+  ${SCRIPT_NAME} enable-bind domain.vpn
+  ${SCRIPT_NAME} disable-bind domain.vpn
+
+
+  * initialize, init : Setup a new OpenVPN server.
+  * create-server : Create a VPN server with given VPN local domain
+                    and server Internet Domain Name.
+  * remove-server : Remove a VPN and all its clients.
+  * build-hosts : Generate a hosts file extract for VPN clients.
+  * add-client : Add a client to the given VPN local domain.
+  * remove-client : Remove a client from the given VPN local domain.
+  * build-client-config : Create the client configurations archives.
+  * toggle-c2c : Toggle client to client communication for VPN domain.
+  * toggle-nat : Toggle client access to VPN server local network (via NAT).
+  * toggle-gateway : Toggle client Internet access via VPN connexion (not recommended).
+  * enable-bind: Enable bind DNS server for VPN local domain.
+  * disable-bind: Cleanup bind DNS server for VPN local domain.
+"
+  test -n "${1}" && exit ${1}
+} # usage
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+REALPATH=""
+function realpath {
+  command test ${#} -ne 1 && exit 1
+  REALPATH=$(command readlink -f "${1}")
+} # realpath
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(command which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_binary
+
+
+
+# Check if OpenVPN SSL environment is initialized.
+#
+# @return Exit with error if OpenVPN SSL environment is missing.
+function check_openvpn_env {
+  if [ ! -e '/etc/openvpn/config/easy-rsa' ]; then
+    echo "Error : please initialize your environment with:
+    ${SCRIPT_NAME} initialize" >&2
+    exit 1
+  fi
+} # check_openvpn_env
+
+
+
+# Check if OpenVPN server exist.
+#
+# @param string $domain_name The server domain name.
+#
+# @return Exit with error if OpenVPN server does not exists.
+function check_openvpn_server {
+  command test ${#} -ne 1 && exit 1
+
+  if [ ! -e "/etc/openvpn/${1}.conf" -a ! -d "/etc/openvpn/config/${1}" ]; then
+    echo "Error : server '${1}' does not exists." >&2
+    exit 1
+  fi
+} # check_openvpn_server
+
+
+
+# Enable or disable NAT for OpenVPN server.
+#
+# @param string $domain_name The server domain name.
+#
+# @return void
+function toggle_iptables_nat {
+  command test ${#} -ne 1 && exit 1
+
+  DOMAIN_NAME="${1}"
+
+  # Loading server details.
+  export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+  source "${KEY_DIR}/server-details"
+
+  if [ -n "$(command grep '^push.*"redirect-gateway' "/etc/openvpn/${DOMAIN_NAME}.conf")" \
+       -o -n "$(command grep '^push.*"route' "/etc/openvpn/${DOMAIN_NAME}.conf")" ]; then
+
+    if [ ! -e "/etc/network/if-up.d/iptables-${DOMAIN_NAME}" ]; then
+      # Enable NAT configuration.
+      command sed -i \
+          -e 's/[# ]*\(net\.ipv4\.conf\.default\.forwarding=\).*/\11/g' \
+          -e 's/[# ]*\(net\.ipv4\.ip_forward=\).*/\11/g' \
+        '/etc/sysctl.conf'
+      command sysctl -p
+
+      command echo '#!/bin/sh' > "/etc/network/if-up.d/iptables-${DOMAIN_NAME}"
+
+      command iptables -t nat -A POSTROUTING -s "${SERVER_IP_RANGE}.0/24" -o eth0 -j MASQUERADE
+      command echo "iptables -t nat -A POSTROUTING -s "${SERVER_IP_RANGE}.0/24" -o eth0 -j MASQUERADE" \
+          > "/etc/network/if-up.d/iptables-${DOMAIN_NAME}"
+
+      command chmod +x "/etc/network/if-up.d/iptables-${DOMAIN_NAME}"
+    fi
+  else
+    # Remove NAT configuration.
+
+    command iptables -t nat -D POSTROUTING -s "${SERVER_IP_RANGE}.0/24" -o eth0 -j MASQUERADE
+    command rm "/etc/network/if-up.d/iptables-${DOMAIN_NAME}"
+  fi
+
+} # toggle_iptables_nat
+
+
+
+# Build bind configuration.
+#
+# @param string $domain_name The server domain name.
+#
+# @return void
+function build_bind_config {
+  command test ${#} -ne 1 && exit 1
+
+  DOMAIN_NAME="${1}"
+
+  # Loading server details.
+  export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+  source "${KEY_DIR}/server-details"
+
+  NAMED_SERIAL="$(command date '+%Y%m%d')$((${RANDOM}%100))"
+
+  REVERSE_IP_RANGE=$(echo ${SERVER_IP_RANGE} \
+      | command sed -e 's/\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\3\.\2\.\1/')
+
+  if [ -e "/etc/bind/${DOMAIN_NAME}.conf.local" ]; then
+    # Init the config files.
+    ###################### File db.${SERVER_IP_RANGE} #######################
+    command echo "\$ttl 86400
+${REVERSE_IP_RANGE}.in-addr.arpa. IN SOA ${HOSTNAME}. root.${HOSTNAME}. (
+  ${NAMED_SERIAL}; Serial
+  3600; refresh after 1 hours.
+  3600; Retry after 1 hour.
+  1209600; expire after 2 week.
+  86400; Minimum TTL of 1 day.
+);
+
+;
+; Name servers declaration.
+;
+
+${REVERSE_IP_RANGE}.in-addr.arpa.  IN NS  ${HOSTNAME}.;
+
+;
+; Hostnames declaration.
+;
+1.${REVERSE_IP_RANGE}.in-addr.arpa. IN PTR server.${DOMAIN_NAME}.;" \
+        > "/etc/bind/db.${SERVER_IP_RANGE}"
+
+
+    # Add clients lines
+    command sed -e "s|^\([^ ]*\) \(.*\)$|\2.${REVERSE_IP_RANGE}.in-addr.arpa. IN PTR \1.;|" \
+        "/etc/openvpn/config/${DOMAIN_NAME}/clients.list" \
+        >> "/etc/bind/db.${SERVER_IP_RANGE}"
+
+    ###################### File db.${DOMAIN_NAME} #######################
+    command echo "\$ttl 86400
+${DOMAIN_NAME}. IN SOA ${HOSTNAME}. root.${HOSTNAME}. (
+  ${NAMED_SERIAL}; Serial
+  3600; refresh after 1 hours.
+  3600; Retry after 1 hour.
+  1209600; expire after 2 week.
+  86400; Minimum TTL of 1 day.
+);
+
+;
+; Name servers declaration.
+;
+
+${DOMAIN_NAME}.  IN NS  ${HOSTNAME}.;
+
+;
+; Hostnames declaration.
+;
+server.${DOMAIN_NAME}. IN A ${SERVER_IP_RANGE}.1;" \
+      > "/etc/bind/db.${DOMAIN_NAME}"
+
+
+    # Add clients lines
+    command sed -e "s|^\([^ ]*\) \(.*\)$|\1. IN A ${SERVER_IP_RANGE}.\2;|" \
+        "/etc/openvpn/config/${DOMAIN_NAME}/clients.list" \
+        >> "/etc/bind/db.${DOMAIN_NAME}"
+
+    # Reloading bind.
+    /etc/init.d/bind9 reload
+
+  fi
+
+} # build_bind_config
+
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "tar" "tar"
+check_binary "mktemp" "mktemp"
+check_binary "sed" "sed"
+check_binary "gzip" "gzip"
+check_binary "zip" "zip"
+check_binary "openvpn" "openvpn"
+check_binary "unix2dos" "dos2unix"
+
+
+EASYRSA_PATH='/usr/share/doc/openvpn/examples/easy-rsa/2.0'
+
+# Check if at least one args given.
+command test ${#} -eq 0 && usage 1
+
+case "${1}" in
+
+  initialize | init )
+    # Setting up defaults.
+    SERVER_HOST="${HOSTNAME}"
+
+    if [ -e '/etc/openvpn/config/easy-rsa' ]; then
+      source '/etc/openvpn/config/easy-rsa'
+
+      COUNTRY="${KEY_COUNTRY}"
+      PROVINCE="${KEY_PROVINCE}"
+      CITY="${KEY_CITY}"
+      ORGANIZATION="${KEY_ORG}"
+      EMAIL="${KEY_EMAIL}"
+    else
+      COUNTRY='FR'
+      PROVINCE='75'
+      CITY='Paris'
+      ORGANIZATION='biapy'
+      EMAIL="root@${HOSTNAME}"
+    fi
+
+    echo "Please setup default values:"
+#    read -p "Internet Domain Name [ ${SERVER_HOST} ]: " OPENVPN_SERVER
+    read -p "Country Name (2 letter code) [ ${COUNTRY} ]: " KEY_COUNTRY
+    read -p "State or Province Name (full name) [ ${PROVINCE} ]: " KEY_PROVINCE
+    read -p "Locality Name (eg, city) [ ${CITY} ]: " KEY_CITY
+    read -p "Organization Name (eg, company) [ ${ORGANIZATION} ]: " KEY_ORG
+    read -p "Email Address [ ${EMAIL} ]: " KEY_EMAIL
+
+#    test -z "${OPENVPN_SERVER}" && OPENVPN_SERVER="${SERVER_HOST}"
+    test -z "${KEY_COUNTRY}" && KEY_COUNTRY="${COUNTRY}"
+    test -z "${KEY_PROVINCE}" && KEY_PROVINCE="${PROVINCE}"
+    test -z "${KEY_CITY}" && KEY_CITY="${CITY}"
+    test -z "${KEY_ORG}" && KEY_ORG="${ORGANIZATION}"
+    test -z "${KEY_EMAIL}" && KEY_EMAIL="${EMAIL}"
+
+    command mkdir --parent '/etc/openvpn/config'
+    echo "# EasyRSA configuration for OpenVPN
+export KEY_COUNTRY='${KEY_COUNTRY}'
+export KEY_PROVINCE='${KEY_PROVINCE}'
+export KEY_CITY='${KEY_CITY}'
+export KEY_ORG='${KEY_ORG}'
+export KEY_EMAIL='${KEY_EMAIL}'
+    " > '/etc/openvpn/config/easy-rsa'
+
+
+    command grep '^BM_TARBALL_TARGETS\[' '/etc/backup-manager.conf' \
+        | command sed -e 's/^.*="\([^"]*\)".*$/\1/' \
+        | command xargs -iTARGET sh -c "test ! -e 'TARGET' && echo 'TARGET'" \
+        | command xargs -iTARGET ${0} remove-target 'TARGET'
+    exit 0
+    ;;
+
+
+
+  create-server )
+    # Check if valid number of arguments given (2).
+    command test ${#} -ne 3 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+    COMMON_NAME="${3}"
+
+    if [ -e "/etc/openvpn/${DOMAIN_NAME}.conf" ]; then
+      echo "Error : server '${DOMAIN_NAME}' already exists." >&2
+      exit 1
+    fi
+
+    # Randomize VPN local domain IP range.
+    IP_RANGE="10.$((${RANDOM}%256)).$((${RANDOM}%256))"
+
+    # Find a available server port.
+    SERVER_PORT=1194
+    while [ -n "$(command grep "^port[\t ]*${SERVER_PORT}$" /etc/openvpn/*.conf)" -o -n "$(command netstat -ul | command grep "${SERVER_PORT}")" ]; do
+      SERVER_PORT=$((${RANDOM} + 10240))
+    done
+
+
+    pushd "${EASYRSA_PATH}"
+    source "${EASYRSA_PATH}/vars"
+    popd
+
+    source '/etc/openvpn/config/easy-rsa'
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+    command mkdir --parent "${KEY_DIR}"
+
+    export KEY_CN="${COMMON_NAME}"
+
+    command sh "${EASYRSA_PATH}/clean-all"
+
+    # Build certificate authority.
+    command sh "${EASYRSA_PATH}/pkitool" --initca
+
+    # Build server certificate.
+    command sh "${EASYRSA_PATH}/pkitool" --server "${COMMON_NAME}"
+
+    # Build Diffie Hellman
+    command sh "${EASYRSA_PATH}/build-dh"
+
+    # Create TLS key (for HSA firewall)
+    command openvpn --genkey --secret "${KEY_DIR}/ta.key"
+
+    # Create logs and lib directories
+    LIB_DIR="/var/lib/openvpn/${DOMAIN_NAME}"
+    LOG_DIR="/var/log/openvpn/${DOMAIN_NAME}"
+    command mkdir --parent "${LIB_DIR}"
+    command mkdir --parent "${LOG_DIR}"
+
+    # Create server configuration file.
+    command gzip -cd '/usr/share/doc/openvpn/examples/sample-config-files/server.conf.gz' \
+        | command sed \
+            -e "s|^ca[\t ].*|ca ${KEY_DIR}/ca.crt|" \
+            -e "s|^cert[\t ].*|cert ${KEY_DIR}/${COMMON_NAME}.crt|" \
+            -e "s|^key[\t ].*|key ${KEY_DIR}/${COMMON_NAME}.key|" \
+            -e "s|^dh[\t ].*|dh ${KEY_DIR}/dh${KEY_SIZE}.pem|" \
+            -e "s|^[; ]*tls-auth[\t ].*|tls-auth ${KEY_DIR}/ta.key 0|" \
+            -e "s|^port[\t ].*|port ${SERVER_PORT}|" \
+            -e "s|^server[\t ].*|server ${IP_RANGE}.0 255.255.255.0|" \
+            -e 's/^;\(user[ \t]*.*\)/\1/' \
+            -e 's/^;\(group[ \t]*.*\)/\1/' \
+            -e "s|^[; ]*ifconfig-pool-persist[\t ].*|ifconfig-pool-persist ${LIB_DIR}/ipp.txt|" \
+            -e "s|^[; ]*status[\t ].*|status ${LOG_DIR}/openvpn-status.log|" \
+            -e "s|^[; ]*log-append[\t ].*|log-append ${LOG_DIR}/openvpn.log|" \
+        > "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+    # Creating revoked client list.
+    echo "
+# Revoked certificate list
+crl-verify ${KEY_DIR}/crl.pem" \
+      >> "/etc/openvpn/${DOMAIN_NAME}.conf"
+    export KEY_CN=""
+    export KEY_OU=""
+    export KEY_NAME=""
+    command openssl ca -gencrl -out "${KEY_DIR}/crl.pem" -config "${KEY_CONFIG}"
+
+    # Fixing permissions for key dir and "user nobody" options.
+    command chmod go+rx "${KEY_DIR}"
+
+    # Creating client configuration directory.
+    command mkdir --parent "${KEY_DIR}/clients-configs"
+    echo "
+# Advanced clients configurations
+client-config-dir ${KEY_DIR}/clients-configs" \
+      >> "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+    # Creating client list.
+    command touch "${KEY_DIR}/clients.list"
+
+    # Creating client OpenVPN configs directory
+    command mkdir --parent "${KEY_DIR}/clients"
+
+
+    # Storing server details for clients configuration.
+    echo "# server details
+SERVER_COMMON_NAME='${COMMON_NAME}'
+SERVER_PORT='${SERVER_PORT}'
+SERVER_IP_RANGE='${IP_RANGE}'" \
+        > "${KEY_DIR}/server-details"
+
+
+    echo "Starting the new VPN server..."
+    /etc/init.d/openvpn start "${DOMAIN_NAME}"
+
+    exit 0
+    ;;
+
+
+
+  remove-server )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    /etc/init.d/openvpn stop "${DOMAIN_NAME}"
+
+    if [ -e "/etc/network/if-up.d/iptables-${DOMAIN_NAME}" ]; then
+      KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+      # Loading server details.
+      source "${KEY_DIR}/server-details"
+
+      command iptables -t nat -D POSTROUTING -s "${SERVER_IP_RANGE}.0/24" -o eth0 -j MASQUERADE
+      command rm "/etc/network/if-up.d/iptables-${DOMAIN_NAME}"
+    fi
+
+    command rm "/etc/openvpn/${DOMAIN_NAME}.conf"
+    command rm -r "/etc/openvpn/config/${DOMAIN_NAME}"
+    command rm -r "/var/lib/openvpn/${DOMAIN_NAME}"
+    command rm -r "/var/log/openvpn/${DOMAIN_NAME}"
+
+    # Clean up bind config if necessary.
+    if [ -e "/etc/bind/${DOMAIN_NAME}.conf.local" ]; then
+
+      command rm "/etc/bind/${DOMAIN_NAME}.conf.local"
+      command rm "/etc/bind/db.${SERVER_IP_RANGE}"
+      command rm "/etc/bind/db.${DOMAIN_NAME}"
+
+      command sed -i \
+          -e "/${DOMAIN_NAME}.conf.local/d" \
+        '/etc/bind/named.conf.local'
+
+      /etc/init.d/bind9 reload
+    fi
+
+    echo "Server '${DOMAIN_NAME}' has been removed."
+
+    exit 0
+    ;;
+
+
+
+  build-hosts )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    # Loading server details.
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+    source "${KEY_DIR}/server-details"
+
+    echo "# Add these lines to the /etc/hosts file.
+${SERVER_IP_RANGE}.1 server.${DOMAIN_NAME}"
+
+    command sed \
+        -e "s/\([^ ]*\)[ \t]*\(.*\)$/${SERVER_IP_RANGE}.\2 \1/" \
+        "${KEY_DIR}/clients.list"
+
+    exit 0
+    ;;
+
+
+
+  add-client )
+    # Check if valid number of arguments given (2).
+    command test ${#} -ne 3 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+    CLIENT_NAME="${3}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    pushd "${EASYRSA_PATH}"
+    source "${EASYRSA_PATH}/vars"
+    popd
+
+    source '/etc/openvpn/config/easy-rsa'
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+    COMPLETE_NAME="${CLIENT_NAME}.${DOMAIN_NAME}"
+
+    if [ -n "$(command grep "^${COMPLETE_NAME} " "${KEY_DIR}/clients.list" )" ]; then
+      echo "Error : Client '${CLIENT_NAME}' already exists in server '${DOMAIN_NAME}'." >&2
+      exit 1
+    fi
+
+    command sh "${EASYRSA_PATH}/pkitool" "${COMPLETE_NAME}"
+
+    # Computing client IP ID.
+    IP_ID=5
+
+    while [ -n "$(command grep " ${IP_ID}$" "${KEY_DIR}/clients.list")" ]; do
+      IP_ID=$((${IP_ID} + 4))
+    done
+
+    # Loading server details.
+    source "${KEY_DIR}/server-details"
+
+    # Add client to server client list.
+    echo "${COMPLETE_NAME} ${IP_ID}" >> "${KEY_DIR}/clients.list"
+
+    # Create client advanced config file, and fixing IP.
+    SERVER_SIDE_IP="${SERVER_IP_RANGE}.$((${IP_ID} + 1))"
+    CLIENT_SIDE_IP="${SERVER_IP_RANGE}.${IP_ID}"
+    command echo "ifconfig-push ${CLIENT_SIDE_IP} ${SERVER_SIDE_IP}" \
+        > "${KEY_DIR}/clients-configs/${COMPLETE_NAME}"
+
+    # Update bind config if possible.
+    build_bind_config "${DOMAIN_NAME}"
+
+    ${0} build-client-config "${DOMAIN_NAME}" "${CLIENT_NAME}"
+
+    exit 0
+    ;;
+
+  build-client-config )
+    # Check if valid number of arguments given (2).
+    command test ${#} -ne 3 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+    CLIENT_NAME="${3}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    pushd "${EASYRSA_PATH}"
+    source "${EASYRSA_PATH}/vars"
+    popd
+
+    source '/etc/openvpn/config/easy-rsa'
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+    COMPLETE_NAME="${CLIENT_NAME}.${DOMAIN_NAME}"
+
+    if [ -z "$(command grep "^${COMPLETE_NAME} " "${KEY_DIR}/clients.list" )" ]; then
+      echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN_NAME}'." >&2
+      exit 1
+    fi
+
+
+    ######### Building Unix Client config. ########
+    # Create client Unix OpenVPN config.
+    TEMP_DIR=$(command mktemp -d)
+    TEMP_CLIENT_DIR="${TEMP_DIR}/openvpn/config/${DOMAIN_NAME}"
+    command mkdir --parent "${TEMP_CLIENT_DIR}"
+    command cp "${KEY_DIR}/${COMPLETE_NAME}.crt" "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.crt"
+    command cp "${KEY_DIR}/${COMPLETE_NAME}.key" "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.key"
+    command cp "${KEY_DIR}/ca.crt" "${TEMP_CLIENT_DIR}/ca.crt"
+    command cp "${KEY_DIR}/ta.key" "${TEMP_CLIENT_DIR}/ta.key"
+
+    command cp '/etc/openvpn/update-resolv-conf' "${TEMP_CLIENT_DIR}/update-resolv-conf"
+
+    CLIENT_CONFIG_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+    command cp '/usr/share/doc/openvpn/examples/sample-config-files/client.conf' \
+              "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.conf"
+    command sed -i  \
+        -e "s|^remote[\t ].*|remote ${SERVER_COMMON_NAME} ${SERVER_PORT}|" \
+        -e "s|^ca[\t ].*|ca ${CLIENT_CONFIG_DIR}/ca.crt|" \
+        -e "s|^cert[\t ].*|cert ${CLIENT_CONFIG_DIR}/${COMPLETE_NAME}.crt|" \
+        -e "s|^key[\t ].*|key ${CLIENT_CONFIG_DIR}/${COMPLETE_NAME}.key|" \
+        -e "s|;tls-auth[\t ].*|tls-auth ${CLIENT_CONFIG_DIR}/ta.key 1|" \
+        -e "s|;\(ns-cert-type[\t ].*\)|\1|" \
+        -e 's/^;\(user[ \t]*.*\)/\1/' \
+        -e 's/^;\(group[ \t]*.*\)/\1/' \
+      "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.conf"
+
+    command tar --directory ${TEMP_DIR} -czf "${KEY_DIR}/clients/${COMPLETE_NAME}-compat.tar.gz" "openvpn/"
+
+    command echo "
+# VPN provided DNS configuration.
+up ${CLIENT_CONFIG_DIR}/update-resolv-conf
+down ${CLIENT_CONFIG_DIR}/update-resolv-conf" \
+      >> "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.conf"
+
+    command tar --directory ${TEMP_DIR} -czf "${KEY_DIR}/clients/${COMPLETE_NAME}.tar.gz" "openvpn/"
+    command rm -r "${TEMP_DIR}"
+
+
+
+    ######### Building MacOS X Tunnelblick Client config. ########
+    # Create client Tunnelblick OpenVPN config.
+    TEMP_DIR=$(command mktemp -d)
+    TEMP_CLIENT_DIR="${TEMP_DIR}/${DOMAIN_NAME}.tblk"
+    command mkdir --parent "${TEMP_CLIENT_DIR}"
+    command cp "${KEY_DIR}/${COMPLETE_NAME}.crt" "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.crt"
+    command cp "${KEY_DIR}/${COMPLETE_NAME}.key" "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.key"
+    command cp "${KEY_DIR}/ca.crt" "${TEMP_CLIENT_DIR}/ca.crt"
+    command cp "${KEY_DIR}/ta.key" "${TEMP_CLIENT_DIR}/ta.key"
+
+    command cp '/usr/share/doc/openvpn/examples/sample-config-files/client.conf' \
+              "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.conf"
+    command sed -i  \
+        -e "s|^remote[\t ].*|remote ${SERVER_COMMON_NAME} ${SERVER_PORT}|" \
+        -e "s|^ca[\t ].*|ca ca.crt|" \
+        -e "s|^cert[\t ].*|cert ${COMPLETE_NAME}.crt|" \
+        -e "s|^key[\t ].*|key ${COMPLETE_NAME}.key|" \
+        -e "s|;tls-auth[\t ].*|tls-auth ta.key 1|" \
+        -e "s|;\(ns-cert-type[\t ].*\)|\1|" \
+        -e 's/^;\(user[ \t]*.*\)/\1/' \
+        -e 's/^;\(group[ \t]*.*\)/\1/' \
+      "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.conf"
+
+    command pushd "${TEMP_DIR}"
+    command zip -pr "${KEY_DIR}/clients/${COMPLETE_NAME}-tunnelblick.zip" "${DOMAIN_NAME}.tblk"
+    command popd
+
+    command rm -r "${TEMP_DIR}"
+
+
+
+    ######### Building Windows Client config. ########
+    # Create client Windows OpenVPN config.
+    TEMP_DIR=$(command mktemp -d)
+    TEMP_CLIENT_DIR="${TEMP_DIR}/openvpn/${DOMAIN_NAME}"
+    command mkdir --parent "${TEMP_CLIENT_DIR}"
+    command cp "${KEY_DIR}/${COMPLETE_NAME}.crt" "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.crt"
+    command cp "${KEY_DIR}/${COMPLETE_NAME}.key" "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.key"
+    command cp "${KEY_DIR}/ca.crt" "${TEMP_CLIENT_DIR}/ca.crt"
+    command cp "${KEY_DIR}/ta.key" "${TEMP_CLIENT_DIR}/ta.key"
+
+    CLIENT_CONFIG_DIR="C:\\\\Program Files\\\\OpenVPN\\\\config\\\\${DOMAIN_NAME}"
+
+    command cp '/usr/share/doc/openvpn/examples/sample-config-files/client.conf' \
+              "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.ovpn"
+    command sed -i  \
+        -e "s|^remote[\t ].*|remote ${SERVER_COMMON_NAME} ${SERVER_PORT}|" \
+        -e "s|^ca[\t ].*|ca \"${CLIENT_CONFIG_DIR}\\\\ca.crt\"|" \
+        -e "s|^cert[\t ].*|cert \"${CLIENT_CONFIG_DIR}\\\\${COMPLETE_NAME}.crt\"|" \
+        -e "s|^key[\t ].*|key \"${CLIENT_CONFIG_DIR}\\\\${COMPLETE_NAME}.key\"|" \
+        -e "s|;tls-auth[\t ].*|tls-auth \"${CLIENT_CONFIG_DIR}\\\\ta.key\" 1|" \
+        -e "s|;\(ns-cert-type[\t ].*\)|\1|" \
+        -e 's|\\|\\\\|g' \
+      "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.ovpn"
+
+    command unix2dos "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.ovpn"
+
+    command pushd "${TEMP_DIR}/openvpn"
+    command zip -pr "${KEY_DIR}/clients/${COMPLETE_NAME}.zip" "${DOMAIN_NAME}/" "${COMPLETE_NAME}.ovpn"
+    command popd
+
+    # Create client Windows 64bit OpenVPN config.
+    CLIENT_CONFIG_DIR="C:\\\\Program Files (x86)\\\\OpenVPN\\\\config\\\\${DOMAIN_NAME}"
+    command cp '/usr/share/doc/openvpn/examples/sample-config-files/client.conf' \
+              "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.ovpn"
+    command sed -i  \
+        -e "s|^remote[\t ].*|remote ${SERVER_COMMON_NAME} ${SERVER_PORT}|" \
+        -e "s|^ca[\t ].*|ca \"${CLIENT_CONFIG_DIR}\\\\ca.crt\"|" \
+        -e "s|^cert[\t ].*|cert \"${CLIENT_CONFIG_DIR}\\\\${COMPLETE_NAME}.crt\"|" \
+        -e "s|^key[\t ].*|key \"${CLIENT_CONFIG_DIR}\\\\${COMPLETE_NAME}.key\"|" \
+        -e "s|;tls-auth[\t ].*|tls-auth \"${CLIENT_CONFIG_DIR}\\\\ta.key\" 1|" \
+        -e "s|;\(ns-cert-type[\t ].*\)|\1|" \
+        -e 's|\\|\\\\|g' \
+      "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.ovpn"
+
+    command unix2dos "${TEMP_DIR}/openvpn/${COMPLETE_NAME}.ovpn"
+
+    command pushd "${TEMP_DIR}/openvpn"
+    command zip -pr "${KEY_DIR}/clients/${COMPLETE_NAME}-x64.zip" "${DOMAIN_NAME}/" "${COMPLETE_NAME}.ovpn"
+    command popd
+
+    command rm -r "${TEMP_DIR}"
+
+    echo "Client '${CLIENT_NAME}' created in server '${DOMAIN_NAME}':
+Unix configuration:
+    '${KEY_DIR}/clients/${COMPLETE_NAME}.tar.gz' for recent/unsecure OpenVPN (Ubuntu)
+    '${KEY_DIR}/clients/${COMPLETE_NAME}-compat.tar.gz' for old/secure OpenVPN install (Debian)
+    Install it on client with :
+        sudo apt-get install openvpn resolvconf
+        sudo tar --directory /etc -xzf '${COMPLETE_NAME}.tar.gz'
+        sudo /etc/init.d/openvpn start '${COMPLETE_NAME}'
+Mac OS X Tunnelblick configuration:
+    '${KEY_DIR}/clients/${COMPLETE_NAME}-tunnelblick.zip'
+Windows configuration:
+    '${KEY_DIR}/clients/${COMPLETE_NAME}.zip'
+    Unzip it in c:\\Program Files\\OpenVPN\\config\\.
+Windows 64bits configuration:
+    '${KEY_DIR}/clients/${COMPLETE_NAME}-x64.zip'
+    Unzip it in c:\\Program Files (x86)\\OpenVPN\\config\\.
+"
+    exit 0
+    ;;
+
+
+
+  remove-client )
+    # Check if valid number of arguments given (2).
+    command test ${#} -ne 3 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+    CLIENT_NAME="${3}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    pushd "${EASYRSA_PATH}"
+    source "${EASYRSA_PATH}/vars"
+    popd
+
+    source '/etc/openvpn/config/easy-rsa'
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+    COMPLETE_NAME="${CLIENT_NAME}.${DOMAIN_NAME}"
+
+    if [ -z "$(command grep "^${COMPLETE_NAME} " "${KEY_DIR}/clients.list" )" ]; then
+      echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN_NAME}'." >&2
+      exit 1
+    fi  
+
+    command sh "${EASYRSA_PATH}/revoke-full" "${COMPLETE_NAME}"
+
+    command sed -i -e "/^${COMPLETE_NAME} /d" "${KEY_DIR}/clients.list"
+    command rm "${KEY_DIR}/${COMPLETE_NAME}.crt"
+    command rm "${KEY_DIR}/${COMPLETE_NAME}.csr"
+    command rm "${KEY_DIR}/${COMPLETE_NAME}.key"
+    command rm "${KEY_DIR}/clients-configs/${COMPLETE_NAME}"
+    command rm "${KEY_DIR}/clients/${COMPLETE_NAME}.zip"
+    command rm "${KEY_DIR}/clients/${COMPLETE_NAME}.tar.gz"
+
+    exit 0
+    ;;
+
+
+
+  toggle-c2c )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    if [ -n "$(command grep "^;client-to-client" "/etc/openvpn/${DOMAIN_NAME}.conf")" ]; then
+      command sed -i \
+          -e 's/^;client-to-client/client-to-client/' \
+        "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+      echo "Client to client communications enabled for server '${DOMAIN_NAME}'."
+    else
+      command sed -i \
+          -e 's/^client-to-client/;client-to-client/' \
+        "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+      echo "Client to client communications disabled for server '${DOMAIN_NAME}'."
+    fi
+
+    exit 0
+    ;;
+
+
+
+  toggle-nat )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    # Detect ETH0 IP.
+    ETH0_RANGE=$(command ifconfig eth0 \
+        | command grep "inet " \
+        | command sed -e 's/.*inet [^:]*:\([^ ]*\) .*/\1/' \
+        | command cut --delimiter=. --fields=1-3)
+
+    if [ -z "$(command grep '^push.*"route' "/etc/openvpn/${DOMAIN_NAME}.conf")" ]; then
+      echo "push \"route $ETH0_RANGE.0 255.255.255.0\"; Allow access to local network." \
+        >>  "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+      echo "Local network access enabled for server '${DOMAIN_NAME}'."
+    else
+      command sed -i \
+          -e '/[ \t]*push[ \t]*"route.*/d' \
+        "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+      echo "Local network access disabled for server '${DOMAIN_NAME}'."
+    fi
+
+    toggle_iptables_nat "${DOMAIN_NAME}"
+
+    exit 0
+    ;;
+
+
+
+  toggle-gateway )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    if [ -n "$(command grep '^;.*push.*"redirect-gateway' "/etc/openvpn/${DOMAIN_NAME}.conf")" ]; then
+      command sed -i \
+          -e 's/;[ \t]*\(push[ \t]*"redirect-gateway.*\)$/\1/g' \
+        "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+      echo "Internet gateway enabled for server '${DOMAIN_NAME}'."
+    else
+      command sed -i \
+          -e 's/[ \t]*\(push[ \t]*"redirect-gateway.*\)$/;\1/g' \
+        "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+      echo "Internet gateway disabled for server '${DOMAIN_NAME}'."
+    fi
+
+    toggle_iptables_nat "${DOMAIN_NAME}"
+
+    exit 0
+    ;;
+
+
+
+  enable-bind )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+    # Loading server details.
+    source "${KEY_DIR}/server-details"
+
+    if [ ! -d '/etc/bind/' ]; then
+      # install bind if necessary.
+      command apt-get install -y bind9
+    fi
+
+    REVERSE_IP_RANGE=$(echo ${SERVER_IP_RANGE} \
+        | command sed -e 's/\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\3\.\2\.\1/')
+    if [ -z "$(grep "${DOMAIN_NAME}" '/etc/bind/named.conf.local')" ]; then
+      echo "
+# OpenVPN configuration
+zone \"${REVERSE_IP_RANGE}.in-addr.arpa\" in {
+        type master;
+        file \"/etc/bind/db.${SERVER_IP_RANGE}\";
+};
+
+zone \"${DOMAIN_NAME}\" in {
+        type master;
+        file \"/etc/bind/db.${DOMAIN_NAME}\";
+};" > "/etc/bind/${DOMAIN_NAME}.conf.local"
+
+      echo "include \"/etc/bind/${DOMAIN_NAME}.conf.local\";" \
+          >> '/etc/bind/named.conf.local'
+
+
+      command echo "push \"dhcp-option DOMAIN ${DOMAIN_NAME}\"
+push \"dhcp-option DNS ${SERVER_IP_RANGE}.1\"" \
+         >> "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      build_bind_config "${DOMAIN_NAME}"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+
+      echo "DNS server enabled for server '${DOMAIN_NAME}'."
+
+    else
+      echo "Nothing to be done."
+    fi
+
+    exit 0
+    ;;
+
+
+
+  disable-bind )
+    # Check if valid number of arguments given (1).
+    command test ${#} -ne 2 && usage 1
+
+    check_openvpn_env
+
+    DOMAIN_NAME="${2}"
+
+    check_openvpn_server "${DOMAIN_NAME}"
+
+    export KEY_DIR="/etc/openvpn/config/${DOMAIN_NAME}"
+
+    # Loading server details.
+    source "${KEY_DIR}/server-details"
+
+    if [ -e "/etc/bind/${DOMAIN_NAME}.conf.local" ]; then
+      command rm "/etc/bind/${DOMAIN_NAME}.conf.local"
+      command rm "/etc/bind/db.${SERVER_IP_RANGE}"
+      command rm "/etc/bind/db.${DOMAIN_NAME}"
+
+      command sed -i \
+          -e "/${DOMAIN_NAME}.conf.local/d" \
+        '/etc/bind/named.conf.local'
+
+      /etc/init.d/bind9 reload
+
+      command sed -i \
+          -e '/^[ \t]*push "dhcp-option.*/d' \
+        "/etc/openvpn/${DOMAIN_NAME}.conf"
+
+      /etc/init.d/openvpn restart "${DOMAIN_NAME}"
+
+      echo "DNS server disabled for server '${DOMAIN_NAME}'."
+
+    else
+      echo "Nothing to be done."
+    fi
+
+    exit 0
+    ;;
+
+
+
+  * )
+    echo "Error : '${1}' is not a valid action." >&2
+    usage 1
+    ;;
+esac
+
+exit 0
+
