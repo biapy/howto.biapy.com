@@ -555,6 +555,8 @@ ${SERVER_IP_RANGE}.1 server.${DOMAIN_NAME}"
     exit 0
     ;;
 
+
+
   build-client-config )
     # Check if valid number of arguments given (2).
     command test ${#} -ne 3 && usage 1
@@ -643,8 +645,6 @@ down ${CLIENT_CONFIG_DIR}/update-resolv-conf" \
         -e "s|^key[\t ].*|key ${COMPLETE_NAME}.key|" \
         -e "s|;tls-auth[\t ].*|tls-auth ta.key 1|" \
         -e "s|;\(ns-cert-type[\t ].*\)|\1|" \
-        -e 's/^;\(user[ \t]*.*\)/\1/' \
-        -e 's/^;\(group[ \t]*.*\)/\1/' \
       "${TEMP_CLIENT_DIR}/${COMPLETE_NAME}.conf"
 
     command pushd "${TEMP_DIR}"
