@@ -575,6 +575,9 @@ ${SERVER_IP_RANGE}.1 server.${DOMAIN_NAME}"
 
     COMPLETE_NAME="${CLIENT_NAME}.${DOMAIN_NAME}"
 
+    # Loading server details.
+    source "${KEY_DIR}/server-details"
+
     if [ -z "$(command grep "^${COMPLETE_NAME} " "${KEY_DIR}/clients.list" )" ]; then
       echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN_NAME}'." >&2
       exit 1
