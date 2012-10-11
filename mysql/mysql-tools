@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.1.3"
+VERSION="1.1.4"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -20,11 +20,11 @@ Usage :
       [ --user-prefix='user_prefix' ] [ --host='user_host' ] [ --auto-hosts ]
       [ --user='mysql_user' ] [ --password='mysql_password' ]
       [ --mysql='mysql' ] [ --server='localhost' ] [ --with-ssh[=root] ]
-      [ --create database_name |
-        --drop database_name |
-        --empty database_name |
-        --adduser=user_name [ --grant='ALL' ] [ database_name ]
-        --deluser=user_name
+      [ --create='database_name' |
+        --drop='database_name' |
+        --empty='database_name' |
+        --adduser='user_name' [ --grant='ALL' ] [ --database='database_name' ]
+        --deluser='user_name'
       ]
 
   Available options are :
@@ -41,6 +41,7 @@ Usage :
     * --auto-hosts     : Automaticaly compute created user hosts.
     * --db-prefix | --dp    : The database name prefix.
     * --user-prefix | --up  : The username prefix.
+    * --database | --db     : The database name.
 
   Available actions are :
     * --help          : Display this message.
@@ -376,20 +377,48 @@ while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e add
   case "${OPTOPT}" in
     create | c )
       ACTION="create"
+
+      if [ -n "${OPTARG}" ]; then
+        BASE_DB_NAME="${OPTARG}"
+      fi
       ;;
 
     drop | d )
       MANDATORY_PASSWORD="true"
       ACTION="drop"
+
+      if [ -n "${OPTARG}" ]; then
+        BASE_DB_NAME="${OPTARG}"
+      fi
       ;;
 
     empty | e )
       MANDATORY_PASSWORD="true"
       ACTION="empty"
+
+      if [ -n "${OPTARG}" ]; then
+        BASE_DB_NAME="${OPTARG}"
+      fi
       ;;
 
     db-prefix | dp )
       BASE_DB_PREFIX="${OPTARG}"
+      ;;
+
+    database | db )
+      if [ -n "${OPTARG}" ]; then
+        case "${ACTION}" in
+          "create" | "drop" | "empty" )
+            # ignore database option for these actions.
+            if [ -z "${BASE_DB_NAME}" ]; then
+              BASE_DB_NAME="${OPTARG}"
+            fi
+            ;;
+          * )
+            BASE_DB_NAME="${OPTARG}"
+            ;;
+        esac
+      fi
       ;;
 
     user-prefix | up )
@@ -463,8 +492,6 @@ while getoptex "help create c db-prefix: dp: user-prefix: up: drop d empty e add
 done
 
 shift $[OPTIND-1]
-
-BASE_DB_NAME="${1}"
 
 if [ -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" ]; then
   echo "Error: Database name is missing." >&2
@@ -554,11 +581,12 @@ case "${BASE_DB_NAME}" in
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
-    MYSQL_USER="${2}"
-    MYSQL_PASSWORD="${3}"
+    USER_NAME="${2}"
+    USER_PASSWORD="${3}"
     ALLOWED_HOSTS="localhost ${4}"
     ROOT_PASSWORD="${5}"
 
+    ${0} --password="${ROOT_PASSWORD}" --host="${ALLOWED_HOSTS}" --adduser "${USER_NAME}"
     ;;
 
   clear-db )
@@ -661,7 +689,7 @@ if [ "${WITH_SSH}" = "true" \
   # We use SSH access to remote server if mysql access failed.
   if ! check_mysql "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
                 "${MYSQL_USER}" "${MYSQL_PASSWORD}" "" "true"; then
-    if [ "${MYSQL_PASSWORD}" = "false" ]; then
+    if [ "${MYSQL_PASSWORD}" = "true" ]; then
       command read -p "Enter password: " -s MYSQL_PASSWORD
     fi
 
@@ -670,6 +698,9 @@ if [ "${WITH_SSH}" = "true" \
     case "${ACTION}" in
       adduser | deluser )
         ACTION_ARGUMENT="--${ACTION}='${BASE_USER_NAME}'"
+        ;;
+      create | drop | empty )
+        ACTION_ARGUMENT="--${ACTION}='${BASE_DB_NAME}'"
         ;;
       * )
         if [ -n "${ACTION}" ]; then
@@ -681,7 +712,7 @@ if [ "${WITH_SSH}" = "true" \
     ARGUMENTS=" --mysql='${MYSQL_CLIENT}' --server='localhost' \\
 --user='${MYSQL_USER}' --password='${MYSQL_PASSWORD}' --host='${USER_HOSTS}' \\
 --db-prefix='${BASE_DB_PREFIX}' --user-prefix='${BASE_USER_PREFIX}' \\
---grant='${PRIVILEGES}' ${ACTION_ARGUMENT} '${BASE_DB_NAME}'"
+--grant='${PRIVILEGES}' --database='${BASE_DB_NAME}' ${ACTION_ARGUMENT}"
 
     # Running mysql-tools on remote server.
     echo "

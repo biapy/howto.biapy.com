@@ -3,28 +3,59 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-
+VERSION="1.1.0"
 
 SCRIPT_NAME="$(command basename ${0})"
 
 # Print this script help.
 function usage {
-  command echo "
+  command echo "PostgreSQL Tools v${VERSION}
 This tool ease PostgreSQL server administration from command line.
 
 Usage :
 
-  ${SCRIPT_NAME} create-db database_name [ "allowed hosts" ]
-  ${SCRIPT_NAME} create-domain-db www.domain-name.com [ "allowed hosts" ]
-  ${SCRIPT_NAME} create-privileged-user username [ "allowed hosts" ]
-  ${SCRIPT_NAME} create-user username [ "allowed hosts" ]
+  ${SCRIPT_NAME} [ --db-prefix='database_prefix' ]
+      [ --user-prefix='user_prefix' ] [ --host='user_host' ] [ --auto-hosts ]
+      [ --user='pgsql_user' ] [ --password='pgsql_password' ]
+      [ --psql='psql' ] [ --server='localhost' ] [ --with-ssh[=postgres] ]
+      [ --create='database_name' |
+        --drop='database_name' |
+        --empty='database_name' |
+        --adduser='user_name' [ --grant='ALL' ] [ --database='database_name' ] |
+        --deluser='user_name'
+      ]
 
-  * create-db : Create a database and its user.
-  * create-domain-db : Create a database for domain
-  * create-privileged-user : Create a user that can create databases.
-  * create-user : Create a user without priviledges.
+  Available options are :
+    * --psql | -m     : Specify the psql client command to use
+                        (default to psql).
+    * --server | -s   : Specify the pgsql server to connect to
+                        (default to localhost).
+    * --user | -u     : The user used to run the SQL queries (default to postgres).
+    * --password | -p : The password of the user running the queries.
+    * --with-ssh | -r : If server is remote, pgsql-tools is run on the remote
+                        server via ssh. This is always on.
+                        This option allow to set the SSH user to use (default
+                        to root).
+    * --host | -h     : The created user host (multiple occurence allowed).
+    * --auto-hosts    : Automaticaly compute created user hosts.
+    * --db-prefix | --dp    : The database name prefix.
+    * --user-prefix | --up  : The username prefix.
+    * --database | --db     : The database name.
+
+  Available actions are :
+    * --help          : Display this message.
+    * --create | -c   : Create a database and its user.
+    * --empty | -e    : Drop all tables of a database.
+    * --drop | -d     : Destroy the database and its user.
+    * --adduser | -a  : Create a unprivilegied user, or a user for a database.
+    * --grant | -g    : In conjunction with --adduser, set the create user
+                        privileges (default: ALL) (multiple occurence allowed).
+                        see: http://www.postgresql.org/docs/8.4/static/sql-grant.html
+    * --deluser       : Delete a pgsql user.
+
 "
-  exit 1
+
+  test -n "${1}" && exit ${1}
 } # usage
 
 
@@ -37,8 +68,50 @@ Usage :
 REALPATH=""
 function realpath {
   command test ${#} -ne 1 && exit 1
-  REALPATH=$(/bin/readlink -f "${1}")
+  REALPATH="$(/bin/readlink -f "${1}")"
 } # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=""
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
+
+
+
+# Read the interface IP.
+#
+# @param string $interface The network interface (for example: eth0).
+#
+# @return A IP address.
+INTERFACE_IP=""
+function interface_ip {
+  command test ${#} -ne 1 && exit 1
+
+  INTERFACE="${1}"
+
+  INTERFACE_IP="$(command ifconfig "${INTERFACE}" \
+            | command grep "inet " \
+            | command sed -e 's/.*inet [^:]*:\([^ ]*\).*/\1/')"
+} # interface_ip
 
 
 
@@ -52,33 +125,11 @@ function check_binary {
   command test ${#} -ne 2 && exit 1
 
   # Test the binary presence.
-  if [ -z "$(which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'."
+  if [ -z "$(command which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
     exit 1
   fi
 } # check_binary
-
-
-
-# Check if MySQL connection is working
-#
-# @param string $mysql_host The MySQL host.
-# @param string $mysql_user The MySQL user.
-# @param string $mysql_password The MySQL password.
-# @param string $mysql_db The MySQL DB.
-#
-# @return Exit with error if connection to MySQL fail.
-function check_mysql {
-  command test ${#} -ne 4 && exit 1
-
-  # Test the MySQL connection.
-  if ! command mysql --execute="SELECT 1" \
-            --host="${1}" --user="${2}" --password="${3}" \
-            "${4}" 2>&1 > /dev/null; then
-    echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters."
-    exit 1
-  fi
-} # check_mysql
 
 
 
@@ -90,6 +141,182 @@ function pg_hba_conf {
   PG_HBA_CONF="$(command find '/etc/postgresql' -name 'pg_hba.conf' \
       | command head -n 1)"
 } # pg_hba_conf
+
+
+
+# Append database credentials for a user to pg_hba.conf.
+#
+# @param string $db_name The database name.
+# @param string $db_user The database user.
+# @param string $user_hosts The allowed hosts.
+function append_pg_hba_conf {
+  command test ${#} -ne 3 && exit 1
+
+  DB_NAME="${1}"
+  DB_USER="${2}"
+  USER_HOSTS="${3}"
+
+  # Fetch the pg_hba.conf path.
+  pg_hba_conf
+
+  PG_HBA_CONTENTS=""
+
+  if [ -e "${PG_HBA_CONF}" ]; then
+    for ALLOWED_HOST in ${USER_HOSTS}; do
+
+      host_ipv4 "${ALLOWED_HOST}"
+      if [ -n "${HOST_IPV4}" ]; then
+        PG_HBA_CONTENTS="${PG_HBA_CONTENTS}
+# Allow connection to ${DB_NAME} from ${ALLOWED_HOST} :
+host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV4}/32    md5"
+      fi
+
+      host_ipv6 "${ALLOWED_HOST}"
+      if [ -n "${HOST_IPV6}" ]; then
+        PG_HBA_CONTENTS="${PG_HBA_CONTENTS}
+# Allow connection to ${DB_NAME} from ${ALLOWED_HOST} :
+host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV6}/128    md5"
+      fi
+    done
+
+    if [ "${USER}" = "root" ]; then
+      echo "${PG_HBA_CONTENTS}" >> "${PG_HBA_CONF}"
+      command /etc/init.d/postgresql reload
+    else
+      command sudo /bin/bash -c "echo '${PG_HBA_CONTENTS}' >> '${PG_HBA_CONF}'
+        command /etc/init.d/postgresql reload"
+    fi
+  fi
+} # append_pg_hba_conf
+
+
+
+# Remove database credentials from pg_hba.conf.
+#
+# @param string $db_name The database name.
+function cleanup_pg_hba_conf {
+  command test ${#} -ne 1 && exit 1
+
+  VALUE_TYPE="${1}"
+  VALUE="${2}"
+
+  # Fetch the pg_hba.conf path.
+  pg_hba_conf
+
+  case "${VALUE_TYPE}" in
+    "database" )
+      REGEXP="/^host[\t ]*${VALUE}[\t ]*.*/d"
+      COMMENT_REGEXP="/^# Allow connection to ${VALUE}.*/d"
+      ;;
+    "role" )
+      REGEXP="/^host[\t ]*[^\t ]*[\t ]*${VALUE}[\t ]*.*/d"
+      COMMENT_REGEXP="/^# Allow connection to ${VALUE}.*/d"
+      ;;
+  esac
+
+  if [ -e "${PG_HBA_CONF}" ]; then
+    if [ "${USER}" = "root" ]; then
+      command sed -i \
+          -e "${REGEXP}" \
+          -e "${COMMENT_REGEXP}" \
+          "${PG_HBA_CONF}"
+      command /etc/init.d/postgresql reload
+    else
+      command sudo /bin/bash -c "command sed -i \\
+            -e '${REGEXP}' \\
+            -e '${COMMENT_REGEXP}' \\
+            '${PG_HBA_CONF}'
+        command /etc/init.d/postgresql reload"
+    fi
+  fi
+} # cleanup_pg_hba_conf
+
+
+
+# Call PgSQL.
+#
+# @param string $pgsql_host The PgSQL server host.
+# @param string $pgsql_user A PgSQL user.
+# @param string $pgsql_password A PgSQL user password.
+# @param mixed $arg1, $arg2 arguments passed to pgsql command.
+#
+# @return PgSQL command result.
+function pgsql_call {
+  command test ${#} -lt 5 && exit 1
+
+  PGSQL_CALL_CLIENT="${1}"
+  PGSQL_CALL_HOST="${2}"
+  PGSQL_CALL_USER="${3}"
+  PGSQL_CALL_PASSWORD="${4}"
+  shift $[4]
+
+  if [ "${PGSQL_CALL_PASSWORD}" = "false" ]; then
+    "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+        --username="${PGSQL_CALL_USER}" "${@}"
+    RETURN_VALUE="${?}"
+  elif [ "${PGSQL_CALL_PASSWORD}" = "true" ]; then
+    "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+        --username="${PGSQL_CALL_USER}" --password "${@}"
+    RETURN_VALUE="${?}"
+  else
+    PGPASSFILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
+    command chmod go-rw "${PGPASSFILE}"
+    echo "${PGSQL_CALL_HOST}:*:*:${PGSQL_CALL_USER}:${PGSQL_CALL_PASSWORD}" > "${PGPASSFILE}"
+    env LANG="en_US.UTF-8" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+        --username="${PGSQL_CALL_USER}" "${@}"
+    RETURN_VALUE="${?}"
+    command rm "${PGPASSFILE}"
+  fi
+
+  return "${RETURN_VALUE}"
+} # pgsql_call
+
+
+
+# Check if PgSQL connection is working
+#
+# @param string $pgsql_host The PgSQL host.
+# @param string $pgsql_user The PgSQL user.
+# @param string $pgsql_password The PgSQL password.
+# @param string $pgsql_db The PgSQL database (optional).
+# @param string $no_exit "true" to use return values instead of exit (optional).
+#
+# @return Exit with error if connection to PgSQL fail.
+function check_pgsql {
+  command test ${#} -lt 4 && exit 1
+
+  PGSQL_CHECK_CLIENT="${1}"
+  PGSQL_CHECK_HOST="${2}"
+  PGSQL_CHECK_USER="${3}"
+  PGSQL_CHECK_PASSWORD="${4}"
+  PGSQL_CHECK_DB="${5}"
+  NO_EXIT="${6}"
+
+  # Test the PgSQL connection.
+  if [ -n "${PGSQL_CHECK_DB}" ]; then
+    if ! pgsql_call "${PGSQL_CHECK_CLIENT}" "${PGSQL_CHECK_HOST}" \
+          "${PGSQL_CHECK_USER}" "${PGSQL_CHECK_PASSWORD}" \
+          --command="SELECT 1" --dbname="${PGSQL_CHECK_DB}" 1>"/dev/null"; then
+      if [ "${NO_EXIT}" = "true" ]; then
+        return 1
+      fi
+      echo "Error : Unable to connect to PostgreSQL. Please provide valid PostgreSQL connection parameters." >&2
+      exit 1
+    fi
+  else
+    if ! pgsql_call "${PGSQL_CHECK_CLIENT}" "${PGSQL_CHECK_HOST}" \
+          "${PGSQL_CHECK_USER}" "${PGSQL_CHECK_PASSWORD}" \
+          --command="SHOW SERVER_VERSION" 1>"/dev/null"; then
+      if [ "${NO_EXIT}" = "true" ]; then
+        return 2
+      fi
+      echo "Error : Unable to connect to PostgreSQL. Please provide valid PostgreSQL connection parameters." >&2
+      exit 1
+    fi
+  fi
+
+  return 0
+} # check_pgsql
 
 
 
@@ -129,50 +356,128 @@ function host_ipv6 {
 
 
 
-# Download a file from the given URL.
-#
-# @param string $url The URL of the file to download.
-#
-# @return ${DOWNLOAD_FILE} The path to the downloaded file.
-DOWNLOAD_FILE=""
-function download_file {
-  command test ${#} -ne 1 && exit 1
-
-  # Download a file.
-  DOWNLOAD_FILE="$(command mktemp)"
-  command wget --quiet "${1}" \
-      --output-document="${DOWNLOAD_FILE}"
-
-  if [ ! -s "${DOWNLOAD_FILE}" ]; then
-    command rm "${DOWNLOAD_FILE}"
-    echo "Error : Unable to download file from '${1}'."
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let OPTIND || OPTIND=1
+  [ $OPTIND -lt $# ] || return 1
+  shift $OPTIND
+  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
+  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
+  then
+    local o
+    o="-${1#-$OPTOFS}"
+    for opt in ${optlist#;}
+    do
+      OPTOPT="${opt%[;.:]}"
+      unset OPTARG
+      local opttype="${opt##*[^;:.]}"
+      [ -z "$opttype" ] && opttype=";"
+      if [ ${#OPTOPT} -gt 1 ]
+      then # long-named option
+        case $o in
+          "--$OPTOPT")
+            if [ "$opttype" != ":" ]; then return 0; fi
+            OPTARG="$2"
+            if [ -z "$OPTARG" ];
+            then # error: must have an agrument
+              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT";
+              OPTOPT="?"
+              return 1;
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "--$OPTOPT="*)
+            if [ "$opttype" = ";" ];
+            then  # error: must not have arguments
+              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTARG=${o#"--$OPTOPT="}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-$OPTOPT")
+            unset OPTOFS
+            [ "$opttype" != ":" ] && return 0
+            OPTARG="$2"
+            if [ -z "$OPTARG" ]
+            then
+              echo "$0: error: -$OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "-$OPTOPT"*)
+            if [ $opttype = ";" ]
+            then # an option with no argument is in a chain of options
+              OPTOFS="$OPTOFS?" # move to the next option in the chain
+              OPTIND=$[OPTIND-1] # the chain still has other options
+              return 0
+            else
+              unset OPTOFS
+              OPTARG="${o#-$OPTOPT}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage
     exit 1
-  fi
-} # download_file
-
-
-
-# Download and uncompress a tgz file from the given URL.
-#
-# @param string $url The URL of the file to download.
-#
-# @return ${DOWNLOAD_TGZ} The path to the extracted content.
-DOWNLOAD_TGZ=""
-function download_tgz {
-  command test ${#} -ne 1 && exit 1
-
-  download_file "${1}"
-
-  # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TGZ="$(command mktemp -d)"
-  command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
-  command rm "${DOWNLOAD_FILE}"
-
-  if [ $(command ls -1 --all "${DOWNLOAD_TGZ}" | command wc --lines) -eq 0 ]; then
-    echo "Error : unable to untar file downloaded from '${1}'."
-    exit 1
-  fi
-} # download_tgz
+  fi; fi
+  OPTOPT="?"
+  unset OPTARG
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
+  while [ -n "$l" ]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [ -n "${l%%[^:.;]*}" ]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo $r
+}
+function getopt()
+{
+  local optlist=`optlistex "$1"`
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
 
 
 
@@ -181,216 +486,517 @@ check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
-check_binary "psql" "postgresql-client"
 check_binary "apg" "apg"
-check_binary "wget" "wget"
+check_binary "ssh" "openssh-client"
 
-# Check if at least one args given.
-command test ${#} -eq 0 && usage
+# Application defaults
+PSQL_CLIENT="psql"
+PSQL_HOST="localhost"
+# ssh remote control is always on.
+WITH_SSH="true"
+WITH_SSH_USER="root"
 
-case "${1}" in
+BASE_DB_NAME=""
+ACTION=""
+BASE_DB_PREFIX=""
+BASE_USER_PREFIX=""
+DB_PREFIX=""
+USER_PREFIX=""
+BASE_USER_NAME=""
+AUTO_HOSTS="false"
+USER_HOSTS="localhost"
+PSQL_USER="postgres"
+PSQL_PASSWORD="false"
+PRIVILEGES=""
+
+MANDATORY_DB="true"
+MANDATORY_PASSWORD="false"
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. psql: m: server: s: with-ssh. r. auto-hosts database: db:" "${@}"; do
+  # Options debuging.
+  # echo "Option <${OPTOPT}> has an arg <${OPTARG}>}"
+
+  case "${OPTOPT}" in
+    create | c )
+      MANDATORY_PASSWORD="true"
+      ACTION="create"
+
+      if [ -n "${OPTARG}" ]; then
+        BASE_DB_NAME="${OPTARG}"
+      fi
+      ;;
+
+    drop | d )
+      MANDATORY_PASSWORD="true"
+      ACTION="drop"
+
+      if [ -n "${OPTARG}" ]; then
+        BASE_DB_NAME="${OPTARG}"
+      fi
+      ;;
+
+    empty | e )
+      MANDATORY_PASSWORD="true"
+      ACTION="empty"
+
+      if [ -n "${OPTARG}" ]; then
+        BASE_DB_NAME="${OPTARG}"
+      fi
+      ;;
+
+    db-prefix | dp )
+      BASE_DB_PREFIX="${OPTARG}"
+      ;;
+
+    database | db )
+      if [ -n "${OPTARG}" ]; then
+        case "${ACTION}" in
+          "create" | "drop" | "empty" )
+            # ignore database option for these actions.
+            if [ -z "${BASE_DB_NAME}" ]; then
+              BASE_DB_NAME="${OPTARG}"
+            fi
+            ;;
+          * )
+            BASE_DB_NAME="${OPTARG}"
+            ;;
+        esac
+      fi
+      ;;
+
+    user-prefix | up )
+      BASE_USER_PREFIX="${OPTARG}"
+      ;;
+
+    adduser | a )
+      BASE_USER_NAME="${OPTARG}"
+      ACTION="adduser"
+      MANDATORY_DB="false"
+      ;;
+
+    grant | g )
+      if [ -n "${OPTARG}" ]; then
+        PRIVILEGES="${PRIVILEGES},${OPTARG}"
+      fi
+      ;;
+
+    deluser )
+      BASE_USER_NAME="${OPTARG}"
+      ACTION="deluser"
+      MANDATORY_PASSWORD="true"
+      MANDATORY_DB="false"
+      ;;
+
+    host | h )
+      if [ -n "${OPTARG}" ]; then
+        USER_HOSTS="${USER_HOSTS} ${OPTARG}"
+      fi
+      ;;
+
+    auto-hosts )
+      AUTO_HOSTS="true"
+      ;;
+
+    server | s )
+      if [ -n "${OPTARG}" ]; then
+        PSQL_HOST="${OPTARG}"
+      fi
+      ;;
+
+    psql | m )
+      if [ -n "${OPTARG}" ]; then
+        PSQL_CLIENT="${OPTARG}"
+      fi
+      ;;
+
+    with-ssh | r )
+      WITH_SSH="true"
+      if [ -n "${OPTARG}" ]; then
+        WITH_SSH_USER="${OPTARG}"
+      fi
+      ;;
+
+    user | u)
+      PSQL_USER="${OPTARG}"
+      ;;
+
+    password | p)
+      PSQL_PASSWORD="${OPTARG}"
+
+      if [ -z "${PSQL_PASSWORD}" ]; then
+        PSQL_PASSWORD="true"
+      fi
+      ;;
+
+    help | * )
+      usage
+      exit 0
+      ;;
+  esac
+done
+
+shift $[OPTIND-1]
+
+if [ -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" ]; then
+  echo "Error: Database name is missing." >&2
+  usage 1
+fi
+
+
+
+# Check PSQL_CLIENT existance.
+if [[ "${PSQL_CLIENT}" =~ "/" ]]; then
+  # PSQL_CLIENT is a path.
+  realpath_check "${PSQL_CLIENT}"
+  PSQL_CLIENT="${REALPATH}"
+else
+  # PSQL_CLIENT is a command.
+  PSQL_CLIENT_PATH="$(command which "${PSQL_CLIENT}")"
+  if [ -z "${PSQL_CLIENT_PATH}" ]; then
+    echo "Error: can not find '${PSQL_CLIENT}'." >&2
+    exit 1
+  fi
+  PSQL_CLIENT="${PSQL_CLIENT_PATH}"
+fi
+
+
+
+# Retrocompatibility.
+case "${BASE_DB_NAME}" in
+  create-db )
+    # Check if valid number of arguments given.
+    command test ${#} -lt 2 && usage 1
+
+    PSQL_DB="${2}"
+    ALLOWED_HOSTS="${3}"
+    ROOT_PASSWORD="${4}"
+
+    ${0} --host="${ALLOWED_HOSTS}" --password="${ROOT_PASSWORD}" --create "${PSQL_DB}"
+    exit 0
+    ;;
 
   create-domain-db )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
     DOMAIN="${2}"
     ALLOWED_HOSTS="${3}"
-
-    PGSQL_DB=$(echo "${DOMAIN}" | command tr '[a-z].-' '[A-Z]__')
-
-    ${0} create-db "${PGSQL_DB}" "${ALLOWED_HOSTS}"
-
-    exit 0
-    ;;
-
-
-
-  create-db )
-    # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
-
-    PGSQL_HOST="localhost"
-    PGSQL_DB="${2}"
-    ALLOWED_HOSTS="${3}"
     ROOT_PASSWORD="${4}"
 
-    PGSQL_USER=$(command echo "${PGSQL_DB}" \
-    | command tr '[A-Z]' '[a-z]')
-    PGSQL_PASSWORD=$(command apg -q -a  0 -n 1 -M NCL)
+    PSQL_DB=$(echo "${DOMAIN//[^_0-9A-Za-z]/_}" | command tr '[a-z]' '[A-Z]')
 
-    # Fetch the pg_hba.conf path.
-    pg_hba_conf
-
-
-    COMMAND="command createuser --no-superuser \\
-          --no-createdb --no-createrole --login '${PGSQL_USER}';
-        command psql -c \"ALTER ROLE \\\"${PGSQL_USER}\\\" PASSWORD '${PGSQL_PASSWORD}'\";
-        command createdb --encoding UTF8 \\
-          --owner '${PGSQL_USER}' '${PGSQL_DB}';"
-
-    command su 'postgres' -c "${COMMAND}"
-
-
-    if [ -e "${PG_HBA_CONF}" ]; then
-      for ALLOWED_HOST in ${ALLOWED_HOSTS}; do
-
-        host_ipv4 "${ALLOWED_HOST}"
-        if [ -n "${HOST_IPV4}" ]; then
-          echo "
-  # Allow connection to ${PGSQL_DB} from ${ALLOWED_HOST} :
-  host    ${PGSQL_DB}    ${PGSQL_USER}    ${HOST_IPV4}/32    md5" \
-              >> "${PG_HBA_CONF}"
-        fi
-
-        host_ipv6 "${ALLOWED_HOST}"
-        if [ -n "${HOST_IPV6}" ]; then
-          echo "
-  # Allow connection to ${PGSQL_DB} from ${ALLOWED_HOST} :
-  host    ${PGSQL_DB}    ${PGSQL_USER}    ${HOST_IPV6}/128    md5" \
-              >> "${PG_HBA_CONF}"
-        fi
-
-      done
-    fi
-
-    command /etc/init.d/postgresql reload
-
-    command echo "# Les paramètres d'accès à votre base de données sont :
-# Hôte
-PGSQL_HOST=localhost
-# Nom de la base de données
-PGSQL_DB=${PGSQL_DB}
-# Identifiant
-PGSQL_USER=${PGSQL_USER}
-# Mot de passe
-PGSQL_PASSWORD=${PGSQL_PASSWORD}"
+    ${0} --host="${ALLOWED_HOSTS}" --password="${ROOT_PASSWORD}" --create "${PSQL_DB}"
     exit 0
     ;;
-
-
-
-  create-privileged-user )
-    # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
-
-    PGSQL_HOST="localhost"
-    PGSQL_USER="${2}"
-    ALLOWED_HOSTS="${3}"
-    ROOT_PASSWORD="${4}"
-
-    PGSQL_PASSWORD=$(command apg -q -a  0 -n 1 -M NCL)
-
-    # Fetch the pg_hba.conf path.
-    pg_hba_conf
-
-
-    COMMAND="command createuser --no-superuser \\
-          --createdb --no-createrole --login '${PGSQL_USER}';
-        command psql -c \"ALTER ROLE \\\"${PGSQL_USER}\\\" PASSWORD '${PGSQL_PASSWORD}'\";"
-
-    command su 'postgres' -c "${COMMAND}"
-
-
-    if [ -e "${PG_HBA_CONF}" ]; then
-      for ALLOWED_HOST in ${ALLOWED_HOSTS}; do
-
-        host_ipv4 "${ALLOWED_HOST}"
-        if [ -n "${HOST_IPV4}" ]; then
-          echo "
-# Allow connection to all databases from ${ALLOWED_HOST} :
-host    all    ${PGSQL_USER}    ${HOST_IPV4}/32    md5" \
-              >> "${PG_HBA_CONF}"
-        fi
-
-        host_ipv6 "${ALLOWED_HOST}"
-        if [ -n "${HOST_IPV6}" ]; then
-          echo "
-# Allow connection to all databases from ${ALLOWED_HOST} :
-host    all    ${PGSQL_USER}    ${HOST_IPV6}/128    md5" \
-              >> "${PG_HBA_CONF}"
-        fi
-
-      done
-    fi
-
-    command /etc/init.d/postgresql reload
-
-    command echo "# Les paramètres d'accès de l'utilisateur privilégié sont :
-# Hôte
-PGSQL_HOST=localhost
-# Identifiant
-PGSQL_USER=${PGSQL_USER}
-# Mot de passe
-PGSQL_PASSWORD=${PGSQL_PASSWORD}"
-
-    exit 0
-    ;;
-
-
 
   create-user )
     # Check if valid number of arguments given.
-    command test ${#} -lt 2 && usage
+    command test ${#} -lt 2 && usage 1
 
-    PGSQL_HOST="localhost"
-    PGSQL_USER="${2}"
-    ALLOWED_HOSTS="${3}"
-    ROOT_PASSWORD="${4}"
+    PSQL_USER="${2}"
+    PSQL_PASSWORD="${3}"
+    ALLOWED_HOSTS="localhost ${4}"
+    ROOT_PASSWORD="${5}"
 
-    PGSQL_PASSWORD=$(command apg -q -a  0 -n 1 -M NCL)
+    ${0} --password="${ROOT_PASSWORD}" --host="${ALLOWED_HOSTS}" --adduser "${USER_NAME}"
+    ;;
 
-    # Fetch the pg_hba.conf path.
-    pg_hba_conf
+  create-privileged-user )
+    # Check if valid number of arguments given.
+    command test ${#} -lt 2 && usage 1
+
+    PSQL_USER="${2}"
+    PSQL_PASSWORD="${3}"
+    ALLOWED_HOSTS="localhost ${4}"
+    ROOT_PASSWORD="${5}"
+
+    ${0} --password="${ROOT_PASSWORD}" --host="${ALLOWED_HOSTS}" --adduser "${USER_NAME}"
+    ;;
+esac
 
 
-    COMMAND="command createuser --no-superuser \\
-          --no-createdb --no-createrole --login '${PGSQL_USER}';
-        command psql -c \"ALTER ROLE \\\"${PGSQL_USER}\\\" PASSWORD '${PGSQL_PASSWORD}'\";"
 
-    command su 'postgres' -c "${COMMAND}"
+# Compute final db name.
+DB_NAME=""
+if [ -n "${BASE_DB_PREFIX}" ]; then
+  if [ -z "${BASE_USER_PREFIX}" ]; then
+    BASE_USER_PREFIX="$(command echo "${BASE_DB_PREFIX}" | command cut --bytes=1)"
+  fi
+
+  DB_PREFIX="${BASE_DB_PREFIX//[^_0-9A-Za-z]/-}_"
+fi
+if [ -n "${BASE_USER_PREFIX}" ]; then
+  USER_PREFIX="${BASE_USER_PREFIX//[^_0-9A-Za-z]/-}_"
+fi
+
+DB_NAME="${DB_PREFIX}${BASE_DB_NAME//[^_0-9A-Za-z]/-}"
+
+# Compute final db user name.
+if [ -n "${BASE_USER_NAME}" ]; then
+  DB_USER="$(command echo "${USER_PREFIX//[^_0-9A-Za-z]/-}${BASE_USER_NAME//[^_0-9A-Za-z]/-}" \
+  | command tr '[A-Z]' '[a-z]')"
+else
+  DB_USER="$(command echo "${USER_PREFIX//[^_0-9A-Za-z]/-}${BASE_DB_NAME//[^_0-9A-Za-z]/-}" \
+  | command tr '[A-Z]' '[a-z]')"
+fi
+DB_PASSWORD="$(command apg -q -a  0 -n 1 -M NCL)"
+
+# set default grant privileges.
+if [ -z "${PRIVILEGES}" ]; then
+  PRIVILEGES="ALL"
+fi
 
 
-    if [ -e "${PG_HBA_CONF}" ]; then
-      for ALLOWED_HOST in ${ALLOWED_HOSTS}; do
+# Ask for password if none given.
+if [ "${MANDATORY_PASSWORD}" = "true" \
+    -a "${PSQL_PASSWORD}" = "true" ]; then
+  command read -p "Enter password for user ${PSQL_USER}: " -s PSQL_PASSWORD
+fi
 
-        host_ipv4 "${ALLOWED_HOST}"
-        if [ -n "${HOST_IPV4}" ]; then
-          echo "
-# Allow connection to template1 from ${ALLOWED_HOST} :
-host    template1    ${PGSQL_USER}    ${HOST_IPV4}/32    md5" \
-              >> "${PG_HBA_CONF}"
-        fi
 
-        host_ipv6 "${ALLOWED_HOST}"
-        if [ -n "${HOST_IPV6}" ]; then
-          echo "
-# Allow connection to template1 from ${ALLOWED_HOST} :
-host    template1    ${PGSQL_USER}    ${HOST_IPV6}/128    md5" \
-              >> "${PG_HBA_CONF}"
-        fi
 
-      done
+# Compute user hosts for remote access.
+if [ "${AUTO_HOSTS}" = "true" \
+    -a "${MYSQL_HOST}" != "localhost" \
+    -a "${MYSQL_HOST}" != "127.0.0.1" ]; then
+  USER_HOSTS="${USER_HOSTS} $(command hostname) $(command hostname --fqdn)"
+  interface_ip "eth0"
+  if [ -n "${INTERFACE_IP}" ]; then
+    USER_HOSTS="${USER_HOSTS} ${INTERFACE_IP}"
+  fi
+fi
+
+
+
+# Check PgSQL connection
+if [ "${WITH_SSH}" = "true" \
+    -a "${PSQL_HOST}" != "localhost" \
+    -a "${PSQL_HOST}" != "127.0.0.1" ]; then
+  # We use SSH access to remote server if pgsql access failed.
+  if [ "${MYSQL_PASSWORD}" = "true" ]; then
+    command read -p "Enter password for user ${PSQL_USER}: " -s PSQL_PASSWORD
+  fi
+
+  # Building remote pgsql-tools arguments list.
+  ACTION_ARGUMENT=""
+  case "${ACTION}" in
+    adduser | deluser )
+      ACTION_ARGUMENT="--${ACTION}='${BASE_USER_NAME}'"
+      ;;
+    create | drop | empty )
+      ACTION_ARGUMENT="--${ACTION}='${BASE_DB_NAME}'"
+      ;;
+    * )
+      if [ -n "${ACTION}" ]; then
+        ACTION_ARGUMENT="--${ACTION}"
+      fi
+      ;;
+  esac
+
+  ARGUMENTS=" --psql='${PSQL_CLIENT}' --server='localhost' \\
+--user='${PSQL_USER}' --password='${PSQL_PASSWORD}' --host='${USER_HOSTS}' \\
+--db-prefix='${BASE_DB_PREFIX}' --user-prefix='${BASE_USER_PREFIX}' \\
+--grant='${PRIVILEGES}' --database='${BASE_DB_NAME}' ${ACTION_ARGUMENT}"
+
+  # Running pgsql-tools on remote server.
+  echo "
+Failed to connect to remove PgSQL server using ${PSQL_CLIENT} client.
+Establishing SSH connection to '${WITH_SSH_USER}@${PSQL_HOST}'..." >&2
+  if command ssh "${WITH_SSH_USER}"@"${PSQL_HOST}" \
+      "command pgsql-tools ${ARGUMENTS}"; then
+    exit 0
+  else
+    exit 1
+  fi
+else
+  check_pgsql "${PSQL_CLIENT}" "${PSQL_HOST}" \
+              "${PSQL_USER}" "${PSQL_PASSWORD}"
+fi
+
+
+
+case "${ACTION}" in
+  create )
+    # Creating role.
+    SQL_QUERY="CREATE ROLE \"${DB_USER}\"
+            PASSWORD '${DB_PASSWORD}'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT LOGIN"
+    if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
+      echo "Error: unable to create role '${DB_USER}'" >&2
+      exit 1
     fi
 
-    command /etc/init.d/postgresql reload
+    # Create database.
+    SQL_QUERY="CREATE DATABASE \"${DB_NAME}\"
+            WITH OWNER \"${DB_USER}\" ENCODING 'UTF8';"
+    if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
+      echo "Error: unable to create database '${DB_NAME}'" >&2
+      exit 1
+    fi
 
-    command echo "# Les paramètres d'accès de l'utilisateur privilégié sont :
-# Hôte
+    append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
+
+    command echo "# Database access parameters are :
+# Database server host
 PGSQL_HOST=localhost
-# Identifiant
-PGSQL_USER=${PGSQL_USER}
-# Mot de passe
-PGSQL_PASSWORD=${PGSQL_PASSWORD}"
+# Database name
+PGSQL_DB=${DB_NAME}
+# Database user
+PGSQL_USER=${DB_USER}
+# Database user password
+PGSQL_PASSWORD=${DB_PASSWORD}"
+    exit 0
+    ;;
+
+
+
+  drop )
+    # Drop database.
+    SQL_QUERY="DROP DATABASE IF EXISTS \"${DB_NAME}\""
+    if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
+      echo "Error: unable to drop database '${DB_NAME}'" >&2
+      exit 1
+    fi
+
+    # Drop role.
+    SQL_QUERY="DROP ROLE IF EXISTS \"${DB_USER}\""
+    if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
+      echo "Error: unable to drop role '${DB_USER}'" >&2
+      exit 1
+    fi
+
+    cleanup_pg_hba_conf "database" "${DB_NAME}"
+
+    echo "Database '${DB_NAME}' dropped successfully."
+    exit 0
+    ;;
+
+
+
+  empty )
+    # Compute database emptying query.
+    SQL_QUERY="$(pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --dbname="${DB_NAME}" --command='\d' \
+          --tuples-only --no-align \
+      | command sed -e 's/^\([^|]*\)|\([^|]*\)|\([^|]*\)|.*$/drop \3 if exists \1.\2 cascade;/g')"
+
+    if [ "${SQL_QUERY}" != "No relations found." ]; then
+      if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+            "${PSQL_USER}" "${PSQL_PASSWORD}" \
+            --dbname="${DB_NAME}" --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
+        echo "Error: unable to drop objects from database '${DB_NAME}'." >&2
+        exit 1
+      fi
+    else
+      echo "Database '${DB_NAME}' is already empty." >&2
+      exit 0
+    fi
+
+    echo "Database '${DB_NAME}' emptied successfully."
+    exit 0
+    ;;
+
+
+
+  adduser )
+    # Creating role.
+    SQL_QUERY="CREATE ROLE \"${DB_USER}\"
+            PASSWORD '${DB_PASSWORD}'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT LOGIN"
+
+    if [ -n "${BASE_DB_NAME}" ]; then
+      SQL_QUERY="${SQL_QUERY};
+        GRANT ${PRIVILEGES} ON DATABASE \"${DB_NAME}\"
+            TO \"${DB_USER}\";"
+    fi
+
+    if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
+
+      if [ -z "${BASE_DB_NAME}" ]; then
+        echo "Error: unable to create role '${DB_USER}'." >&2
+      else
+        echo "Error: unable to create role '${DB_USER}' for database '${DB_NAME}'." >&2
+      fi
+
+      exit 1
+    fi
+
+    if [ -z "${BASE_DB_NAME}" ]; then
+      append_pg_hba_conf "*" "${DB_USER}" "${USER_HOSTS}"
+
+      command echo "# User access parameters are :
+# Database server host
+PGSQL_HOST=localhost
+# Database user
+PGSQL_USER=${DB_USER}
+# Database user password
+PGSQL_PASSWORD=${DB_PASSWORD}"
+
+    else
+      append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
+
+        command echo "# Database access parameters are :
+# Database server host
+PGSQL_HOST=localhost
+# Database name
+PGSQL_DB=${DB_NAME}
+# Database user
+PGSQL_USER=${DB_USER}
+# Database user password
+PGSQL_PASSWORD=${DB_PASSWORD}"
+    fi
 
     exit 0
     ;;
 
 
 
+  deluser )
+    # Drop role.
+
+    # Compute revoking query.
+    SQL_QUERY="$(pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --list --tuples-only \
+        | command egrep -v ' *:' \
+        | command cut --delimiter='|' --fields=1 \
+        | command sed -e '/^$/d' -e 's/^[ ]*//g' -e 's/[ ]*$//g' \
+          -e "s/\(.*\)/REVOKE ALL ON DATABASE \"\1\" FROM \"${DB_USER}\";/")"
+
+    SQL_QUERY="${SQL_QUERY}
+      REASSIGN OWNED BY \"${DB_USER}\" TO \"${PSQL_USER}\";
+      DROP OWNED BY \"${DB_USER}\" CASCADE;
+      DROP ROLE IF EXISTS \"${DB_USER}\""
+
+    if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
+          "${PSQL_USER}" "${PSQL_PASSWORD}" \
+          --command="${SQL_QUERY}"; then
+      echo "Error: unable to drop role '${DB_USER}'" >&2
+      exit 1
+    fi
+
+    cleanup_pg_hba_conf "role" "${DB_USER}"
+
+    echo "User '${DB_USER}' successfully deleted."
+    exit 0
+    ;;
+
+
   * )
-    echo "Error : '${1}' is not a valid action."
-    usage
+    echo "Error : '${1}' is not a valid action." >&2
+    usage 1
     ;;
 esac
 
