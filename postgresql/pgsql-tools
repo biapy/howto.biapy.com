@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -21,7 +21,8 @@ Usage :
       [ --create='database_name' |
         --drop='database_name' |
         --empty='database_name' |
-        --adduser='user_name' [ --grant='ALL' ] [ --database='database_name' ] |
+        --adduser='user_name' [ --grant='ALL' ] [ --database='database_name' ]
+                              [ --createdb ] [ --createrole ] [ --superuser ]
         --deluser='user_name'
       ]
 
@@ -41,6 +42,9 @@ Usage :
     * --db-prefix | --dp    : The database name prefix.
     * --user-prefix | --up  : The username prefix.
     * --database | --db     : The database name.
+    * --createdb      : Add database creation privileges to created user.
+    * --createrole    : Add role creation privileges to created user.
+    * --superuser     : Add superuser privileges to created user.
 
   Available actions are :
     * --help          : Display this message.
@@ -509,12 +513,15 @@ USER_HOSTS="localhost"
 PSQL_USER="postgres"
 PSQL_PASSWORD="false"
 PRIVILEGES=""
+USER_CREATEDB="false"
+USER_CREATEROLE="false"
+USER_SUPERUSER="false"
 
 MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. psql: m: server: s: with-ssh. r. auto-hosts database: db:" "${@}"; do
+while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. psql: m: server: s: with-ssh. r. auto-hosts database: db: createdb createrole superuser" "${@}"; do
   # Options debuging.
   # echo "Option <${OPTOPT}> has an arg <${OPTARG}>}"
 
@@ -630,6 +637,18 @@ while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: 
       fi
       ;;
 
+    createdb )
+      USER_CREATEDB="true"
+      ;;
+
+    createrole )
+      USER_CREATEROLE="true"
+      ;;
+
+    superuser )
+      USER_SUPERUSER="true"
+      ;;
+
     help | * )
       usage
       exit 0
@@ -712,7 +731,7 @@ case "${BASE_DB_NAME}" in
     ALLOWED_HOSTS="localhost ${4}"
     ROOT_PASSWORD="${5}"
 
-    ${0} --password="${ROOT_PASSWORD}" --host="${ALLOWED_HOSTS}" --adduser "${USER_NAME}"
+    ${0} --password="${ROOT_PASSWORD}" --host="${ALLOWED_HOSTS}" --adduser "${USER_NAME}" --createdb
     ;;
 esac
 
@@ -795,10 +814,21 @@ if [ "${WITH_SSH}" = "true" \
       ;;
   esac
 
+  OPTIONS=""
+  if [ "${USER_CREATEDB}" = "true" ]; then
+    OPTIONS="${OPTIONS} --createdb"
+  fi
+  if [ "${USER_CREATEROLE}" = "true" ]; then
+    OPTIONS="${OPTIONS} --createrole"
+  fi
+  if [ "${USER_SUPERUSER}" = "true" ]; then
+    OPTIONS="${OPTIONS} --superuser"
+  fi
+
   ARGUMENTS=" --psql='${PSQL_CLIENT}' --server='localhost' \\
 --user='${PSQL_USER}' --password='${PSQL_PASSWORD}' --host='${USER_HOSTS}' \\
 --db-prefix='${BASE_DB_PREFIX}' --user-prefix='${BASE_USER_PREFIX}' \\
---grant='${PRIVILEGES}' --database='${BASE_DB_NAME}' ${ACTION_ARGUMENT}"
+--grant='${PRIVILEGES}' --database='${BASE_DB_NAME}' ${OPTIONS} ${ACTION_ARGUMENT}"
 
   # Running pgsql-tools on remote server.
   echo "
@@ -820,9 +850,26 @@ fi
 case "${ACTION}" in
   create )
     # Creating role.
+    POWERS=""
+    if [ "${USER_CREATEDB}" = "true" ]; then
+      POWERS="${POWERS} CREATEDB"
+    else
+      POWERS="${POWERS} NOCREATEDB"
+    fi
+    if [ "${USER_CREATEROLE}" = "true" ]; then
+      POWERS="${POWERS} CREATEROLE"
+    else
+      POWERS="${POWERS} NOCREATEROLE"
+    fi
+    if [ "${USER_SUPERUSER}" = "true" ]; then
+      POWERS="${POWERS} SUPERUSER"
+    else
+      POWERS="${POWERS} NOSUPERUSER"
+    fi
+
     SQL_QUERY="CREATE ROLE \"${DB_USER}\"
             PASSWORD '${DB_PASSWORD}'
-            NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT LOGIN"
+            ${POWERS} INHERIT LOGIN"
     if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
           "${PSQL_USER}" "${PSQL_PASSWORD}" \
           --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
@@ -910,10 +957,27 @@ PGSQL_PASSWORD=${DB_PASSWORD}"
 
 
   adduser )
+    POWERS=""
+    if [ "${USER_CREATEDB}" = "true" ]; then
+      POWERS="${POWERS} CREATEDB"
+    else
+      POWERS="${POWERS} NOCREATEDB"
+    fi
+    if [ "${USER_CREATEROLE}" = "true" ]; then
+      POWERS="${POWERS} CREATEROLE"
+    else
+      POWERS="${POWERS} NOCREATEROLE"
+    fi
+    if [ "${USER_SUPERUSER}" = "true" ]; then
+      POWERS="${POWERS} SUPERUSER"
+    else
+      POWERS="${POWERS} NOSUPERUSER"
+    fi
+
     # Creating role.
     SQL_QUERY="CREATE ROLE \"${DB_USER}\"
             PASSWORD '${DB_PASSWORD}'
-            NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT LOGIN"
+            ${POWERS} INHERIT LOGIN"
 
     if [ -n "${BASE_DB_NAME}" ]; then
       SQL_QUERY="${SQL_QUERY};
