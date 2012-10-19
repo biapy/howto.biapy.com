@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.3"
+VERSION="1.1.4"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -255,11 +255,11 @@ function pgsql_call {
   shift $[4]
 
   if [ "${PGSQL_CALL_PASSWORD}" = "false" ]; then
-    "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+    env LANG="en_US.UTF-8" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
         --username="${PGSQL_CALL_USER}" "${@}"
     RETURN_VALUE="${?}"
   elif [ "${PGSQL_CALL_PASSWORD}" = "true" ]; then
-    "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+    env LANG="en_US.UTF-8" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
         --username="${PGSQL_CALL_USER}" --password "${@}"
     RETURN_VALUE="${?}"
   else
@@ -1012,7 +1012,7 @@ PGSQL_PASSWORD=${DB_PASSWORD}"
     else
       append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
 
-        command echo "# Database access parameters are :
+      command echo "# Database access parameters are :
 # Database server host
 PGSQL_HOST=localhost
 # Database name
