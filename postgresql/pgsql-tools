@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.4"
+VERSION="1.1.5"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -255,18 +255,18 @@ function pgsql_call {
   shift $[4]
 
   if [ "${PGSQL_CALL_PASSWORD}" = "false" ]; then
-    env LANG="en_US.UTF-8" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+    env LANG="C" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
         --username="${PGSQL_CALL_USER}" "${@}"
     RETURN_VALUE="${?}"
   elif [ "${PGSQL_CALL_PASSWORD}" = "true" ]; then
-    env LANG="en_US.UTF-8" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+    env LANG="C" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
         --username="${PGSQL_CALL_USER}" --password "${@}"
     RETURN_VALUE="${?}"
   else
     PGPASSFILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
     command chmod go-rw "${PGPASSFILE}"
     echo "${PGSQL_CALL_HOST}:*:*:${PGSQL_CALL_USER}:${PGSQL_CALL_PASSWORD}" > "${PGPASSFILE}"
-    env LANG="en_US.UTF-8" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
+    env LANG="C" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
         --username="${PGSQL_CALL_USER}" "${@}"
     RETURN_VALUE="${?}"
     command rm "${PGPASSFILE}"
@@ -778,8 +778,8 @@ fi
 
 # Compute user hosts for remote access.
 if [ "${AUTO_HOSTS}" = "true" \
-    -a "${MYSQL_HOST}" != "localhost" \
-    -a "${MYSQL_HOST}" != "127.0.0.1" ]; then
+    -a "${PSQL_HOST}" != "localhost" \
+    -a "${PSQL_HOST}" != "127.0.0.1" ]; then
   USER_HOSTS="${USER_HOSTS} $(command hostname) $(command hostname --fqdn)"
   interface_ip "eth0"
   if [ -n "${INTERFACE_IP}" ]; then
@@ -794,7 +794,7 @@ if [ "${WITH_SSH}" = "true" \
     -a "${PSQL_HOST}" != "localhost" \
     -a "${PSQL_HOST}" != "127.0.0.1" ]; then
   # We use SSH access to remote server if pgsql access failed.
-  if [ "${MYSQL_PASSWORD}" = "true" ]; then
+  if [ "${PSQL_PASSWORD}" = "true" ]; then
     command read -p "Enter password for user ${PSQL_USER}: " -s PSQL_PASSWORD
   fi
 
@@ -841,6 +841,13 @@ Establishing SSH connection to '${WITH_SSH_USER}@${PSQL_HOST}'..." >&2
     exit 1
   fi
 else
+  if [ "${PSQL_PASSWORD}" = "false" ]; then
+    if ! check_pgsql "${PSQL_CLIENT}" "${PSQL_HOST}" \
+                "${PSQL_USER}" "${PSQL_PASSWORD}" "" "true"; then
+      PSQL_PASSWORD="true"
+    fi
+  fi
+
   check_pgsql "${PSQL_CLIENT}" "${PSQL_HOST}" \
               "${PSQL_USER}" "${PSQL_PASSWORD}"
 fi
