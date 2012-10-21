@@ -1,0 +1,167 @@
+#!/bin/bash
+
+### BEGIN INIT INFO
+# Provides:    openerp
+# Required-Start:  $remote_fs $syslog
+# Required-Stop:  $remote_fs $syslog
+# Should-Start:    $network
+# Should-Stop:    $network
+# Default-Start:  2 3 4 5
+# Default-Stop:    0 1 6
+# Short-Description:  Enterprise Resource Management software
+# Description:    Open ERP is a complete ERP and CRM software.
+### END INIT INFO
+
+VERSION="1.0.0"
+
+PATH="/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin"
+DAEMON="/usr/bin/python2.6"
+NAME="openerp"
+DESC="openerp"
+
+OPENERP_SERVER="/var/lib/openerp/server/bin/openerp-server.py"
+CONFIG_FILE="/etc/openerp/server.cfg"
+USER="openerp"
+PGSQL_CLIENT="/usr/bin/psql"
+
+PID_FILE="/var/run/${NAME}.pid"
+
+DAEMON_ARGS="${OPENERP_SERVER} --config=${CONFIG_FILE}"
+
+test -x "${DAEMON}" || exit 0
+
+set -e
+
+case "${1}" in
+  start)
+    echo -n "Starting ${DESC}: "
+
+    start-stop-daemon --start --quiet --pidfile "${PID_FILE}" \
+      --chuid "${USER}" --background --make-pidfile \
+      --exec "${DAEMON}" -- ${DAEMON_ARGS}
+
+    echo "${NAME}."
+    ;;
+
+
+
+  stop)
+    echo -n "Stopping ${DESC}: "
+
+    start-stop-daemon --stop --quiet --pidfile "${PID_FILE}" \
+      --oknodo
+
+    echo "${NAME}."
+    ;;
+
+
+
+  restart|force-reload)
+    echo -n "Restarting ${DESC}: "
+
+    start-stop-daemon --stop --quiet --pidfile "${PID_FILE}" \
+      --oknodo
+
+    sleep 1
+
+    start-stop-daemon --start --quiet --pidfile "${PID_FILE}" \
+      --chuid "${USER}" --background --make-pidfile \
+      --exec "${DAEMON}" -- ${DAEMON_ARGS}
+
+    echo "${NAME}."
+    ;;
+
+
+
+  upgrade )
+    echo -n "Upgrading ${DESC}: "
+
+    # Stop the server berfore upgrading.
+    start-stop-daemon --stop --quiet --pidfile "${PID_FILE}" \
+      --oknodo 2>&1
+
+    sleep 1
+
+    # Pull latest version from bazaar
+    echo "/var/lib/openerp/server
+/var/lib/openerp/web
+/var/lib/openerp/addons" | while read BZR_PATH; do
+      command pushd "${BZR_PATH}" > '/dev/null' 2>&1
+      command su "${USER}" -c "command bzr pull" > '/dev/null' 2>&1
+      command popd > '/dev/null' 2>&1
+    done
+
+    # Pull others addons from bazaar.
+    if [ -d '/var/lib/openerp/addons-bazaar' ]; then
+      command find '/var/lib/openerp/addons-bazaar' \
+          -mindepth 1 -maxdepth 1 -type d \
+        | while read BZR_PATH; do
+        command pushd "${BZR_PATH}" > '/dev/null' 2>&1
+        command su "${USER}" -c "command bzr pull" > '/dev/null' 2>&1
+        command popd > '/dev/null' 2>&1
+      done
+    fi
+
+    # Parse Database connexion parameters.
+    DB_USER="$(command egrep '^db_user[\t ]*=' '/etc/openerp/server.cfg' \
+        | command cut --delimiter='=' --fields=2 \
+        | command sed -e 's/^[\t ]*//g' -e 's/[\t ]*$//g')"
+    DB_PASSWORD="$(command egrep '^db_password[\t ]*=' '/etc/openerp/server.cfg' \
+        | command cut --delimiter='=' --fields=2 \
+        | command sed -e 's/^[\t ]*//g' -e 's/[\t ]*$//g')"
+    DB_HOST="$(command egrep '^db_host[\t ]*=' '/etc/openerp/server.cfg' \
+        | command cut --delimiter='=' --fields=2 \
+        | command sed -e 's/^[\t ]*//g' -e 's/[\t ]*$//g')"
+    DB_PORT="$(command egrep '^db_port[\t ]*=' '/etc/openerp/server.cfg' \
+        | command cut --delimiter='=' --fields=2 \
+        | command sed -e 's/^[\t ]*//g' -e 's/[\t ]*$//g')"
+
+    # Create a temporary password file.
+    PGPASSFILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
+    command chmod go-rw "${PGPASSFILE}"
+    echo "${DB_HOST}:*:*:${DB_USER}:${DB_PASSWORD}" > "${PGPASSFILE}"
+    ERP_DATABASES="$(env LANG="en_US.UTF-8" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CLIENT}" --host="${DB_HOST}" \
+        --username="${DB_USER}" --list --tuples-only \
+        | command egrep -v ' *:' \
+        | command grep "| ${DB_USER} " \
+        | command cut --delimiter='|' --fields=1 \
+        | command sed -e '/^$/d' -e 's/^[ ]*//g' -e 's/[ ]*$//g')"
+    command rm "${PGPASSFILE}"
+
+    # For each OpenERP database.
+    echo "${ERP_DATABASES}" | while read ERP_DB; do
+
+      # Start the server for upgrade of database.
+      start-stop-daemon --start --quiet --pidfile "${PID_FILE}" \
+        --chuid "${USER}" --background --make-pidfile \
+        --exec "${DAEMON}" -- ${DAEMON_ARGS} \
+        --database="${ERP_DB}" --update="all"
+
+      # Wait 10mn while upgrade complete.
+      sleep 3000
+
+      # Stop the server after upgrade
+      start-stop-daemon --stop --quiet --pidfile "${PID_FILE}" \
+        --oknodo
+
+      sleep 1
+    done
+
+    # Start the server after upgrading.
+    start-stop-daemon --start --quiet --pidfile "${PID_FILE}" \
+      --chuid "${USER}" --background --make-pidfile \
+      --exec "${DAEMON}" -- ${DAEMON_ARGS}
+
+    echo "${NAME}."
+   ;;
+
+
+
+  *)
+    N="/etc/init.d/${NAME}"
+    echo "Usage: ${N} {start|stop|restart|force-reload|upgrade}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0
