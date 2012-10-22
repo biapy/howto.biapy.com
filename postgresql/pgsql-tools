@@ -2,8 +2,8 @@
 #
 # PostgreSQL Tools.
 #
-# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.9"
+# For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
+VERSION="1.1.10"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -669,7 +669,7 @@ fi
 
 # Check PSQL_CLIENT existance.
 if [[ "${PSQL_CLIENT}" =~ "/" \
-    -a "${PSQL_CLIENT}" != "/usr/bin/psql" ]]; then
+    && "${PSQL_CLIENT}" != "/usr/bin/psql" ]]; then
   # PSQL_CLIENT is a path.
   realpath_check "${PSQL_CLIENT}"
   PSQL_CLIENT="${REALPATH}"
