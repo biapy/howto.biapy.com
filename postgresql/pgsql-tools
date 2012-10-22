@@ -669,7 +669,7 @@ fi
 
 # Check PSQL_CLIENT existance.
 if [[ "${PSQL_CLIENT}" =~ "/" \
-    -a "${PSQL_CLIENT}" <> "/usr/bin/psql" ]]; then
+    -a "${PSQL_CLIENT}" != "/usr/bin/psql" ]]; then
   # PSQL_CLIENT is a path.
   realpath_check "${PSQL_CLIENT}"
   PSQL_CLIENT="${REALPATH}"
