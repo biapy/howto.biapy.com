@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.7"
+VERSION="1.1.8"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -578,6 +578,7 @@ while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: 
       ;;
 
     adduser | a )
+      MANDATORY_PASSWORD="true"
       BASE_USER_NAME="${OPTARG}"
       ACTION="adduser"
       MANDATORY_DB="false"
@@ -590,6 +591,7 @@ while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: 
       ;;
 
     deluser )
+      MANDATORY_PASSWORD="true"
       BASE_USER_NAME="${OPTARG}"
       ACTION="deluser"
       MANDATORY_PASSWORD="true"
@@ -844,11 +846,17 @@ else
     if ! check_pgsql "${PSQL_CLIENT}" "${PSQL_HOST}" \
                 "${PSQL_USER}" "${PSQL_PASSWORD}" "" "true"; then
       PSQL_PASSWORD="true"
+
+      # Ask for password if none given.
+      if [ "${MANDATORY_PASSWORD}" = "true" ]; then
+        command read -p "Enter password for user ${PSQL_USER}: " -s PSQL_PASSWORD
+      fi
     fi
   fi
 
   check_pgsql "${PSQL_CLIENT}" "${PSQL_HOST}" \
               "${PSQL_USER}" "${PSQL_PASSWORD}"
+
 fi
 
 
