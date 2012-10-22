@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.11"
+VERSION="1.1.12"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -950,7 +950,7 @@ PGSQL_PASSWORD=${DB_PASSWORD}"
           "${PSQL_USER}" "${PSQL_PASSWORD}" \
           --dbname="${DB_NAME}" --command='\d' \
           --tuples-only --no-align \
-      | command sed -e 's/^\([^|]*\)|\([^|]*\)|\([^|]*\)|.*$/drop \3 if exists \1.\2 cascade;/g')"
+      | command sed -e 's/^\([^|]*\)|\([^|]*\)|\([^|]*\)|.*$/BEGIN TRANSACTION; DROP \3 IF EXISTS "\1.\2" CASCADE; COMMIT;/g')"
 
     if [ "${SQL_QUERY}" != "No relations found." ]; then
       if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
