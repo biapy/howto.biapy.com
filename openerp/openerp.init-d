@@ -12,7 +12,7 @@
 # Description:    Open ERP is a complete ERP and CRM software.
 ### END INIT INFO
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 PATH="/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin"
 DAEMON="/usr/bin/python2.6"
@@ -120,7 +120,7 @@ case "${1}" in
     PGPASSFILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
     command chmod go-rw "${PGPASSFILE}"
     echo "${DB_HOST}:*:*:${DB_USER}:${DB_PASSWORD}" > "${PGPASSFILE}"
-    ERP_DATABASES="$(env LANG="en_US.UTF-8" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CLIENT}" --host="${DB_HOST}" \
+    ERP_DATABASES="$(env LANG="C" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CLIENT}" --host="${DB_HOST}" \
         --username="${DB_USER}" --list --tuples-only \
         | command egrep -v ' *:' \
         | command grep "| ${DB_USER} " \
