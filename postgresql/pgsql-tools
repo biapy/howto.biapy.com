@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.6"
+VERSION="1.1.7"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -256,7 +256,7 @@ function pgsql_call {
 
   if [ "${PGSQL_CALL_PASSWORD}" = "false" ]; then
     env LANG="C" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
-        --username="${PGSQL_CALL_USER}" "${@}"
+        --username="${PGSQL_CALL_USER}" --no-password "${@}"
     RETURN_VALUE="${?}"
   elif [ "${PGSQL_CALL_PASSWORD}" = "true" ]; then
     env LANG="C" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
@@ -300,7 +300,7 @@ function check_pgsql {
   if [ -n "${PGSQL_CHECK_DB}" ]; then
     if ! pgsql_call "${PGSQL_CHECK_CLIENT}" "${PGSQL_CHECK_HOST}" \
           "${PGSQL_CHECK_USER}" "${PGSQL_CHECK_PASSWORD}" \
-          --command="SELECT 1" --dbname="${PGSQL_CHECK_DB}" 1>"/dev/null"; then
+          --command="SELECT 1;" --dbname="${PGSQL_CHECK_DB}" 1>"/dev/null"; then
       if [ "${NO_EXIT}" = "true" ]; then
         return 1
       fi
@@ -310,7 +310,7 @@ function check_pgsql {
   else
     if ! pgsql_call "${PGSQL_CHECK_CLIENT}" "${PGSQL_CHECK_HOST}" \
           "${PGSQL_CHECK_USER}" "${PGSQL_CHECK_PASSWORD}" \
-          --command="SHOW SERVER_VERSION" 1>"/dev/null"; then
+          --command="SHOW SERVER_VERSION;" 1>"/dev/null"; then
       if [ "${NO_EXIT}" = "true" ]; then
         return 2
       fi
