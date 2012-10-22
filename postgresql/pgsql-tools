@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.10"
+VERSION="1.1.11"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -256,18 +256,18 @@ function pgsql_call {
 
   if [ "${PGSQL_CALL_PASSWORD}" = "false" ]; then
     env LANG="C" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
-        --username="${PGSQL_CALL_USER}" --no-password ${@}
+        --username="${PGSQL_CALL_USER}" --no-password "${@}"
     RETURN_VALUE="${?}"
   elif [ "${PGSQL_CALL_PASSWORD}" = "true" ]; then
     env LANG="C" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
-        --username="${PGSQL_CALL_USER}" --password ${@}
+        --username="${PGSQL_CALL_USER}" --password "${@}"
     RETURN_VALUE="${?}"
   else
     PGPASSFILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
     command chmod go-rw "${PGPASSFILE}"
     echo "${PGSQL_CALL_HOST}:*:*:${PGSQL_CALL_USER}:${PGSQL_CALL_PASSWORD}" > "${PGPASSFILE}"
     env LANG="C" PGPASSFILE="${PGPASSFILE}" "${PGSQL_CALL_CLIENT}" --host="${PGSQL_CALL_HOST}" \
-        --username="${PGSQL_CALL_USER}" ${@}
+        --username="${PGSQL_CALL_USER}" "${@}"
     RETURN_VALUE="${?}"
     command rm "${PGPASSFILE}"
   fi
