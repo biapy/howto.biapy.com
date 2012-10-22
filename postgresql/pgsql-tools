@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves@landure.fr>
-VERSION="1.1.5"
+VERSION="1.1.6"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -794,9 +794,8 @@ if [ "${WITH_SSH}" = "true" \
     -a "${PSQL_HOST}" != "localhost" \
     -a "${PSQL_HOST}" != "127.0.0.1" ]; then
   # We use SSH access to remote server if pgsql access failed.
-  if [ "${PSQL_PASSWORD}" = "true" ]; then
-    command read -p "Enter password for user ${PSQL_USER}: " -s PSQL_PASSWORD
-  fi
+  # Force password entry, since it is impossible to type password over SSH.
+  command read -p "Enter password for user ${PSQL_USER}: " -s PSQL_PASSWORD
 
   # Building remote pgsql-tools arguments list.
   ACTION_ARGUMENT=""
