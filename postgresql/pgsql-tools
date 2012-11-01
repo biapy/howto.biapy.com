@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.13"
+VERSION="1.1.14"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -169,16 +169,20 @@ function append_pg_hba_conf {
     for ALLOWED_HOST in ${USER_HOSTS}; do
 
       host_ipv4 "${ALLOWED_HOST}"
-      if [ -n "${HOST_IPV4}" ]; then
+      if [ -n "${HOST_IPV4}" \
+          -a -z "$(echo "${PG_HBA_CONTENTS}" | command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV4}/32[\t ]*md5")" \
+          -a -z "$(command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV4}/32[\t ]*md5" "${PG_HBA_CONF}")" ]; then
         PG_HBA_CONTENTS="${PG_HBA_CONTENTS}
-# Allow connection to ${DB_NAME} from ${ALLOWED_HOST} :
+# Allow ${DB_USER} connection to ${DB_NAME} from ${ALLOWED_HOST} :
 host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV4}/32    md5"
       fi
 
       host_ipv6 "${ALLOWED_HOST}"
-      if [ -n "${HOST_IPV6}" ]; then
+      if [ -n "${HOST_IPV6}" \
+          -a -z "$(echo "${PG_HBA_CONTENTS}" | command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV6}/128[\t ]*md5")" \
+          -a -z "$(command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV6}/128[\t ]*md5" "${PG_HBA_CONF}")" ]; then
         PG_HBA_CONTENTS="${PG_HBA_CONTENTS}
-# Allow connection to ${DB_NAME} from ${ALLOWED_HOST} :
+# Allow ${DB_USER} connection to ${DB_NAME} from ${ALLOWED_HOST} :
 host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV6}/128    md5"
       fi
     done
@@ -199,7 +203,7 @@ host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV6}/128    md5"
 #
 # @param string $db_name The database name.
 function cleanup_pg_hba_conf {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -ne 2 && exit 1
 
   VALUE_TYPE="${1}"
   VALUE="${2}"
@@ -209,12 +213,12 @@ function cleanup_pg_hba_conf {
 
   case "${VALUE_TYPE}" in
     "database" )
-      REGEXP="/^host[\t ]*${VALUE}[\t ]*.*/d"
-      COMMENT_REGEXP="/^# Allow connection to ${VALUE}.*/d"
+      REGEXP="/^host[\\t ]*${VALUE}[\\t ]*.*/d"
+      COMMENT_REGEXP="/^# Allow .* connection to ${VALUE} .*/d"
       ;;
     "role" )
-      REGEXP="/^host[\t ]*[^\t ]*[\t ]*${VALUE}[\t ]*.*/d"
-      COMMENT_REGEXP="/^# Allow connection to ${VALUE}.*/d"
+      REGEXP="/^host[\\t ]*[^\\t ]*[\\t ]*${VALUE}[\\t ]*.*/d"
+      COMMENT_REGEXP="/^# Allow ${VALUE} connection to .* from .*/d"
       ;;
   esac
 
@@ -1013,7 +1017,7 @@ PGSQL_PASSWORD=${DB_PASSWORD}"
     fi
 
     if [ -z "${BASE_DB_NAME}" ]; then
-      append_pg_hba_conf "*" "${DB_USER}" "${USER_HOSTS}"
+      append_pg_hba_conf "all" "${DB_USER}" "${USER_HOSTS}"
 
       command echo "# User access parameters are :
 # Database server host
@@ -1061,7 +1065,7 @@ PGSQL_PASSWORD=${DB_PASSWORD}"
 
     if ! pgsql_call "${PSQL_CLIENT}" "${PSQL_HOST}" \
           "${PSQL_USER}" "${PSQL_PASSWORD}" \
-          --command="${SQL_QUERY}"; then
+          --command="${SQL_QUERY}" > '/dev/null' 2>&1; then
       echo "Error: unable to drop role '${DB_USER}'" >&2
       exit 1
     fi
