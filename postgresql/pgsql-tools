@@ -3,7 +3,7 @@
 # PostgreSQL Tools.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.14"
+VERSION="1.1.15"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -150,15 +150,15 @@ function pg_hba_conf {
 
 # Append database credentials for a user to pg_hba.conf.
 #
-# @param string $db_name The database name.
-# @param string $db_user The database user.
-# @param string $user_hosts The allowed hosts.
+# @param string $option_db_name The database name.
+# @param string $option_db_user The database user.
+# @param string $option_user_hosts The allowed hosts.
 function append_pg_hba_conf {
   command test ${#} -ne 3 && exit 1
 
-  DB_NAME="${1}"
-  DB_USER="${2}"
-  USER_HOSTS="${3}"
+  OPTION_DB_NAME="${1}"
+  OPTION_DB_USER="${2}"
+  OPTION_USER_HOSTS="${3}"
 
   # Fetch the pg_hba.conf path.
   pg_hba_conf
@@ -166,24 +166,24 @@ function append_pg_hba_conf {
   PG_HBA_CONTENTS=""
 
   if [ -e "${PG_HBA_CONF}" ]; then
-    for ALLOWED_HOST in ${USER_HOSTS}; do
+    for ALLOWED_HOST in ${OPTION_USER_HOSTS}; do
 
       host_ipv4 "${ALLOWED_HOST}"
       if [ -n "${HOST_IPV4}" \
-          -a -z "$(echo "${PG_HBA_CONTENTS}" | command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV4}/32[\t ]*md5")" \
-          -a -z "$(command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV4}/32[\t ]*md5" "${PG_HBA_CONF}")" ]; then
+          -a -z "$(echo "${PG_HBA_CONTENTS}" | command egrep "host[\t ]*${OPTION_DB_NAME}[\t ]*${OPTION_DB_USER}[\t ]*${HOST_IPV4}/32[\t ]*md5")" \
+          -a -z "$(command egrep "host[\t ]*${OPTION_DB_NAME}[\t ]*${OPTION_DB_USER}[\t ]*${HOST_IPV4}/32[\t ]*md5" "${PG_HBA_CONF}")" ]; then
         PG_HBA_CONTENTS="${PG_HBA_CONTENTS}
-# Allow ${DB_USER} connection to ${DB_NAME} from ${ALLOWED_HOST} :
-host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV4}/32    md5"
+# Allow ${OPTION_DB_USER} connection to ${OPTION_DB_NAME} from ${ALLOWED_HOST} :
+host    ${OPTION_DB_NAME}    ${OPTION_DB_USER}    ${HOST_IPV4}/32    md5"
       fi
 
       host_ipv6 "${ALLOWED_HOST}"
       if [ -n "${HOST_IPV6}" \
-          -a -z "$(echo "${PG_HBA_CONTENTS}" | command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV6}/128[\t ]*md5")" \
-          -a -z "$(command egrep "host[\t ]*${DB_NAME}[\t ]*${DB_USER}[\t ]*${HOST_IPV6}/128[\t ]*md5" "${PG_HBA_CONF}")" ]; then
+          -a -z "$(echo "${PG_HBA_CONTENTS}" | command egrep "host[\t ]*${OPTION_DB_NAME}[\t ]*${OPTION_DB_USER}[\t ]*${HOST_IPV6}/128[\t ]*md5")" \
+          -a -z "$(command egrep "host[\t ]*${OPTION_DB_NAME}[\t ]*${OPTION_DB_USER}[\t ]*${HOST_IPV6}/128[\t ]*md5" "${PG_HBA_CONF}")" ]; then
         PG_HBA_CONTENTS="${PG_HBA_CONTENTS}
-# Allow ${DB_USER} connection to ${DB_NAME} from ${ALLOWED_HOST} :
-host    ${DB_NAME}    ${DB_USER}    ${HOST_IPV6}/128    md5"
+# Allow ${OPTION_DB_USER} connection to ${OPTION_DB_NAME} from ${ALLOWED_HOST} :
+host    ${OPTION_DB_NAME}    ${OPTION_DB_USER}    ${HOST_IPV6}/128    md5"
       fi
     done
 
@@ -840,7 +840,7 @@ if [ "${WITH_SSH}" = "true" \
   echo "
 Establishing SSH connection to '${WITH_SSH_USER}@${PSQL_HOST}'..." >&2
   if command ssh "${WITH_SSH_USER}"@"${PSQL_HOST}" \
-      "command pgsql-tools ${ARGUMENTS}"; then
+      "command pgsql-tools ${ARGUMENTS} | command sed -e 's/localhost/${PSQL_HOST}/g'"; then
     exit 0
   else
     exit 1
@@ -905,7 +905,12 @@ case "${ACTION}" in
       exit 1
     fi
 
-    append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
+
+    if [ "${USER_CREATEDB}" = "true" ]; then
+      append_pg_hba_conf "all" "${DB_USER}" "${USER_HOSTS}"
+    else
+      append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
+    fi
 
     command echo "# Database access parameters are :
 # Database server host
@@ -1016,9 +1021,14 @@ PGSQL_PASSWORD=${DB_PASSWORD}"
       exit 1
     fi
 
-    if [ -z "${BASE_DB_NAME}" ]; then
+    if [ -z "${BASE_DB_NAME}" \
+        -o "${USER_CREATEDB}" = "true" ]; then
       append_pg_hba_conf "all" "${DB_USER}" "${USER_HOSTS}"
+    else
+      append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
+    fi
 
+    if [ -z "${BASE_DB_NAME}" ]; then
       command echo "# User access parameters are :
 # Database server host
 PGSQL_HOST=localhost
@@ -1028,8 +1038,6 @@ PGSQL_USER=${DB_USER}
 PGSQL_PASSWORD=${DB_PASSWORD}"
 
     else
-      append_pg_hba_conf "${DB_NAME}" "${DB_USER}" "${USER_HOSTS}"
-
       command echo "# Database access parameters are :
 # Database server host
 PGSQL_HOST=localhost
