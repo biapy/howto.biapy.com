@@ -4,7 +4,7 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-VERSION=2.0.1
+VERSION=2.0.2
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -52,15 +52,21 @@ Available options are:
         separated by spaces. This option can be used more than once.
   * --overrides= | -o All
         Set AllowOverride directive (only for 'virtual-host' template).
-  * --ssl | -s
-        Create a HTTP virtual host with mod_ssl. Require --private-key and --public-key
+  * --ssl= | -s key_name
+        Create a HTTP virtual host with mod_ssl.
+        Require a key name or --private-key and --public-key
+        Using the key_name option set the following defaults:
+         - private-key : /etc/ssl/private/key_name.key
+         - public-key  : /etc/ssl/certificates/key_name.crt
+         - root-ca     : /etc/ssl/roots/key_name-root.ca
+         - chain-ca    : /etc/ssl/chains/key_name.ca
   * --private-key= | --key= | -k /etc/ssl/private/domain.com.key
         Set the SSL private key (mandatory with --ssl).
   * --public-key= | --cert= | -p /etc/ssl/certificates/domain.com.crt
         Set the SSL public key (mandatory with --ssl).
-  * --root-ca= | --root= | -r /etc/ssl/authority-roots/domain.com.ca
+  * --root-ca= | --root= | -r /etc/ssl/roots/domain.com-root.ca
         Set the SSL root certificate (with --ssl only).
-  * --chain-ca= | --chain= | -c /etc/ssl/intermediates/domain.com.ca
+  * --chain-ca= | --chain= | -c /etc/ssl/chains/domain.com.ca
         Set the SSL intermediate certificate (with --ssl only).
   * --bind-ip= | --ip= | -i xx.xx.xx.xx
         Set the bind IP for a SSL virtual host (with --ssl only).
@@ -683,7 +689,7 @@ PROTOCOL="http"
 APACHE_MODULES="rewrite"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h template: t: ssl s alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: remove d" "${@}"; do
+while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: remove d" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -716,6 +722,28 @@ while getoptex "help h template: t: ssl s alias: a: private-key: key: k: public-
       SSL_ENABLED="1"
       PROTOCOL="https"
       APACHE_MODULES="${APACHE_MODULES} ssl"
+
+      if [ -n "${OPTARG}" ]; then
+        if [ -z "${SSL_PRIVATE_KEY}" \
+            -a -e "/etc/ssl/private/${OPTARG}.key" ]; then
+          SSL_PRIVATE_KEY="/etc/ssl/private/${OPTARG}.key"
+        fi
+
+        if [ -z "${SSL_PUBLIC_KEY}" \
+            -a -e "/etc/ssl/certificates/${OPTARG}.crt" ]; then
+          SSL_PUBLIC_KEY="/etc/ssl/certificates/${OPTARG}.crt"
+        fi
+
+        if [ -z "${SSL_ROOT_CA}" \
+            -a -e "/etc/ssl/roots/${OPTARG}-root.ca" ]; then
+          SSL_ROOT_CA="/etc/ssl/roots/${OPTARG}-root.ca"
+        fi
+
+        if [ -z "${SSL_CHAIN_CA}" \
+            -a -e "/etc/ssl/chains/${OPTARG}.ca" ]; then
+          SSL_CHAIN_CA="/etc/ssl/chains/${OPTARG}.ca"
+        fi
+      fi
       ;;
     alias | a )
       if [ -n "${OPTARG}" ]; then
