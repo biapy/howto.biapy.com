@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.1.2"
+VERSION="1.2.0"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -30,6 +30,7 @@ Usage :
 
   ${SCRIPT_NAME} [ --sourceforge | --googlecode | --ckeditor ] \\
         [ --download | --zip | --tgz | --tbz2 | --version ] \\
+        [ --download-template=file-name-template ]
         project-name file-name-template
 
   Mandatory arguments are :
@@ -50,6 +51,8 @@ Usage :
     * --tbz2        : Download the sources archive and decompress it as tar.bz2.
     * --zip         : Download the sources archive and decompress it as zip.
     * --version     : Print the detected sources version.
+    * --download-template : Allow to specify a different filename template for download.
+                      The filename template use the same VERSION as the main one.
 "
 
   test -n "${1}" && exit ${1}
@@ -398,9 +401,11 @@ PRIVILEGES=""
 MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
+DOWNLOAD_TEMPLATE=""
+
 ACTION="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ckeditor" "${@}"; do
+while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ckeditor download-template:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -425,6 +430,9 @@ while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ck
       ;;
     'zip' )
       ACTION="unzip"
+      ;;
+    'download-template' )
+      DOWNLOAD_TEMPLATE="${OPTARG}"
       ;;
     'help' | 'h' )
       usage
@@ -472,7 +480,12 @@ case "${FORGE}" in
         ;;
     esac
 
-    SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
+      SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    else
+      SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+    fi
+
     ;;
   'ckeditor' )
     case "${DOWNLOAD_COMMAND}" in
@@ -514,6 +527,11 @@ case "${FORGE}" in
           )"
         ;;
     esac
+
+    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
+      SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    fi
+
     ;;
 esac
 
