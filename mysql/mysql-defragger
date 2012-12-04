@@ -19,7 +19,7 @@
 #  * InnoDB real row count can trigger heavy ressource load on large tables.
 #  * Aria engine is untested and provided as is.
 #
-VERSION="1.0.2"
+VERSION="1.0.3"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -749,11 +749,11 @@ for MYSQL_DB in ${DATABASES[@]}; do
       [ "${VERBOSE}" = "true" -a \( "${ANALYZE}" = "true" -o "${OPTIMIZE}" = "true" \) ] && echo -n " ..."
 
       if [ "${OPTIMIZE}" = "true" -a ${FRAGMENTATION} -ge ${OPTIMIZE_TRIGGER} ]; then
-        if [ -a ${TABLE_ROWS_REAL} -le ${OPTIMIZE_ROW_LIMIT} ]; then
+        if [ ${TABLE_ROWS_REAL} -le ${OPTIMIZE_ROW_LIMIT} ]; then
           [ "${VERBOSE}" = "true" ] && echo -n "Optimize..."
           mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
               "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
-              --execute "ALTER TABLE \`${TABLE_NAME}\` TYPE=InnoDB" "${MYSQL_DB}" \
+              --execute "ALTER TABLE \`${TABLE_NAME}\` ENGINE=InnoDB" "${MYSQL_DB}" \
               >"/dev/null" 2>>"${LOG_FILE}"
           if [ ${?} -gt 0 ]; then
             [ "${VERBOSE}" = "true" ] && echo "Error"
