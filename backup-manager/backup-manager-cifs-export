@@ -1,0 +1,54 @@
+#!/bin/bash
+# backup-manager-cfis-export
+# Copy /var/archives contents to a CFIS (SMBFS) mount point.
+#
+# @author Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
+
+NAME="$(command basename "${0}")"
+VERSION="1.0.0"
+
+# Fetch parameters from command line:
+CIFS_MOUNT="${1}"
+CIFS_USER="${2}"
+CIFS_PASSWORD="${3}"
+
+
+if [ -z "${CIFS_MOUNT}" -o -z "${CIFS_USER}" ]; then
+  echo "${NAME} - ${VERSION}
+
+Copy /var/archives contents to a CFIS (SMBFS) mount point.
+
+Usage :
+
+  ${NAME} \"//server/share\" \"domain\\\\user\" \"password\"
+
+  Where :
+  * //server/share    is the Windows share location.
+  * domain\\\\user      is the user login.
+  * password          is the user password.
+"
+  exit 1
+fi
+
+# Create a temporary mount point.
+MOUNT_LOCATION="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+
+if command mount --types="cifs" -options="rw,iocharset=iso8859-15,user=${CIFS_USER},password=${CIFS_PASSWORD},async,file_mode=0640,dir_mode=0750" \
+    "${CIFS_MOUNT}"  "${MOUNT_LOCATION}"; then
+
+  command rsync --delete --recursive "/var/archives/" "${MOUNT_LOCATION}"
+
+  sleep 5
+
+  if command umount "${MOUNT_LOCATION}"; then
+    command rmdir "${MOUNT_LOCATION}"
+  else
+    echo "Error: unable to unmount '${MOUNT_LOCATION}' from '${CIFS_MOUNT}'." 2>&1
+    exit 1
+  fi
+else
+  command rmdir "${MOUNT_LOCATION}"
+
+  echo "Error: unable to mount '${CIFS_MOUNT}' with user '${CIFS_USER}'." 2>&1
+  exit 1
+fi
