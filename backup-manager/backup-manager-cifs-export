@@ -7,11 +7,12 @@
 NAME="$(command basename "${0}")"
 VERSION="1.0.0"
 
-# Fetch parameters from command line:
-CIFS_MOUNT="${1}"
-CIFS_USER="${2}"
-CIFS_PASSWORD="${3}"
+CONFIG_FILE="/etc/backup-manager-cifs-export.conf"
 
+# Fetch parameters from configuration file:
+CIFS_MOUNT="$(command grep -e "^CIFS_MOUNT" "${CONFIG_FILE}" | command cut --delimiter="=" --fields=2-)"
+CIFS_USER="$(command grep -e "^CIFS_USER" "${CONFIG_FILE}" | command cut --delimiter="=" --fields=2-)"
+CIFS_PASSWORD="$(command grep -e "^CIFS_PASSWORD" "${CONFIG_FILE}" | command cut --delimiter="=" --fields=2-)"
 
 if [ -z "${CIFS_MOUNT}" -o -z "${CIFS_USER}" ]; then
   echo "${NAME} - ${VERSION}
@@ -20,12 +21,20 @@ Copy /var/archives contents to a CFIS (SMBFS) mount point.
 
 Usage :
 
-  ${NAME} \"//server/share\" \"domain\\\\user\" \"password\"
+  ${NAME}
+
+Configuration :
+
+  The configuration is stored in /etc/backup-manager-cifs-export.conf in this format:
+
+  CIFS_MOUNT=//server/share
+  CIFS_USER=domain\user
+  CIFS_PASSWORD=password
 
   Where :
-  * //server/share    is the Windows share location.
-  * domain\\\\user      is the user login.
-  * password          is the user password.
+  * CIFS_MOUNT    is the Windows share location.
+  * CIFS_USER     is the user login.
+  * CIFS_PASSWORD is the user password.
 "
   exit 1
 fi
@@ -43,12 +52,14 @@ if command mount --types="cifs" -options="rw,iocharset=iso8859-15,user=${CIFS_US
   if command umount "${MOUNT_LOCATION}"; then
     command rmdir "${MOUNT_LOCATION}"
   else
-    echo "Error: unable to unmount '${MOUNT_LOCATION}' from '${CIFS_MOUNT}'." 2>&1
+    echo "Error: unable to unmount '${MOUNT_LOCATION}' from '${CIFS_MOUNT}'." >&2
     exit 1
   fi
 else
   command rmdir "${MOUNT_LOCATION}"
 
-  echo "Error: unable to mount '${CIFS_MOUNT}' with user '${CIFS_USER}'." 2>&1
+  echo "Error: unable to mount '${CIFS_MOUNT}' with user '${CIFS_USER}'." >&2
   exit 1
 fi
+
+exit 0
