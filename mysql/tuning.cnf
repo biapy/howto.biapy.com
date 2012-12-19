@@ -20,8 +20,13 @@
 # key_buffer_size = 16 M
 
 # QUERY CACHE
-# query_cache_limit = 2M
 # query_cache_size = 32M
+#  Maximum query response size to cache.
+# query_cache_limit = 2M
+#  Minimum query response size to cache.
+#  A value lower than 4K can cause cache fragmentation
+#  and performance degratation.
+# query_cache_min_res_unit = 4K
 
 # SORT OPERATIONS
 # sort_buffer_size = 2M
