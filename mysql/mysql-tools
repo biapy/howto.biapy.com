@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.1.5"
+VERSION="1.1.6"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -370,7 +370,7 @@ MANDATORY_DB="true"
 MANDATORY_PASSWORD="false"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help create: c: db-prefix: dp: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r. auto-hosts" "${@}"; do
+while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r. auto-hosts" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
