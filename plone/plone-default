@@ -1,0 +1,25 @@
+# Plone default file
+# -----------------
+#
+# This file controls the start and the stop of ZEO servers and ZOPE instances
+# with the init script provided by Plone unified installer package.
+#
+# The following variables should contain a space sperated list of ZEO server
+# and ZOPE instance names which you want to start with the init script.
+# Note that ZEO servers will be started _before_ any instance, and that's
+# your responsability to check dependencies between ZEO servers and ZOPE
+# instances. The order of the variables doesn't matter.
+#
+# ZEO servers and ZOPE instances are searched in %INSTALL_PATH%.
+#
+# ALL means that you would like to start all servers/instances, NONE (or an 
+# empty value) means, well, none.
+
+# ZEO servers
+ZEOSERVERS="ALL"
+
+# ZOPE instances
+INSTANCES="ALL"
+
+# If you want to start client1 and client2 only :
+#INSTANCES="client1 client2"
