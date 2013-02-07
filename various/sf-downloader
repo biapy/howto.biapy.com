@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -30,7 +30,9 @@ Usage :
 
   ${SCRIPT_NAME} [ --sourceforge | --googlecode | --ckeditor ] \\
         [ --download | --zip | --tgz | --tbz2 | --version ] \\
-        [ --download-template=file-name-template ]
+        [ --strip-components=NUMBER | -s NUMBER ] \\
+        [ --output-directory=/path | -d /path ] \\
+        [ --download-template=file-name-template ] \\
         project-name file-name-template
 
   Mandatory arguments are :
@@ -51,7 +53,10 @@ Usage :
     * --tbz2        : Download the sources archive and decompress it as tar.bz2.
     * --zip         : Download the sources archive and decompress it as zip.
     * --version     : Print the detected sources version.
-    * --download-template : Allow to specify a different filename template for download.
+    * --strip-components | -s : When used with --tgz, --tbz2 or --zip, strip
+                      NUMBER leading components from file names on extraction
+    * --output-directory | -d : Path where to extract or download the files.
+    * --download-template     : Allow to specify a different filename template for download.
                       The filename template use the same VERSION as the main one.
 "
 
@@ -136,15 +141,22 @@ function check_package_file {
 # Download a file from the given URL.
 #
 # @param string $url The URL of the file to download.
+# @param string $filename The filename on the filesystem.
+# @param string $path The path where to save the file (need a filename value).
 #
 # @return ${DOWNLOAD_FILE} The path to the downloaded file.
 DOWNLOAD_FILE=""
 function download_file {
   command test ${#} -lt 1 && exit 1
 
+  DOWNLOAD_PATH="/tmp"
+  if [ -n "${3}" ]; then
+    DOWNLOAD_PATH="${3}"
+  fi
+
   # Download a file.
   if [ -n "${2}" ]; then
-    DOWNLOAD_FILE="/tmp/${2}"
+    DOWNLOAD_FILE="${DOWNLOAD_PATH}/${2}"
   else
     DOWNLOAD_FILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
   fi
@@ -172,18 +184,32 @@ function download_file {
 # Download and uncompress a tgz file from the given URL.
 #
 # @param string $url The URL of the file to download.
+# @param string $path An optionnal extraction path.
+# @param string $strip An optionnal strip components value.
 #
 # @return ${DOWNLOAD_TGZ} The path to the extracted content.
 DOWNLOAD_TGZ=""
 function download_tgz {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -lt 1 && exit 1
+
+  if [ -n "${2}" ]; then
+    DOWNLOAD_TGZ="${2}"
+    command mkdir -p "${DOWNLOAD_TGZ}"
+  else
+    DOWNLOAD_TGZ="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+  fi
+
+  STRIP="0"
+  if [ -n "${3}" ]; then
+    STRIP="${3}"
+  fi
 
   download_file "${1}"
 
-
   # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TGZ="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
-  command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
+  command tar --strip-components="${STRIP}" \
+      --directory "${DOWNLOAD_TGZ}" \
+      -xzf "${DOWNLOAD_FILE}"
   command rm "${DOWNLOAD_FILE}"
 
   if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 0 ]; then
@@ -191,7 +217,8 @@ function download_tgz {
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 1 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 1 \
+        -a "${STRIP}" = "0" ]; then
     DOWNLOAD_TGZ="${DOWNLOAD_TGZ}/$(command ls -1 "${DOWNLOAD_TGZ}")"
   fi
 } # download_tgz
@@ -201,18 +228,33 @@ function download_tgz {
 # Download and uncompress a tar.bzip2 file from the given URL.
 #
 # @param string $url The URL of the file to download.
+# @param string $path An optionnal extraction path.
+# @param string $strip An optionnal strip components value.
 #
 # @return ${DOWNLOAD_TBZ2} The path to the extracted content.
 DOWNLOAD_TBZ2=""
 function download_tbz2 {
   check_binary "bzip2" "bzip2"
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -lt 1 && exit 1
+
+  if [ -n "${2}" ]; then
+    DOWNLOAD_TBZ2="${2}"
+    command mkdir -p "${DOWNLOAD_TBZ2}"
+  else
+    DOWNLOAD_TBZ2="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+  fi
+
+  STRIP="0"
+  if [ -n "${3}" ]; then
+    STRIP="${3}"
+  fi
 
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TBZ2="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
-  command tar --directory "${DOWNLOAD_TGZ}" -xjf "${DOWNLOAD_FILE}"
+  command tar --strip-components="${STRIP}" \
+      --directory "${DOWNLOAD_TBZ2}" \
+      -xjf "${DOWNLOAD_FILE}"
   command rm "${DOWNLOAD_FILE}"
 
   if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 0 ]; then
@@ -220,7 +262,8 @@ function download_tbz2 {
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 1 ]; then
+  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 1 \
+        -a "${STRIP}" = "0" ]; then
     DOWNLOAD_TBZ2="${DOWNLOAD_TBZ2}/$(command ls -1 "${DOWNLOAD_TBZ2}")"
   fi
 } # download_tbz2
@@ -230,23 +273,48 @@ function download_tbz2 {
 # Download and uncompress a zip file from the given URL.
 #
 # @param string $url The URL of the file to download.
+# @param string $path An optionnal extraction path.
+# @param string $strip An optionnal strip components value.
 #
 # @return ${DOWNLOAD_ZIP} The path to the extracted content.
 DOWNLOAD_ZIP=""
 function download_zip {
   check_binary "unzip" "unzip"
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -lt 1 && exit 1
+
+  if [ -n "${2}" ]; then
+    DOWNLOAD_ZIP="${2}"
+    command mkdir -p "${DOWNLOAD_ZIP}"
+  else
+    DOWNLOAD_ZIP="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+  fi
+
+  STRIP="0"
+  if [ -n "${3}" ]; then
+    STRIP="${3}"
+  fi
+
+  EXTRACT_PATH="${DOWNLOAD_ZIP}"
+  if [ "${STRIP}" != "0" ]; then
+    EXTRACT_PATH="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+  fi
 
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_ZIP="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
-  command unzip -d "${DOWNLOAD_ZIP}" -qq "${DOWNLOAD_FILE}"
+  command unzip -d "${EXTRACT_PATH}" -qq "${DOWNLOAD_FILE}"
   command rm "${DOWNLOAD_FILE}"
 
-  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc -l) -eq 0 ]; then
+  if [ $(command ls -1 "${EXTRACT_PATH}" | command wc -l) -eq 0 ]; then
     echo "Error : unable to unzip file downloaded from '${1}'." >&2
     exit 1
+  fi
+
+  if [ "${STRIP}" != "0" ]; then
+    command find "${EXTRACT_PATH}" -mindepth "$((${STRIP} +1))" -maxdepth "$((${STRIP} +1))" -print0 \
+      | command xargs -0 -iFILE cp -a FILE "${DOWNLOAD_ZIP}"
+
+    command rm -r "${EXTRACT_PATH}"
   fi
 
   if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc -l) -eq 1 ]; then
@@ -403,9 +471,12 @@ MANDATORY_PASSWORD="false"
 
 DOWNLOAD_TEMPLATE=""
 
+OUTPUT_DIRECTORY=""
+STRIP_COMPONENTS="0"
+
 ACTION="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ckeditor download-template:" "${@}"; do
+while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ckeditor download-template: strip-components: s: output-directory: d:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -433,6 +504,12 @@ while getoptex "help h version v download tgz tbz2 zip sourceforge googlecode ck
       ;;
     'download-template' )
       DOWNLOAD_TEMPLATE="${OPTARG}"
+      ;;
+    'strip-components' | 's' )
+      STRIP_COMPONENTS="${OPTARG}"
+      ;;
+    'output-directory' | 'd' )
+      OUTPUT_DIRECTORY="${OPTARG}"
       ;;
     'help' | 'h' )
       usage
@@ -548,19 +625,19 @@ case "${ACTION}" in
     echo "${VERSION}"
     ;;
   "untar-ungzip" )
-    download_tgz "${SOURCE_URL}"
+    download_tgz "${SOURCE_URL}" "${OUTPUT_DIRECTORY}" "${STRIP_COMPONENTS}"
     echo "${DOWNLOAD_TGZ}"
     ;;
   "untar-unbzip2" )
-    download_tbz2 "${SOURCE_URL}"
+    download_tbz2 "${SOURCE_URL}" "${OUTPUT_DIRECTORY}" "${STRIP_COMPONENTS}"
     echo "${DOWNLOAD_TBZ2}"
     ;;
   "unzip" )
-    download_zip "${SOURCE_URL}"
+    download_zip "${SOURCE_URL}" "${OUTPUT_DIRECTORY}" "${STRIP_COMPONENTS}"
     echo "${DOWNLOAD_ZIP}"
     ;;
   "download" | *)
-    download_file "${SOURCE_URL}" "${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+    download_file "${SOURCE_URL}" "${FILENAME_TEMPLATE//VERSION/${VERSION}}" "${OUTPUT_DIRECTORY}"
     echo "${DOWNLOAD_FILE}"
     ;;
 esac
