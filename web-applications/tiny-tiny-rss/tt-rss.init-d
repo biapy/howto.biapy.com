@@ -23,7 +23,7 @@ FORKING=0
 # Read configuration variable file if it is present
 [ -r "/etc/default/${NAME}" ] && . "/etc/default/${NAME}"
 
-DAEMON_SCRIPT="update.php -daemon"
+DAEMON_SCRIPT="update.php --daemon"
 
 if [ "${FORKING}" != "0" ]; then
 	DAEMON_SCRIPT="update_daemon2.php"
