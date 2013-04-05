@@ -1,0 +1,164 @@
+#!/bin/bash
+#
+#  Configure the new image to be a minimal image, by removing
+# a packages I don't care about - and installing some alternatives.
+#
+# Steve
+# --
+# http://www.steve.org.uk/
+#
+
+
+prefix=$1
+
+
+
+#
+#  Source our common functions - this will let us install a Debian package.
+#
+if [ -e '/usr/lib/xen-tools/common.sh' ]; then
+    . '/usr/lib/xen-tools/common.sh'
+else
+    echo "Installation problem"
+fi
+
+#
+# Copying skeleton files to the domU root
+#
+logMessage "Copying skeleton files"
+
+command cp -a "/etc/xen-tools/skel/"* "${prefix}"
+
+#
+#  Installing udev to fix some problems
+#  See : http://blog.preshweb.co.uk/2008/10/debian-xen-guests-without-devpts-no-ssh/
+#
+installDebianPackage "${prefix}" udev
+
+#
+#  Install some new packages - do this first to avoid dependency errors.
+#
+installDebianPackage "${prefix}" locales
+
+installDebianPackage "${prefix}" syslog-ng 
+installDebianPackage "${prefix}" deborphan
+installDebianPackage "${prefix}" less
+installDebianPackage "${prefix}" screen
+installDebianPackage "${prefix}" sudo
+installDebianPackage "${prefix}" vim
+installDebianPackage "${prefix}" bzip2
+installDebianPackage "${prefix}" libnet-lite-ftp-perl
+installDebianPackage "${prefix}" backup-manager
+
+installDebianPackage "${prefix}" exim4
+installDebianPackage "${prefix}" mailx
+installDebianPackage "${prefix}" sudo
+installDebianPackage "${prefix}" ntp
+installDebianPackage "${prefix}" cron-apt
+installDebianPackage "${prefix}" libdate-manip-perl
+installDebianPackage "${prefix}" logwatch
+installDebianPackage "${prefix}" rkhunter
+installDebianPackage "${prefix}" fail2ban
+installDebianPackage "${prefix}" most
+
+
+
+#
+#  Remove some standard packages.
+#
+
+# PPP stuff.
+removeDebianPackage "${prefix}" pppconfig
+removeDebianPackage "${prefix}" pppoeconf
+removeDebianPackage "${prefix}" pppoe
+removeDebianPackage "${prefix}" ppp
+removeDebianPackage "${prefix}" libpcap0.7
+
+#
+# Stopping daemons
+#
+logMessage "Stopping daemons"
+
+chroot ${prefix} /etc/init.d/ntp stop
+chroot ${prefix} /etc/init.d/exim4 stop
+chroot ${prefix} /etc/init.d/fail2ban stop
+
+#
+# Configuring root mail alias
+#
+logMessage "Configuring root mail alias"
+
+command sed -i -e '/^root:/d' "${prefix}/etc/aliases"
+echo "root: root@$(command hostname -fqdn)" >> "${prefix}/etc/aliases"
+
+#
+# Configuring cron-apt
+#
+logMessage "Configuring cron-apt"
+
+command echo '
+# Send mail to root user when upgrade is available.
+MAILTO="root"
+MAILON="upgrade"' \
+    >> "${prefix}/etc/cron-apt/config"
+
+#
+# Configuring RkHunter
+#
+logMessage "Configuring RkHunter"
+
+SSH_ROOT_ALLOWED=no
+TEST_ROOT_ALLOWED=$(/bin/grep -i "PermitRootLogin.*yes" ${prefix}/etc/ssh/sshd_config)
+if [ -n "$TEST_ROOT_ALLOWED" ]; then
+  SSH_ROOT_ALLOWED=yes
+fi
+command sed -i -e 's|^[#]*\(ALLOWHIDDENDIR=/dev/.udev\)$|\1|' \
+              -e 's|^[#]*\(ALLOWHIDDENDIR=/dev/.static\)$|\1|' \
+              -e 's|^[#]*\(ALLOWHIDDENDIR=/dev/.initramfs\)$|\1|' \
+              -e 's|^[#]*\(HASH_FUNC=\).*$|\1md5sum|' \
+              -e 's|^[#]*\(PKGMGR=\).*$|\1DPKG|' \
+              -e '0,/ALLOWDEVFILE/{//a\
+ALLOWDEVFILE=/dev/shm/network/ifstate
+;}' \
+              -e "s|^[#]*\\(ALLOW_SSH_ROOT_USER=\\).*$|\\1${SSH_ROOT_ALLOWED}|" \
+      "${prefix}/etc/rkhunter.conf"
+
+command chroot ${prefix} rkhunter --update
+
+#
+# Configuring fail2ban
+#
+command sed -i \
+    -e '/\[ssh-ddos\]/, /filter/ {0,/^enabled.*/ s//enabled = true/ }' \
+    -e '/\[pam-generic\]/, /filter/ {0,/^enabled.*/ s//enabled = true/ }' \
+  "${prefix}/etc/fail2ban/jail.conf"
+
+#
+# Creating Backup and Upgrade accounts
+#
+logMessage "Creating backup and upgrade automation users"
+
+command chroot ${prefix} adduser --system --shell /bin/sh --home /var/home/xen-upgrade --disabled-password xen-upgrade
+
+# Configuring sudo for upgrade and update
+command sed -i \
+        -e '/Cmnd alias/a\
+Cmnd_Alias UPGRADE = /usr/bin/apt-get update, /usr/bin/apt-get -y upgrade, /usr/bin/apt-get -y dist-upgrade' \
+        -e '/User privilege/a\
+xen-upgrade ALL = NOPASSWD: UPGRADE' \
+    "${prefix}/etc/sudoers"
+
+# Configuring SSH pub key authentication
+command mkdir "${prefix}/var/home/xen-upgrade/.ssh"
+command cat "/etc/xen-tools/ssh-keys/xen-upgrade-rsa.pub" \
+    >> "${prefix}/var/home/xen-upgrade/.ssh/authorized_keys"
+command chroot "${prefix}" chown -R xen-upgrade:nogroup "/var/home/xen-upgrade/.ssh"
+
+#
+# Killing remaining processes
+#
+logMessage "Killing remaining processes"
+
+#fuser ${prefix} | sed -e 's/.*:[ ]*\([0-9]*\)[^0-9]*$/\1/' | xargs kill
+#fuser -k ${prefix}
+

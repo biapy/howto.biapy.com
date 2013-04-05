@@ -1,0 +1,54 @@
+#!/bin/bash
+# Run apt-get update and apt-get upgrade commands in Xen domU.
+
+## We process the command line args
+case "$1" in
+  update|upgrade|dist-upgrade)
+    if [ -z "$2" ]; then
+      DOMAINS=$(xm list \
+        | grep -v -e "Name" -e "Domain-0" \
+        | sed -e 's/^\([^ ]*\) .*$/\1/')
+    else
+      if [ -z "$(xm list | grep $2)" ]; then
+        echo "Error: Domain $2 is not started."
+        exit 1
+      fi
+      DOMAINS=$2
+    fi
+
+    for DOMAIN in $DOMAINS; do
+      echo "#
+# Running $1 on domain $DOMAIN
+#"
+      case "$1" in
+        update)
+          ssh -i /etc/xen-tools/ssh-keys/xen-upgrade-rsa xen-upgrade@$DOMAIN "sudo apt-get $1"
+          ;;
+        *)
+          ssh -i /etc/xen-tools/ssh-keys/xen-upgrade-rsa xen-upgrade@$DOMAIN "sudo apt-get -y $1"
+          ;;
+      esac
+    done
+  ;;
+
+  *)
+    echo "
+Usage:
+    xen-apt-get (update|upgrade) [hostname]
+
+For example:
+  * xen-apt-get update
+    run apt-get update in all domU
+  * xen-apt-get upgrade
+    run upgrade in all domU
+  * xen-apt-get upgrade httpd
+    run upgrade in domU named 'httpd'
+  * xen-apt-get dist-upgrade
+    run dist-upgrade in all domU
+  * xen-apt-get dist-upgrade httpd
+    run dist-upgrade in domU named 'httpd'
+"
+  ;;
+esac
+
+exit 0
