@@ -125,6 +125,11 @@ ALLOWDEVFILE=/dev/shm/network/ifstate
 
 command chroot ${prefix} rkhunter --update
 
+command echo '// Update rkhunter file signatures databases after running dpkg.
+DPkg::Post-Invoke {
+  "if [ -x /usr/bin/rkhunter ]; then if [ $(/usr/bin/rkhunter --help | /bin/grep "propupd" | /usr/bin/wc -l) -gt 0 ]; then /usr/bin/rkhunter --propupd; fi; fi";
+};' > "${prefix}/etc/apt/apt.conf.d/90rkhunter"
+
 #
 # Configuring fail2ban
 #
