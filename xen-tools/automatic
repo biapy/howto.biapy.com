@@ -90,7 +90,7 @@ chroot ${prefix} /etc/init.d/fail2ban stop
 logMessage "Configuring root mail alias"
 
 command sed -i -e '/^root:/d' "${prefix}/etc/aliases"
-echo "root: root@$(command hostname -fqdn)" >> "${prefix}/etc/aliases"
+echo "root: root@$(command hostname --fqdn)" >> "${prefix}/etc/aliases"
 
 #
 # Configuring cron-apt
