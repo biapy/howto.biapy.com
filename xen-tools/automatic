@@ -60,6 +60,7 @@ installDebianPackage "${prefix}" logwatch
 installDebianPackage "${prefix}" rkhunter
 installDebianPackage "${prefix}" fail2ban
 installDebianPackage "${prefix}" most
+installDebianPackage "${prefix}" lsb-release
 
 
 
