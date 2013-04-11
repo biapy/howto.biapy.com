@@ -65,9 +65,9 @@ create_pidfiledir() {
 
 create_conffile()
 {
-  if [ -d '/etc/syslog-ng/syslog-ng.conf.d' ]; then
+  if [ -d '/etc/syslog-ng/conf.d' ]; then
     echo '' > '/etc/syslog-ng/syslog-ng.conf'
-    command find '/etc/syslog-ng/syslog-ng.conf.d' -type f -name '*.conf' \
+    command find '/etc/syslog-ng/conf.d' -type f -name '*.conf' \
       | command sort | command xargs -iFILE /bin/sh -c "echo '##
 ## Included from FILE
 ##'; /bin/cat 'FILE'" \
