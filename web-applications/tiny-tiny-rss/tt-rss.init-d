@@ -32,7 +32,7 @@ fi
 DAEMON="/usr/bin/php"
 DAEMON_ARGS="${TTRSS_PATH}/${DAEMON_SCRIPT}"
 DAEMON_DIR="${TTRSS_PATH}"
-PIDFILE="/var/run/tt-rss/DOMAIN/${NAME}.pid"
+PIDFILE="/var/run/${NAME}.pid"
 SCRIPTNAME="/etc/init.d/${NAME}"
 USER="www-data"
 GROUP="www-data"
