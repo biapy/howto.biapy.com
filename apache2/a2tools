@@ -780,7 +780,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
       fi
       ;;
     without-multiviews )
-      MULTI_VIEWS = "-MultiViews"
+      MULTI_VIEWS="-MultiViews"
       ;;
     remove | d )
       IS_REMOVAL="1"
