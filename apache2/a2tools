@@ -4,7 +4,7 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-VERSION=2.0.2
+VERSION=2.0.3
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -52,6 +52,8 @@ Available options are:
         separated by spaces. This option can be used more than once.
   * --overrides= | -o All
         Set AllowOverride directive (only for 'virtual-host' template).
+  * --without-multiviews
+        Disable MultiViews for VirtualHost. Can fix some rewriting problems.
   * --ssl= | -s key_name
         Create a HTTP virtual host with mod_ssl.
         Require a key name or --private-key and --public-key
@@ -276,7 +278,7 @@ PATH_TEMPLATE="
   # Some options for the root folder.
   # Read Apache 2 documentation to know exactly what is done.
   <Directory TARGET_VALUE>
-    Options Indexes FollowSymLinks MultiViews
+    Options Indexes FollowSymLinks MULTI_VIEWS
 
     # If you want to enable overrides, you should read:
     # http://httpd.apache.org/docs/2.0/mod/core.html#allowoverride
@@ -682,6 +684,7 @@ SSL_ENABLED="0"
 SSL_BIND_IP="$(eth0_ip)"
 ALLOW_OVERRIDE="None"
 IS_REMOVAL="0"
+MULTI_VIEWS="MultiViews"
 
 TYPE_PREFIX=""
 PROTOCOL="http"
@@ -689,7 +692,7 @@ PROTOCOL="http"
 APACHE_MODULES="rewrite"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: remove d" "${@}"; do
+while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: without-multiviews remove d" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -775,6 +778,9 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
       if [ -n "${OPTARG}" ]; then
         ALLOW_OVERRIDE="${OPTARG}"
       fi
+      ;;
+    without-multiviews )
+      MULTI_VIEWS = "-MultiViews"
       ;;
     remove | d )
       IS_REMOVAL="1"
@@ -933,6 +939,7 @@ ${VHOST_TEMPLATE[1]}"
     | command sed -e "s|SITE_HOSTNAME|${SITE_HOSTNAME}|g" \
                   -e "s|SERVER_ALIAS|${SERVER_ALIAS}|g" \
                   -e "s|TARGET_VALUE|${TARGET_VALUE}|g" \
+                  -e "s|MULTI_VIEWS|${MULTI_VIEWS}|g" \
                   -e "s|ALLOW_OVERRIDE|${ALLOW_OVERRIDE}|g" \
                   -e "s|SSLProxyEngine.*|SSLProxyEngine ${SSL_PROXY_ENGINE}|")"
 
