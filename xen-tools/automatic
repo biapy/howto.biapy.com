@@ -160,6 +160,9 @@ command cat "/etc/xen-tools/ssh-keys/xen-upgrade-rsa.pub" \
     >> "${prefix}/var/home/xen-upgrade/.ssh/authorized_keys"
 command chroot "${prefix}" chown -R xen-upgrade:nogroup "/var/home/xen-upgrade/.ssh"
 
+# Generating locales.
+command chroot ${prefix} locale-gen
+
 #
 # Killing remaining processes
 #
