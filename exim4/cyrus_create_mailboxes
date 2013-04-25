@@ -1,0 +1,24 @@
+#!/bin/bash
+
+MYSQL_HOST=MSQL_HOST
+MYSQL_DB=MSQL_DB
+MYSQL_USERNAME=MSQL_USERNAME
+MYSQL_USERPWD=MSQL_USERPWD
+
+CYRUS_ADMIN_USERNAME=ADMIN_LOGIN
+CYRUS_ADMIN_PASSWORD=ADMIN_PWD
+
+/bin/echo "SELECT CONCAT(user.username, '@', domain.name) AS mailbox
+           FROM user JOIN domain ON (user.domain_id = domain.id)
+           WHERE enabled=1 AND has_mailbox=1" \
+    | /usr/bin/mysql --user=$MYSQL_USERNAME \
+                     --password=$MYSQL_USERPWD \
+                     --host=$MYSQL_HOST $MYSQL_DB \
+    | sed -e '1d' -e 's|.*|createmailbox user/\0;|' \
+    | tr -d "\n" \
+    | sed -e 's/^.*$/\0quit;/' \
+    | cyradm --server localhost \
+            --user $CYRUS_ADMIN_USERNAME \
+            --password $CYRUS_ADMIN_PASSWORD \
+            --auth DIGEST-MD5 > /dev/null 2>&1
+
