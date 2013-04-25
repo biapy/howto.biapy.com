@@ -7,7 +7,7 @@
 #
 VERSION="1.1.6"
 
-SCRIPT_NAME="$(command basename ${0})"
+SCRIPT_NAME="$(command basename "${0}")"
 
 # Print this script help.
 function usage {
@@ -16,7 +16,7 @@ This tool ease MySQL server administration from command line.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --db-prefix='database_prefix' ]
+  ${SCRIPT_NAME} [ --help ] [ --db-prefix='database_prefix' ]
       [ --user-prefix='user_prefix' ] [ --host='user_host' ] [ --auto-hosts ]
       [ --user='mysql_user' ] [ --password='mysql_password' ]
       [ --mysql='mysql' ] [ --server='localhost' ] [ --with-ssh[=root] ]
