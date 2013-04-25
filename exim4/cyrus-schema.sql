@@ -16,7 +16,7 @@ CREATE TABLE `domain`
 	`name` VARCHAR(255)  NOT NULL,
 	PRIMARY KEY (`id`),
 	UNIQUE KEY `unique_domain` (`name`)
-)Type=InnoDB DEFAULT CHARSET=utf8;
+)Engine=InnoDB DEFAULT CHARSET=utf8;
 
 #-----------------------------------------------------------------------------
 #-- user
@@ -40,7 +40,7 @@ CREATE TABLE `user`
 		REFERENCES `domain` (`id`)
 		ON DELETE CASCADE,
 	UNIQUE KEY `unique_user` (`domain_id`, `username`)
-)Type=InnoDB DEFAULT CHARSET=utf8;
+)Engine=InnoDB DEFAULT CHARSET=utf8;
 
 #-----------------------------------------------------------------------------
 #-- alias
@@ -62,7 +62,7 @@ CREATE TABLE `alias`
 		REFERENCES `domain` (`id`)
 		ON DELETE CASCADE,
 	UNIQUE KEY `unique_alias` (`domain_id`, `aliasname`)
-)Type=InnoDB DEFAULT CHARSET=utf8;
+)Engine=InnoDB DEFAULT CHARSET=utf8;
 
 #-----------------------------------------------------------------------------
 #-- alias_additional_target
@@ -82,7 +82,7 @@ CREATE TABLE `alias_target`
 		FOREIGN KEY (`alias_id`)
 		REFERENCES `alias` (`id`)
 		ON DELETE CASCADE
-)Type=InnoDB DEFAULT CHARSET=utf8;
+)Engine=InnoDB DEFAULT CHARSET=utf8;
 
 #-----------------------------------------------------------------------------
 #-- sender_watch
@@ -99,7 +99,7 @@ CREATE TABLE `sender_watch`
 	`enabled` INTEGER default 1 NOT NULL,
 	PRIMARY KEY (`id`),
 	INDEX `sender_watch_sender_address` (`sender_address`)
-)Type=InnoDB DEFAULT CHARSET=utf8;
+)Engine=InnoDB DEFAULT CHARSET=utf8;
 
 
 # This restores the fkey checks, after having unset them earlier
