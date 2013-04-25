@@ -8,4 +8,5 @@ These files are used by:
 Contents
 --------
 * __exim4_helo_checks.conf__ : Exim 4 hardened HELO rules.
+* __exim4_no_spam_scan_acl.conf__ : Exim 4 Access control list preventing Spam scan.
 
