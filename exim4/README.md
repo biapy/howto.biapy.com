@@ -10,6 +10,7 @@ Contents
 --------
 * __exim4_helo_checks.conf__ : Exim 4 hardened HELO rules.
 * __exim4_no_spam_scan_acl.conf__ : Exim 4 Access control list preventing Spam scan.
+* __02_exim4-config_mysql_queries__ : Exim 4 database queries for Cyrus server.
 * __cyrus-schema.sql__ : Cyrus IMAP user database schema.
 * __cyrus_create_mailboxes__ : Cyrus automatic mailboxes creation.
 
