@@ -1,0 +1,34 @@
+
+### auth/10_exim4-config_mysql
+#################################
+
+plain_mysql:
+ driver = plaintext
+ public_name = PLAIN
+ server_prompts = :
+
+ server_condition = "${if and { \
+                      {!eq{$2}{}} \
+                      {!eq{$3}{}} \
+                      {eq{$3}{${lookup mysql{MYSQL_Q_PASSWORD_PLAIN}{$value}fail}} }} {yes}{no}}"
+ server_set_id = $2
+ .ifndef AUTH_SERVER_ALLOW_NOTLS_PASSWORDS
+   server_advertise_condition = ${if eq{$tls_cipher}{}{}{*}}
+ .endif
+
+
+login_mysql:
+  driver = plaintext
+  public_name = LOGIN
+  server_prompts = "Username:: : Password::"
+  server_condition = "${if and { \
+                      {!eq{$1}{}} \
+                      {!eq{$2}{}} \
+                      {eq{$2}{${lookup mysql{MYSQL_Q_PASSWORD_LOGIN}{$value}fail}} }} {yes}{no}}"
+
+  server_set_id = $1
+  .ifndef AUTH_SERVER_ALLOW_NOTLS_PASSWORDS
+    server_advertise_condition = ${if eq{$tls_cipher}{}{}{*}}
+  .endif
+
+

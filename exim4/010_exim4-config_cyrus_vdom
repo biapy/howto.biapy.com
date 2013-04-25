@@ -1,0 +1,48 @@
+
+### router/010_exim4-config_cyrus_vdom
+#################################
+
+# This routeur copy the email as defined by the sender_watch table.
+virtual_sender_watch:
+  driver = redirect
+  data = ${lookup mysql {MYSQL_Q_SENDER_WATCH}{$value}}
+  condition = ${if eq{$authenticated_id}{} {0}{1}}
+  unseen
+
+# This router forward email as defined by the alias table.
+virtual_alias:
+  driver = redirect
+  data = ${lookup mysql {MYSQL_Q_ALIAS}{$value}}
+
+# This router forward email as defined by the alias table.
+# This is for multi domain aliases.
+virtual_meta_alias:
+  driver = redirect
+  data = ${lookup mysql {MYSQL_Q_META_ALIAS}{$value}}
+
+# This router catch unknow emails as defined by the alias table.
+virtual_catchall:
+  driver = redirect
+  data = ${lookup mysql {MYSQL_Q_CATCHALL}{$value}}
+
+# This router catch unknow email as defined by the alias table.
+# This is for multi domain catch-all.
+virtual_meta_catchall:
+  driver = redirect
+  data = ${lookup mysql {MYSQL_Q_META_CATCHALL}{$value}}
+
+# This router reject e-mails that are not enabled, or does not have
+# a mailbox.
+fail_router:
+  debug_print = "R: fail_router for $local_part@$domain"
+  driver = redirect
+  domains = ${lookup mysql {MYSQL_Q_DISABLED}{$value}}
+  data = ":fail:"
+  allow_fail
+
+# This router pass the email to cyrus for mailbox delivery.
+cyrus_vdom:
+  driver = accept
+  domains = +cyrus_domains
+  transport = cyrus_ltcp
+  no_more
