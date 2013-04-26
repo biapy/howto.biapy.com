@@ -2,7 +2,10 @@
 ### main/02_exim4-config_mysql_queries
 #################################
 
-# Query to fetch list of email domains.
+# Query to fetch list of all email domains.
+MYSQL_Q_CYRUS_ALL_DOMAINS=SELECT DISTINCT domain.name FROM domain
+
+# Query to fetch current email domain.
 MYSQL_Q_CYRUS_DOMAIN=SELECT DISTINCT domain.name FROM domain \
                  WHERE domain.name = '${quote_mysql:$domain}'
 
@@ -154,4 +157,6 @@ MYSQL_Q_PASSWORD_LOGIN=SELECT DISTINCT user.password FROM domain JOIN user ON (d
 
 # Cyrus virtual domains :
 domainlist cyrus_domains = mysql;MYSQL_Q_CYRUS_DOMAIN
+
+domainlist cyrus_all_domains = mysql;MYSQL_Q_CYRUS_ALL_DOMAINS
 
