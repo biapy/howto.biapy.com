@@ -454,6 +454,7 @@ check_binary "dirname" "coreutils"
 check_binary "sed" "sed"
 #check_binary "wget" "wget"
 
+USER_AGENT="Mozilla/5.0 (X11; U; Linux $(command uname --machine); rv:5.0) Gecko/20100101 Firefox/5.0 (Debian)"
 
 BASE_DB_NAME=""
 ACTION=""
@@ -591,14 +592,14 @@ case "${FORGE}" in
     case "${DOWNLOAD_COMMAND}" in
       curl )
         VERSION="$(command curl --silent --location --output "-" \
-            "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
           | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
           | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
           )"
         ;;
       wget | * )
         VERSION="$(command wget --quiet --output-document=- \
-            "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
           | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
           | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
           )"
