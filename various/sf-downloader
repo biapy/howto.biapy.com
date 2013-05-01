@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.3"
+VERSION="1.2.4"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -46,7 +46,7 @@ Usage :
   Available options are :
     * --help | -h   : Display this message.
     * --sourceforge : Fetch files from sourceforge.net (default).
-    * --sf-direct   : Fetch files from sourceforge.net, alternative version detection method.
+    * --sf-alt : Fetch files from sourceforge.net, alternative version detection method.
     * --googlecode  : Fetch files from googlecode.com.
     * --ckeditor    : Fetch ckeditor files from cksource.com.
     * --download    : Download the project sources archive.
@@ -455,7 +455,7 @@ check_binary "dirname" "coreutils"
 check_binary "sed" "sed"
 #check_binary "wget" "wget"
 
-USER_AGENT="Mozilla/5.0 (X11; U; Linux $(command uname --machine); rv:5.0) Gecko/20100101 Firefox/5.0 (Debian)"
+USER_AGENT="Mozilla/5.0 (X11; U; Linux $(command uname --machine); rv:5.0) Gecko/20100101 Firefox/5.0"
 
 BASE_DB_NAME=""
 ACTION=""
@@ -478,7 +478,7 @@ STRIP_COMPONENTS="0"
 
 ACTION="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip sourceforge sf-direct googlecode ckeditor download-template: strip-components: s: output-directory: d:" "${@}"; do
+while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt googlecode ckeditor download-template: strip-components: s: output-directory: d:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -486,8 +486,8 @@ while getoptex "help h version v download tgz tbz2 zip sourceforge sf-direct goo
     'sourceforge' )
       FORGE="sourceforge"
       ;;
-    'sf-direct' )
-      FORGE="sf-direct"
+    'sf-alt' )
+      FORGE="sf-alt"
       ;;
     'googlecode' )
       FORGE="googlecode"
@@ -593,19 +593,19 @@ case "${FORGE}" in
         )"
     ;;
 
-  'sf-direct' )
+  'sf-alt' )
     SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
     case "${DOWNLOAD_COMMAND}" in
       curl )
         VERSION="$(command curl --silent --location --output "-" \
-            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
+              "http://sourceforge.net/projects/${PROJECT_NAME}/" \
           | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
           | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
           )"
         ;;
       wget | * )
         VERSION="$(command wget --quiet --output-document=- \
-            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
+              "http://sourceforge.net/projects/${PROJECT_NAME}/" \
           | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
           | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
           )"
@@ -623,14 +623,14 @@ case "${FORGE}" in
     case "${DOWNLOAD_COMMAND}" in
       curl )
         VERSION="$(command curl --silent --location --output "-" \
-              "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
           | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
           | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
           )"
         ;;
       wget | * )
         VERSION="$(command wget --quiet --output-document=- \
-              "http://sourceforge.net/projects/${PROJECT_NAME}/" \
+            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
           | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
           | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
           )"
