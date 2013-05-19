@@ -557,7 +557,11 @@ class CsvParser
 
     $results = array();
     $file_separator = $this->separators[0];
-    $user_culture = sfContext::getInstance()->getUser()->getCulture();
+    if(class_exists('sfContext'))
+    {
+      // Symfony 1.0 specifics.
+      $user_culture = sfContext::getInstance()->getUser()->getCulture();
+    }
 
     // We open the CSV file:
     $file_handle = fopen($file, 'r');
