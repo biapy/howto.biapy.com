@@ -104,7 +104,7 @@ class CsvParser
     }
 
     $this->separators = array(';', ',');
-    $this->true_values = array('1', 'TRUE', 'X', 'V', __('TRUE'));
+    $this->true_values = array('1', 'TRUE', 'X', 'V', $this->__('TRUE'));
 
     $this->setConfiguration($configuration);
   }
@@ -124,7 +124,7 @@ class CsvParser
     if(function_exists('__'))
     {
       // Symfony 1.0 specifics.
-      return __($string, $values);
+      return $this->__($string, $values);
     }
 
     foreach($values as $name => $value)
@@ -133,7 +133,7 @@ class CsvParser
     }
 
     return $string;
-  } // __()
+  } // $this->__()
 
 
 
@@ -188,14 +188,14 @@ class CsvParser
 
         if(!isset($infos['title']))
         {
-          throw new Exception(__('Configuration is not valid: column title is missing.'));
+          throw new Exception($this->__('Configuration is not valid: column title is missing.'));
         }
 
         $configuration[$result_column] = $infos;
       }
       else
       {
-        throw new Exception(__('Configuration is not valid: result column must be a string or a array.'));
+        throw new Exception($this->__('Configuration is not valid: result column must be a string or a array.'));
       }
     }
 
@@ -254,7 +254,7 @@ class CsvParser
           return $this->parseExcel($filename);
         } // Test if file is a strange excel file.
 
-        throw new Exception(__('File is neither a Excel or a CSV file.'));
+        throw new Exception($this->__('File is neither a Excel or a CSV file.'));
     }
 
     return false;
@@ -294,7 +294,7 @@ class CsvParser
             return $this->parseExcel($uploaded_file->getFilePath());
           } // Test if file is a strange excel file.
 
-          throw new Exception(__('Uploaded file is neither a Excel or a CSV file.'));
+          throw new Exception($this->__('Uploaded file is neither a Excel or a CSV file.'));
       }
     }
 
@@ -372,14 +372,14 @@ class CsvParser
 
       if($is_mandatory && !isset($columns[$result_column]))
       {
-        throw new Exception(__('Column %column% is missing.', array('%column%' => $infos['title'])));
+        throw new Exception($this->__('Column %column% is missing.', array('%column%' => $infos['title'])));
       }
 
     }
 
     if(count($columns) == 0) // Test if columns associations found.
     {
-      throw new Exception(__('No corresponding column found.'));
+      throw new Exception($this->__('No corresponding column found.'));
     } // Test if columns associations found.
 
     return $columns;
@@ -409,7 +409,7 @@ class CsvParser
     {
       if($this->configuration[$result_column]['mandatory'] && !$value)
       {
-        throw new Exception(__("Column %column% is missing at line %line%.", array('%column%' => $this->configuration[$result_column]['title'], '%line%' => $line_number)));
+        throw new Exception($this->__("Column %column% is missing at line %line%.", array('%column%' => $this->configuration[$result_column]['title'], '%line%' => $line_number)));
       }
     }
 
