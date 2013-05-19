@@ -7,3 +7,5 @@ Contents
 --------
 
 * __php-tools__ : PHP configuration management tool (see [Gérer la configuration PHP en ligne de commande (fr)](http://howto.biapy.com/fr/debian-gnu-linux/serveurs/php/gerer-la-configuration-php-en-ligne-de-commande))
+* __CsvParser.class.php__ : Library easing CSV file reading with PHP. Usefull for data import.
+* __DirectoriesAutoloader.php__ : An optimized class autoloader for PHP.
