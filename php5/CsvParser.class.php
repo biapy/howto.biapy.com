@@ -97,7 +97,11 @@ class CsvParser
   public function __construct($configuration)
   {
     // Get the translation function
-    sfLoader::loadHelpers('I18N', sfContext::getInstance()->getModuleName());
+    if(class_exists('sfLoader'))
+    {
+      // Symfony 1.0 specifics.
+      sfLoader::loadHelpers('I18N', sfContext::getInstance()->getModuleName());
+    }
 
     $this->separators = array(';', ',');
     $this->true_values = array('1', 'TRUE', 'X', 'V', __('TRUE'));
@@ -398,8 +402,12 @@ class CsvParser
       case self::DATE:
         if($value)
         {
-          list($d, $m, $y) = sfI18N::getDateForCulture($value, $user_culture);
-          $value = "$y-$m-$d";
+          if(class_exists('sfI18N'))
+          {
+            // Symfony 1.0 specifics.
+            list($d, $m, $y) = sfI18N::getDateForCulture($value, $user_culture);
+            $value = "$y-$m-$d";
+          }
         }
         else
         {
