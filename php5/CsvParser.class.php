@@ -109,6 +109,34 @@ class CsvParser
     $this->setConfiguration($configuration);
   }
 
+
+
+  /**
+   * Manage calls to I18N functions.
+   *
+   * @param string $string The text to translate.
+   * @param array $values Optionnal substitutions.
+   * @access protected
+   * @return string The translated text.
+   */
+  protected function __($string, $values = array())
+  {
+    if(function_exists('__'))
+    {
+      // Symfony 1.0 specifics.
+      return __($string, $values);
+    }
+
+    foreach($values as $name => $value)
+    {
+      $string = str_replace($name, $value, $string);
+    }
+
+    return $string;
+  } // __()
+
+
+
   /**
    * Set this CSV parser configuration.
    * 
