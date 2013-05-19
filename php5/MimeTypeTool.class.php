@@ -755,7 +755,7 @@ exit 0';
 
  dirname(__FILE__) . DIRECTORY_SEPARATOR . 'get-mime-type.sh';
 
-    $command = sprintf("%s '%s'", $shell, $get_mime_type);
+    $command = sprintf("%s -c '%s'", $shell, $get_mime_type);
 
     return exec($command);
   } // getMimeType()
