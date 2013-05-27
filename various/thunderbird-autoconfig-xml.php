@@ -1,6 +1,6 @@
 <?php
 
-$mail_domain = str_replace('autoconfig.', $_SERVER['HTTP_HOST']);
+$mail_domain = str_replace('autoconfig.', '', $_SERVER['HTTP_HOST']);
 
 $default_domain = $mail_domain;
 
@@ -27,8 +27,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
     <displayName><?php echo $mail_domain ?> Mail</displayName>
     <displayShortName><?php echo $mail_domain ?></displayShortName>
 <?php foreach($protocols as $protocol): ?>
-  <?php switch($protocol): ?>
-    <?php
+  <?php switch($protocol):
       case 'imap/tls':
     ?>
     <incomingServer type="imap">
