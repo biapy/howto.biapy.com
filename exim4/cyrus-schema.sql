@@ -1,106 +1,55 @@
+CREATE TABLE alias (
+  id INT AUTO_INCREMENT NOT NULL,
+  domain_id INT DEFAULT NULL,
+  aliasname VARCHAR(255) NOT NULL,
+  enabled TINYINT(1) NOT NULL,
+  INDEX IDX_E16C6B94115F0EE5 (domain_id),
+  INDEX enabled_index (enabled),
+  UNIQUE INDEX aliasname_unique (domain_id, aliasname),
+  PRIMARY KEY(id)
+) DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE = InnoDB;
 
-# This is a fix for InnoDB in MySQL >= 4.1.x
-# It "suspends judgement" for fkey relationships until are tables are set.
-SET FOREIGN_KEY_CHECKS = 0;
+CREATE TABLE user (
+  id INT AUTO_INCREMENT NOT NULL,
+  domain_id INT DEFAULT NULL,
+  username VARCHAR(255) NOT NULL,
+  password VARCHAR(64) NOT NULL,
+  enabled TINYINT(1) NOT NULL,
+  has_mailbox TINYINT(1) NOT NULL,
+  INDEX IDX_8D93D649115F0EE5 (domain_id),
+  INDEX enabled_index (enabled),
+  UNIQUE INDEX username_unique (domain_id, username),
+  PRIMARY KEY(id)
+) DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE = InnoDB;
 
-#-----------------------------------------------------------------------------
-#-- domain
-#-----------------------------------------------------------------------------
+CREATE TABLE alias_target (
+  id INT AUTO_INCREMENT NOT NULL,
+  alias_id INT DEFAULT NULL,
+  target VARCHAR(255) NOT NULL,
+  INDEX IDX_F4E9D9D85E564AE2 (alias_id),
+  UNIQUE INDEX alias_target_unique (alias_id, target),
+  PRIMARY KEY(id)
+) DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE = InnoDB;
 
-DROP TABLE IF EXISTS `domain`;
+CREATE TABLE sender_watch (
+  id INT AUTO_INCREMENT NOT NULL,
+  sender_address VARCHAR(255) NOT NULL,
+  target VARCHAR(255) NOT NULL, enabled TINYINT(1) NOT NULL,
+  INDEX sender_address_index (sender_address),
+  INDEX enabled_index (enabled),
+  UNIQUE INDEX send_watch_unique (sender_address, target),
+  PRIMARY KEY(id)
+) DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE = InnoDB;
 
+CREATE TABLE domain (
+  id INT AUTO_INCREMENT NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  UNIQUE INDEX UNIQ_A7A91E0B5E237E06 (name),
+  PRIMARY KEY(id)
+) DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE = InnoDB;
 
-CREATE TABLE `domain`
-(
-	`id` INTEGER  NOT NULL AUTO_INCREMENT,
-	`name` VARCHAR(255)  NOT NULL,
-	PRIMARY KEY (`id`),
-	UNIQUE KEY `unique_domain` (`name`)
-)Engine=InnoDB DEFAULT CHARSET=utf8;
-
-#-----------------------------------------------------------------------------
-#-- user
-#-----------------------------------------------------------------------------
-
-DROP TABLE IF EXISTS `user`;
-
-
-CREATE TABLE `user`
-(
-	`id` INTEGER  NOT NULL AUTO_INCREMENT,
-	`domain_id` INTEGER  NOT NULL,
-	`username` VARCHAR(255)  NOT NULL,
-	`password` VARCHAR(64)  NOT NULL,
-	`enabled` INTEGER default 1 NOT NULL,
-	`has_mailbox` INTEGER default 1 NOT NULL,
-	PRIMARY KEY (`id`),
-	INDEX `user_FI_1` (`domain_id`),
-	CONSTRAINT `user_FK_1`
-		FOREIGN KEY (`domain_id`)
-		REFERENCES `domain` (`id`)
-		ON DELETE CASCADE,
-	UNIQUE KEY `unique_user` (`domain_id`, `username`)
-)Engine=InnoDB DEFAULT CHARSET=utf8;
-
-#-----------------------------------------------------------------------------
-#-- alias
-#-----------------------------------------------------------------------------
-
-DROP TABLE IF EXISTS `alias`;
-
-
-CREATE TABLE `alias`
-(
-	`id` INTEGER  NOT NULL AUTO_INCREMENT,
-	`domain_id` INTEGER,
-	`aliasname` VARCHAR(255)  NOT NULL,
-	`enabled` INTEGER default 1 NOT NULL,
-	PRIMARY KEY (`id`),
-	INDEX `alias_FI_1` (`domain_id`),
-	CONSTRAINT `alias_FK_1`
-		FOREIGN KEY (`domain_id`)
-		REFERENCES `domain` (`id`)
-		ON DELETE CASCADE,
-	UNIQUE KEY `unique_alias` (`domain_id`, `aliasname`)
-)Engine=InnoDB DEFAULT CHARSET=utf8;
-
-#-----------------------------------------------------------------------------
-#-- alias_additional_target
-#-----------------------------------------------------------------------------
-
-DROP TABLE IF EXISTS `alias_target`;
+ALTER TABLE alias ADD CONSTRAINT FK_E16C6B94115F0EE5 FOREIGN KEY (domain_id) REFERENCES domain (id) ON DELETE CASCADE;
+ALTER TABLE user ADD CONSTRAINT FK_8D93D649115F0EE5 FOREIGN KEY (domain_id) REFERENCES domain (id) ON DELETE CASCADE;
+ALTER TABLE alias_target ADD CONSTRAINT FK_F4E9D9D85E564AE2 FOREIGN KEY (alias_id) REFERENCES alias (id) ON DELETE CASCADE;
 
 
-CREATE TABLE `alias_target`
-(
-	`id` INTEGER  NOT NULL AUTO_INCREMENT,
-	`alias_id` INTEGER  NOT NULL,
-	`target` VARCHAR(512)  NOT NULL,
-	PRIMARY KEY (`id`),
-	INDEX `alias_target_FI_1` (`alias_id`),
-	CONSTRAINT `alias_target_FK_1`
-		FOREIGN KEY (`alias_id`)
-		REFERENCES `alias` (`id`)
-		ON DELETE CASCADE
-)Engine=InnoDB DEFAULT CHARSET=utf8;
-
-#-----------------------------------------------------------------------------
-#-- sender_watch
-#-----------------------------------------------------------------------------
-
-DROP TABLE IF EXISTS `sender_watch`;
-
-
-CREATE TABLE `sender_watch`
-(
-	`id` INTEGER  NOT NULL AUTO_INCREMENT,
-	`sender_address` VARCHAR(512) NOT NULL,
-	`target` VARCHAR(512) NOT NULL,
-	`enabled` INTEGER default 1 NOT NULL,
-	PRIMARY KEY (`id`),
-	INDEX `sender_watch_sender_address` (`sender_address`)
-)Engine=InnoDB DEFAULT CHARSET=utf8;
-
-
-# This restores the fkey checks, after having unset them earlier
-SET FOREIGN_KEY_CHECKS = 1;
