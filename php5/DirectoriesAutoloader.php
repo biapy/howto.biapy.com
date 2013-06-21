@@ -183,6 +183,10 @@ class DirectoriesAutoloader {
 	 * Tente de charger une classe
 	 */
 	private function _loadClass ($pClassName){
+		if(class_exists(str_replace('\\', ':', $pClassName), false)){
+			return true;
+		}
+
 		$className = strtolower ($pClassName);
 		if (count ($this->_classes) === 0){
 			if (is_readable ($this->_cachePath.'directoriesautoloader.cache.php')){
