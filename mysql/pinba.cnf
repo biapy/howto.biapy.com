@@ -1,0 +1,58 @@
+#Pinba engine configuration.
+
+[mysqld]
+
+# pinba_port
+# ----------
+# port used by data collector. Default value is 30002.
+#pinba_port = 30002
+
+# pinba_address
+# -------------
+# IP address to listen at (leave it empty if you want to listen at any IP).
+pinba_address = 127.0.0.1
+
+# pinba_stats_gathering_period (microseconds)
+# -------------------------------------------
+# defines how often the collector thread has to lock down both request and
+# temporary pool in order to process incoming packets and drop outdated ones.
+# Default value is 10000 microseconds, i.e. it checks for new data 100 times
+# per sec.
+#
+# Make sure UDP buffer in your system is big enough to store arriving packages.
+# Check out netstat -s | grep "receive errors" output - if the number
+# constantly grows, then you need to increase the buffer. Linux users can do
+# that using echo "<new value>" > /proc/sys/net/core/rmem_default.
+#pinba_stats_gathering_period = 10000
+
+# pinba_stats_history (seconds)
+# -----------------------------
+# defines how old can be data in the request pool. Pinba deletes outdated data
+# before processing incoming packets, this setting defines what to consider
+# "old". Default value is 900 seconds, i.e. the data will stay for 15 minutes
+# (15 * 60 sec), but only if the request pool will not overflow.
+#pinba_stats_history = 900
+
+# pinba_temp_pool_size
+# --------------------
+# The value should not be too low, or Pinba will start dropping incoming
+# packets. Default value is 10000, but in some cases you might want to
+# increase it.
+#pinba_temp_pool_size = 10000
+
+# pinba_request_pool_size
+# -----------------------
+# this is basically the number of request records to store. If you set the
+# value to, say, 10000, Pinba will be able store 10000 requests packets at
+# maximum and newer requests will overwrite the old ones. The rule of thumb is
+# to use this formula: max * stats_history = request. Default value is 1000000.
+#pinba_request_pool_size = 10000
+
+# pinba_tag_report_timeout (seconds)
+# ----------------------------------
+# defines how long to update tag report after the last read from the report.
+# The report data is first generated when you read it for the first time (hence
+# the first query might take a while..), but after that it's updated on the
+# fly. This setting defines how long the data is updated. Default value is -1,
+# i.e. keep the data updated forever.
+#pinba_tag_report_timeout = -1
