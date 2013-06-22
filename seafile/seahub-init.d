@@ -55,12 +55,6 @@ function usage () {
     echo ""
 }
 
-# Check args
-if [[ $1 != "start" && $1 != "stop" && $1 != "restart" \
-    && $1 != "start-fastcgi" && $1 != "restart-fastcgi" ]]; then
-    usage;
-    exit 1;
-fi
 
 function check_python_executable() {
     if [[ "$PYTHON" != "" && -x $PYTHON ]]; then
@@ -90,18 +84,18 @@ function validate_ccnet_conf_dir () {
         echo "Error: there is no ccnet config directory."
         echo "Have you run setup-seafile.sh before this?"
         echo ""
-        exit -1;
+        exit 1;
     fi
 }
 
 function read_seafile_data_dir () {
-    seafile_ini=${default_ccnet_conf_dir}/seafile.ini
-    if [[ ! -f ${seafile_ini} ]]; then
+    seafile_ini="${default_ccnet_conf_dir}/seafile.ini"
+    if [[ ! -f "${seafile_ini}" ]]; then
         echo "${seafile_ini} not found. Now quit"
         exit 1
     fi
-    seafile_data_dir=$(cat "${seafile_ini}")
-    if [[ ! -d ${seafile_data_dir} ]]; then
+    seafile_data_dir="$(command cat "${seafile_ini}")"
+    if [[ ! -d "${seafile_data_dir}" ]]; then
         echo "Your seafile server data directory \"${seafile_data_dir}\" is invalid or doesn't exits."
         echo "Please check it first, or create this directory yourself."
         echo ""
@@ -129,16 +123,16 @@ function before_start() {
     validate_ccnet_conf_dir;
     read_seafile_data_dir;
 
-    validate_seahub_running;
-
-    export CCNET_CONF_DIR=${default_ccnet_conf_dir}
-    export SEAFILE_CONF_DIR=${seafile_data_dir}
-    export PYTHONPATH=${INSTALLPATH}/seafile/lib/python2.6/site-packages:${INSTALLPATH}/seafile/lib64/python2.6/site-packages:${INSTALLPATH}/seahub/thirdpart:$PYTHONPATH
-    export PYTHONPATH=${INSTALLPATH}/seafile/lib/python2.7/site-packages:${INSTALLPATH}/seafile/lib64/python2.7/site-packages:$PYTHONPATH
+    export CCNET_CONF_DIR="${default_ccnet_conf_dir}"
+    export SEAFILE_CONF_DIR="${seafile_data_dir}"
+    export PYTHONPATH="${INSTALLPATH}/seafile/lib/python2.6/site-packages:${INSTALLPATH}/seafile/lib64/python2.6/site-packages:${INSTALLPATH}/seahub/thirdpart:${PYTHONPATH}"
+    export PYTHONPATH="${INSTALLPATH}/seafile/lib/python2.7/site-packages:${INSTALLPATH}/seafile/lib64/python2.7/site-packages:${PYTHONPATH}"
 }
 
 function do_start () {
     before_start;
+    validate_seahub_running;
+
     # echo "Starting seahub at port ${PORT} ..."
 
     if pgrep -f "${manage_py}" 1>/dev/null; then
@@ -154,13 +148,13 @@ function do_start () {
             "${manage_py}" run_gunicorn -c "${gunicorn_conf}" -b "0.0.0.0:${PORT}" \
             || return 2
     else
-        ## $PYTHON "${manage_py}" runfcgi host=127.0.0.1 port=${PORT} pidfile=$pidfile \
+        ## $PYTHON "${manage_py}" runfcgi "host=127.0.0.1" "port=${PORT}" "pidfile=${pidfile}" \
         ##    outlog=${accesslog} errlog=${errorlog}
 
-        start-stop-daemon --start --quiet --pidfile $PIDFILE \
+        start-stop-daemon --start --quiet --pidfile "${PIDFILE}" \
             --user "${USER}" --group "${GROUP}" --exec $PYTHON -- \
-            "${manage_py}" runfcgi host=127.0.0.1 port=${PORT} pidfile=$pidfile \
-            outlog=${accesslog} errlog=${errorlog} \
+            "${manage_py}" runfcgi "host=127.0.0.1" "port=${PORT}" "pidfile=${pidfile}" \
+            "outlog=${accesslog}" "errlog=${errorlog}" \
             || return 2
     fi
 
@@ -181,18 +175,18 @@ function do_stop () {
     #   1 if daemon was already stopped
     #   2 if daemon could not be stopped
     #   other if a failure occurred
-    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile $PIDFILE
+    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile "${PIDFILE}"
     RETVAL="$?"
-    [ "$RETVAL" = 2 ] && return 2
+    [ "${RETVAL}" = '2' ] && return 2
 
     # Many daemons don't delete their pidfiles when they exit.
-    rm -f $PIDFILE
-    return "$RETVAL"
+    rm -f "${PIDFILE}"
+    return "${RETVAL}"
 }
 
 case $1 in
     "start" )
-        [ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+        [ "$VERBOSE" != no ] && log_daemon_msg "Starting ${DESC}" "${NAME}"
         do_start
         case "$?" in
             0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
@@ -200,7 +194,7 @@ case $1 in
         esac
         ;;
     "stop" )
-        [ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+        [ "$VERBOSE" != no ] && log_daemon_msg "Stopping ${DESC}" "${NAME}"
         do_stop
         case "$?" in
             0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
@@ -212,7 +206,7 @@ case $1 in
         # If the "reload" option is implemented then remove the
         # 'force-reload' alias
         #
-        log_daemon_msg "Restarting $DESC" "$NAME"
+        log_daemon_msg "Restarting ${DESC}" "${NAME}"
         do_stop
         sleep 2
         case "$?" in

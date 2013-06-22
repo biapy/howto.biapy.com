@@ -52,12 +52,6 @@ function usage () {
     echo ""
 }
 
-# check args
-if [[ $# != 1 || ( "$1" != "start" && "$1" != "stop" && "$1" != "restart" ) ]]; then
-    usage;
-    exit 1;
-fi
-
 function validate_ccnet_conf_dir () {
     if [[ ! -d ${default_ccnet_conf_dir} ]]; then
         echo "Error: there is no ccnet config directory."
@@ -68,13 +62,13 @@ function validate_ccnet_conf_dir () {
 }
 
 function read_seafile_data_dir () {
-    seafile_ini=${default_ccnet_conf_dir}/seafile.ini
-    if [[ ! -f ${seafile_ini} ]]; then
+    seafile_ini="${default_ccnet_conf_dir}/seafile.ini"
+    if [[ ! -f "${seafile_ini}" ]]; then
         echo "${seafile_ini} not found. Now quit"
         exit 1
     fi
-    seafile_data_dir=$(cat "${seafile_ini}")
-    if [[ ! -d ${seafile_data_dir} ]]; then
+    seafile_data_dir="$(command cat "${seafile_ini}")"
+    if [[ ! -d "${seafile_data_dir}" ]]; then
         echo "Your seafile server data directory \"${seafile_data_dir}\" is invalid or doesn't exits."
         echo "Please check it first, or create this directory yourself."
         echo ""
@@ -83,7 +77,7 @@ function read_seafile_data_dir () {
 }
 
 function test_config() {
-    if ! LD_LIBRARY_PATH=$SEAFILE_LD_LIBRARY_PATH ${seaf_controller} --test -c "${default_ccnet_conf_dir}" -d "${seafile_data_dir}"; then
+    if ! LD_LIBRARY_PATH="${SEAFILE_LD_LIBRARY_PATH}" ${seaf_controller} --test -c "${default_ccnet_conf_dir}" -d "${seafile_data_dir}"; then
         exit 1;
     fi
 }
