@@ -68,13 +68,13 @@ function check_python_executable() {
     fi
 
     if which python2.7 2>/dev/null 1>&2; then
-        PYTHON=python2.7
+        PYTHON="$(command which 'python2.7')"
     elif which python27 2>/dev/null 1>&2; then
-        PYTHON=python27
+        PYTHON="$(command which 'python27')"
     elif which python2.6 2>/dev/null 1>&2; then
-        PYTHON=python2.6
+        PYTHON="$(command which 'python2.6')"
     elif which python26 2>/dev/null 1>&2; then
-        PYTHON=python26
+        PYTHON="$(command which 'python26')"
     else
         echo
         echo "Can't find a python executable of version 2.6 or above in PATH"
