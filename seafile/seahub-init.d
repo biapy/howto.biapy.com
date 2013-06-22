@@ -143,7 +143,7 @@ function do_start () {
     if [ "${MODE}" != 'fastcgi' ]; then
         ## $PYTHON "${manage_py}" run_gunicorn -c "${gunicorn_conf}" -b "0.0.0.0:${PORT}"
 
-        start-stop-daemon --start --quiet --make-pidfile --pidfile "${pidfile}" \
+        start-stop-daemon --start --quiet --pidfile "${pidfile}" \
             --chuid "${USER}" --user "${USER}" --group "${GROUP}" --exec "${PYTHON}" -- \
             "${manage_py}" run_gunicorn -c "${gunicorn_conf}" -b "0.0.0.0:${PORT}" \
             || return 2
@@ -151,7 +151,7 @@ function do_start () {
         ## $PYTHON "${manage_py}" runfcgi "host=127.0.0.1" "port=${PORT}" "pidfile=${pidfile}" \
         ##    outlog=${accesslog} errlog=${errorlog}
 
-        start-stop-daemon --start --quiet -pidfile "${pidfile}" \
+        start-stop-daemon --start --quiet --pidfile "${pidfile}" \
             --chuid "${USER}" --user "${USER}" --group "${GROUP}" --exec "${PYTHON}" -- \
             "${manage_py}" runfcgi "host=127.0.0.1" "port=${PORT}" "pidfile=${pidfile}" \
             "outlog=${accesslog}" "errlog=${errorlog}" \
