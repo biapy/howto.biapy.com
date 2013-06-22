@@ -119,8 +119,8 @@ function do_start () {
 
     ## LD_LIBRARY_PATH=$SEAFILE_LD_LIBRARY_PATH ${seaf_controller} -c "${default_ccnet_conf_dir}" -d "${seafile_data_dir}"
     LD_LIBRARY_PATH=$SEAFILE_LD_LIBRARY_PATH start-stop-daemon --start --quiet \
-        --pidfile $PIDFILE --user "${USER}" --group "${GROUP}" --exec ${seaf_controller} -- \
-         -c "${default_ccnet_conf_dir}" -d "${seafile_data_dir}" \
+        --pidfile "${PIDFILE}" --chuid "${USER}" --user "${USER}" --group "${GROUP}" --exec ${seaf_controller} -- \
+        -c "${default_ccnet_conf_dir}" -d "${seafile_data_dir}" \
         || return 2
 
     sleep 3

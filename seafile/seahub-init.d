@@ -143,16 +143,16 @@ function do_start () {
     if [ "${MODE}" != 'fastcgi' ]; then
         ## $PYTHON "${manage_py}" run_gunicorn -c "${gunicorn_conf}" -b "0.0.0.0:${PORT}"
 
-        start-stop-daemon --start --quiet --pidfile $PIDFILE \
-            --user "${USER}" --group "${GROUP}" --exec $PYTHON -- \
+        start-stop-daemon --start --quiet --make-pidfile --pidfile $PIDFILE \
+            --chuid "${USER}" --user "${USER}" --group "${GROUP}" --exec "${PYTHON}" -- \
             "${manage_py}" run_gunicorn -c "${gunicorn_conf}" -b "0.0.0.0:${PORT}" \
             || return 2
     else
         ## $PYTHON "${manage_py}" runfcgi "host=127.0.0.1" "port=${PORT}" "pidfile=${pidfile}" \
         ##    outlog=${accesslog} errlog=${errorlog}
 
-        start-stop-daemon --start --quiet --pidfile "${PIDFILE}" \
-            --user "${USER}" --group "${GROUP}" --exec $PYTHON -- \
+        start-stop-daemon --start --quiet --make-pidfile --pidfile "${PIDFILE}" \
+            --chuid "${USER}" --user "${USER}" --group "${GROUP}" --exec "${PYTHON}" -- \
             "${manage_py}" runfcgi "host=127.0.0.1" "port=${PORT}" "pidfile=${pidfile}" \
             "outlog=${accesslog}" "errlog=${errorlog}" \
             || return 2
@@ -175,7 +175,8 @@ function do_stop () {
     #   1 if daemon was already stopped
     #   2 if daemon could not be stopped
     #   other if a failure occurred
-    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile "${PIDFILE}"
+    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile "${PIDFILE}" \
+        --user "${USER}" --group "${GROUP}" --exec "${PYTHON}"
     RETVAL="$?"
     [ "${RETVAL}" = '2' ] && return 2
 
