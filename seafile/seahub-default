@@ -1,0 +1,8 @@
+# Seahub for %DOMAIN% default file
+# --------------------------------
+
+# Seahub mode (normal or fastcgi)
+MODE='fastcgi'
+
+# Seahub port
+PORT=8000
