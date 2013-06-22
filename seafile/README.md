@@ -1,12 +1,12 @@
-Plone
+Seafile
 =====
 
 These files are used by:
 
-* [Installer Plone sur Debian (fr)](http://howto.biapy.com/fr/debian-gnu-linux/applications-web/gestion-de-contenu/installer-plone-sur-debian)
+* [Installer Seafile sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/applications-web/gestion-de-fichiers/installer-seafile-sur-debian)
 
 Contents
 --------
-* __plone-default__ : Plone init.d configuration file.
-* __plone-init.d__ : Plone init.d script.
-* __plone-logrotate.d__ : Plone logrotate configuration file.
+* __seahub-default__ : Seahub init.d configuration file.
+* __seahub-init.d__ : Seahub init.d script.
+* __seafile-init.d__ : Seafile init.d file.

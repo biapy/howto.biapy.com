@@ -124,15 +124,6 @@ function validate_port () {
     fi
 }
 
-if [[ ($1 == "start" || $1 == "restart") \
-    && ($# == 1) ]]; then
-elif [[ $1 == "stop" && $# == 1 ]]; then
-    dummy=dummy
-else
-    usage;
-    exit 1
-fi
-
 function before_start() {
     check_python_executable;
     validate_ccnet_conf_dir;
@@ -239,7 +230,11 @@ case $1 in
             ;;
         esac
         ;;
+    *)
+        #echo "Usage: $SCRIPTNAME {start|stop|restart|reload|force-reload}" >&2
+        echo "Usage: $SCRIPTNAME {start|stop|restart|force-reload}" >&2
+        exit 3
+        ;;
 esac
 
-echo "Done."
-echo ""
+:
