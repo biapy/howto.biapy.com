@@ -11,6 +11,7 @@
 require_once(dirname(__FILE__) . DIRECTORY_SEPARATOR . 'memcached_mysql_sessionhandler_config.class.php');
 class Memcached_MySQL_SessionHandler
     extends Memcached_MySQL_SessionHandler_Config
+    implements \SessionHandlerInterface
 {
 
   const EXPIRATION_PREFIX = 'db-';
