@@ -9,7 +9,7 @@
  * @see http://howto.biapy.com/fr/debian-gnu-linux/serveurs/php/gerer-les-sessions-php-avec-memcached-et-mysql
  */
 
-if(! class_exists('SessionHandlerInterface'))
+if(! interface_exists('SessionHandlerInterface'))
 {
   interface SessionHandlerInterface {
     public function close();
