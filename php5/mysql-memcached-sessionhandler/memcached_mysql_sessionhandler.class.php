@@ -185,8 +185,8 @@ class Memcached_MySQL_SessionHandler
     $data = $this->memcached->get($session_id);
     if($data === false)
     {
-      $stmt = $this->mysqli->prepare(sprintf('SELECT %1$s_data FROM %2$s_session
-          WHERE %1$s_id=?',
+      $stmt = $this->mysqli->prepare(sprintf('SELECT %1$ssession_data FROM %2$sphp_session
+          WHERE %1$ssession_id=?',
           self::FIELD_PREFIX, self::TABLE_PREFIX));
       $stmt->bind_param("s", $session_id);
       $stmt->execute();
@@ -243,9 +243,9 @@ class Memcached_MySQL_SessionHandler
     }
     $expiration = $this->lifeTime + $now;
 
-    $stmt = $this->mysqli->prepare(sprintf('UPDATE %2$s_session
-                  SET %1$s_expiration=?
-                  WHERE %1$s_id=?',
+    $stmt = $this->mysqli->prepare(sprintf('UPDATE %2$sphp_session
+                  SET %1$ssession_expiration=?
+                  WHERE %1$ssession_id=?',
                   self::FIELD_PREFIX, self::TABLE_PREFIX));
 
     $stmt->bind_param("is", $expiration, $session_id);
@@ -278,9 +278,9 @@ class Memcached_MySQL_SessionHandler
 
     if ($this->initSessionData !== $data) {
      $stmt = $this->mysqli->prepare(sprintf('INSERT INTO
-              %2$s_session(%1$s_id, %1$s_expiration, %1$s_data)
+              %2$sphp_session(%1$ssession_id, %1$ssession_expiration, %1$ssession_data)
               VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE
-              %1$s_expiration = ?, %1$s_data = ?',
+              %1$ssession_expiration = ?, %1$ssession_data = ?',
               self::FIELD_PREFIX, self::TABLE_PREFIX));
       $stmt->bind_param("sisss", $session_id, $expiration, $data, $expiration, $data);
       $result = $stmt->execute();
@@ -304,8 +304,8 @@ class Memcached_MySQL_SessionHandler
   {
     $this->memcached->delete($session_id);
     $this->memcached->delete(self::EXPIRATION_PREFIX.$session_id);
-    $stmt = $this->mysqli->prepare(sprintf('DELETE FROM %2$s_session
-                    WHERE %1$s_id=?',
+    $stmt = $this->mysqli->prepare(sprintf('DELETE FROM %2$sphp_session
+                    WHERE %1$ssession_id=?',
                     self::FIELD_PREFIX, self::TABLE_PREFIX));
     $stmt->bind_param("s", $session_id);
     $stmt->execute();
@@ -324,8 +324,8 @@ class Memcached_MySQL_SessionHandler
    */
   public function gc($maxlifetime)
   {
-    $stmt = $this->mysqli->prepare(sprintf('SELECT %1$s_id FROM %2$s_session
-            WHERE %1$s_expiration<?',
+    $stmt = $this->mysqli->prepare(sprintf('SELECT %1$ssession_id FROM %2$sphp_session
+            WHERE %1$ssession_expiration<?',
             self::FIELD_PREFIX, self::TABLE_PREFIX));
     $stmt->bind_param("i", time());
     $stmt->execute();

@@ -15,8 +15,8 @@ abstract class Memcached_MySQL_SessionHandler_Config
   const MYSQL_USER = 'user';
   const MYSQL_PASSWORD = 'password';
 
-  const TABLE_PREFIX = 'php';
-  const FIELD_PREFIX = 'session';
+  const TABLE_PREFIX = '';
+  const FIELD_PREFIX = '';
 
   const MEMCACHED_ID = 'Ismeijyan5';
   // Memcached servers list.

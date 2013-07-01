@@ -1,7 +1,10 @@
 Handle PHP sessions with Memcached and MySQL
 ============================================
 
-Files used by the guide  [Gérer les sessions PHP avec Memcached et MySQL (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/php/gerer-les-sessions-php-avec-memcached-et-mysql).
+Files used by these howtos:
+
+* [Gérer les sessions PHP avec Memcached et MySQL (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/php/gerer-les-sessions-php-avec-memcached-et-mysql).
+* [Store PHP sessions in Memcached and MySQL (en)](https://howto.biapy.com/en/debian-gnu-linux/servers/php/store-php-sessions-in-memcached-and-mysql)
 
 * __memcached_mysql_sessionhandler.class.php__ : The PHP custom session handler class (to place in _/etc/php5/session-management/_).
 * __memcached_mysql_sessionhandler_config.class.php__ : The PHP custom session handler configuration class (to place in _/etc/php5/session-management/_).
