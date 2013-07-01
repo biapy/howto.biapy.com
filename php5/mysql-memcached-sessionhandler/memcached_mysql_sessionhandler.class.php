@@ -52,6 +52,7 @@ class Memcached_MySQL_SessionHandler
   {
     // this ensures to write down and close the session when destroying the
     // handler object
+    ini_set('session.save_handler', 'user');
     register_shutdown_function("session_write_close");
 
     $this->lifeTime = intval(ini_get("session.gc_maxlifetime"));
@@ -200,7 +201,7 @@ class Memcached_MySQL_SessionHandler
       {
         // record not in the db
         $stmt->free_result();
-        $data = false;
+        $data = '';
       }
       $stmt->close();
       unset($stmt);
@@ -225,7 +226,7 @@ class Memcached_MySQL_SessionHandler
 
     $this->memcached->set($session_id, $data, $this->lifeTime);
 
-    return $data;
+    return $data ? $data : '';
   } // read()
 
 
