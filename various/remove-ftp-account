@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# We check for the existance of needed commands
+
+usage() {
+  echo "
+
+Usage :
+
+  remove-ftp-account [ --help ] [ --purge ] username
+
+  This little script help you to remove a user from your FTP server.
+  Available options are:
+
+  -h
+  --help
+    Display this little help.
+
+  -p
+  --purge
+    By default, the user data directory is kept. Use this option to completly
+    delete the user data.
+"
+  exit 0
+}
+
+if [ ! -x /usr/bin/mysql ]; then
+  echo "Unable to find 'mysql' on your system. Please install the package 'mysql'."
+  exit 1
+fi
+
+# We fetch MySQL configuration from PAM.
+MYSQL_USERNAME=$(cat /etc/pam.d/vsftpd \
+                    | grep "user=" | head -n 1 \
+                    | sed -e 's/.*user=\([^ \t]*\).*/\1/')
+MYSQL_USERPWD=$(cat /etc/pam.d/vsftpd \
+                    | grep "passwd=" | head -n 1 \
+                    | sed -e 's/.*passwd=\([^ \t]*\).*/\1/')
+MYSQL_HOST=$(cat /etc/pam.d/vsftpd \
+                    | grep "host=" | head -n 1 \
+                    | sed -e 's/.*host=\([^ \t]*\).*/\1/')
+MYSQL_DB=$(cat /etc/pam.d/vsftpd \
+                    | grep "db=" | head -n 1 \
+                    | sed -e 's/.*db=\([^ \t]*\).*/\1/')
+
+# We fetch default USER home directory from VSFTPD configuration.
+LOCAL_ROOT=$(cat /etc/vsftpd.conf \
+                    | grep -e "^local_root=" | head -n 1 \
+                    | sed -e 's/^local_root=\([^ \t]*\).*$/\1/')
+
+FTP_USERNAME=""
+PURGE_FTP_USER=""
+
+# Parse the command line 
+while [ $# -ge 1 ]; do
+  case $1 in
+    -h|--help)
+      usage
+    ;;
+   -p|--purge)
+      PURGE_FTP_USER="true"
+    ;;
+   *)
+      if [ -n "$FTP_USERNAME" ]; then
+        echo "Unknown option $1"
+        usage
+      fi
+
+      FTP_USERNAME=$1
+    ;;
+  esac
+  shift
+done
+
+if [ -z "$FTP_USERNAME" ]; then
+  echo "You must specify a username."
+  usage
+fi
+
+# We compute default user FTP path:
+FTP_PATH=$(/bin/echo ${LOCAL_ROOT} | /bin/sed -e "s/\$USER/${FTP_USERNAME}/")
+
+
+if [ -e /etc/vsftpd.d/$FTP_USERNAME ]; then
+  # We use a custom user path. We need to configure vsftpd for it:
+  FTP_PATH=$(cat /etc/vsftpd.d/${FTP_USERNAME} \
+                    | grep -e "^[ \t]*local_root=" | head -n 1 \
+                    | sed -e 's/^[ \t]*local_root=\([^ \t]*\).*$/\1/')
+  command rm /etc/vsftpd.d/${FTP_USERNAME}
+fi
+
+/bin/echo "DELETE FROM accounts WHERE username = '$FTP_USERNAME';" \
+    | /usr/bin/mysql --user=$MYSQL_USERNAME --password=$MYSQL_USERPWD --host=$MYSQL_HOST $MYSQL_DB
+
+
+echo "
+The user $FTP_USERNAME has been removed from your FTP server."
+
+if [ -n "$PURGE_FTP_USER" ]; then
+  command rm -r ${FTP_PATH}
+
+  echo "The user path '${FTP_PATH}' has been automatically removed."
+else
+  echo "You can now remove the user path : '${FTP_PATH}'."
+fi
+

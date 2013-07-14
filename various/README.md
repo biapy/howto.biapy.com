@@ -17,3 +17,6 @@ Contents
 * __rtorrent.init-d__ : rtorrent as daemon init.d script (see [Install rTorrent latest version on Debian (en)](http://howto.biapy.com/en/debian-gnu-linux/system/software/install-rtorrent-latest-version-on-debian))
 * __6to4.sh__ : Modified 6to4.sh from OpenWRT Backfire 6to4 package for usage with 6rd tunnel (cancelled try to use Free french SP 6rd tunnel).
 * __mount_ntfs3g__ : Script to mount NTFS partition with read/write permissions on Mac OS X (see [Installer NTFS-3G via MacPorts sur Mac OS X (fr)](http://howto.biapy.com/fr/mac-os-x/guides/installer-ntfs-3g-via-macports-sur-mac-os-x))
+* __add-ftp-account__ : Add a vsFTPd user account (see [Installer le serveur FTP vsFTPd sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/autres/installer-le-serveur-ftp-vsftpd-sur-debian))
+* __remove-ftp-account__ : Remove a vsFTPd user account (see [Installer le serveur FTP vsFTPd sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/autres/installer-le-serveur-ftp-vsftpd-sur-debian))
+

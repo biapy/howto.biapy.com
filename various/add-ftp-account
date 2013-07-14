@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# We check for the existance of needed commands
+
+usage() {
+  echo "
+
+Usage :
+
+  add-ftp-account [ --help ] [ --target /some/path ] [ --password some-password ] username
+
+  This little script help you to add a user to your FTP server.
+  Available options are:
+
+  -h
+  --help
+    Display this little help.
+
+  -p some-password
+  --password some-password
+    By default, a password is automatically created for the user you are
+    adding. This option allow you to choose a custom password for you user.
+
+  -t /some/path
+  --target  /some/path
+    By default, a directory for the user is created in the default FTP
+    server root. This option allow you to set a different path for the user.
+"
+  exit 0
+}
+
+if [ ! -x /usr/bin/mysql ]; then
+  echo "Unable to find 'mysql' on your system. Please install the package 'mysql'."
+  exit 1
+fi
+
+if [ ! -x /usr/bin/apg ]; then
+  echo "Unable to find 'apg' on your system. Please install the package 'apg'."
+  exit 1
+fi
+
+
+# We fetch MySQL configuration from PAM.
+MYSQL_USERNAME=$(command cat '/etc/pam.d/vsftpd' \
+                    | command grep "user=" | command head -n 1 \
+                    | command sed -e 's/.*user=\([^ \t]*\).*/\1/')
+MYSQL_USERPWD=$(cat '/etc/pam.d/vsftpd' \
+                    | command grep "passwd=" | command head -n 1 \
+                    | command sed -e 's/.*passwd=\([^ \t]*\).*/\1/')
+MYSQL_HOST=$(cat '/etc/pam.d/vsftpd' \
+                    | command grep "host=" | command head -n 1 \
+                    | command sed -e 's/.*host=\([^ \t]*\).*/\1/')
+MYSQL_DB=$(cat '/etc/pam.d/vsftpd' \
+                    | command grep "db=" | command head -n 1 \
+                    | command sed -e 's/.*db=\([^ \t]*\).*/\1/')
+
+# We fetch default USER home directory from VSFTPD configuration.
+LOCAL_ROOT=$(command cat '/etc/vsftpd.conf' \
+                    | command grep -e "^local_root=" | command head -n 1 \
+                    | command sed -e 's/^local_root=\([^ \t]*\).*$/\1/')
+
+# We fetch local user from VSFTPD configuration.
+LOCAL_USER=$(command cat '/etc/vsftpd.conf' \
+                    | command grep -e "^guest_username=" | head -n 1 \
+                    | command sed -e 's/^guest_username=\([^ \t]*\).*$/\1/')
+
+#
+# We create a random default password:
+#
+FTP_PASSWORD=$(command apg -q -a 0 -n 1 -M NCL)
+FTP_PATH=""
+FTP_USERNAME=""
+
+# Parse the command line 
+while [ $# -ge 1 ]; do
+  case $1 in
+    -h|--help)
+      usage
+    ;;
+   -p|--password)
+      # in this case, $2 should be the conffile !
+      if [ -n "$2" ]; then
+        FTP_PASSWORD=$2
+      else
+        echo "The -p (--password) option must be followed by a password."
+        usage
+      fi
+      # we shift here to avoid processing the file path 
+      shift
+    ;;
+    -t|--target)
+      # in this case, $2 should be the conffile !
+      if [ -n "$2" ]; then
+        FTP_PATH=$2
+      else
+        echo "The -t (--target) option must be followed by a path."
+        usage
+      fi
+      # we shift here to avoid processing the file path 
+      shift
+    ;;
+    *)
+      if [ -n "$FTP_USERNAME" ]; then
+        echo "Unknown option $1"
+        usage
+      fi
+
+      FTP_USERNAME=$1
+    ;;
+  esac
+  shift
+done
+
+if [ -z "$FTP_USERNAME" ]; then
+  echo "You must specify a username."
+  usage
+fi
+
+if [ -z "$FTP_PATH" ]; then
+  # We compute default user FTP path:
+  FTP_PATH="$(command echo ${LOCAL_ROOT} | command sed -e "s/\$USER/${FTP_USERNAME}/")"
+else
+  # We use a custom user path. We need to configure vsftpd for it:
+  echo "# Custom user path.
+local_root=${FTP_PATH}" | command tee "/etc/vsftpd.d/${FTP_USERNAME}"
+fi
+
+command echo "INSERT INTO accounts (username, pass) VALUES('${FTP_USERNAME}', PASSWORD('${FTP_PASSWORD}'));" \
+    | command mysql --user="${MYSQL_USERNAME}" --password="${MYSQL_USERPWD}" --host="${MYSQL_HOST}" "${MYSQL_DB}"
+
+if [ ! -e "${FTP_PATH}" ]; then
+  command mkdir --parent "${FTP_PATH}/upload"
+  command chown -R ${LOCAL_USER}:nogroup "${FTP_PATH}"
+  command chmod a-w "${FTP_PATH}"
+else
+  command echo "Do you really want to change owner of '${FTP_PATH}' to ${LOCAL_USER}:nogroup (y/n) ?"
+  command read CHANGE_PERM
+
+  if [ "${CHANGE_PERM}" = "y" ]; then
+    command chown -R ${LOCAL_USER}:nogroup "${FTP_PATH}"
+    command chmod a-w "${FTP_PATH}"
+  fi
+fi
+
+echo "
+A new user has been created for your FTP server:
+  * username : ${FTP_USERNAME}
+  * password : ${FTP_PASSWORD}
+  * path : ${FTP_PATH}
+"
