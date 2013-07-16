@@ -87,9 +87,6 @@ case "$1" in
 		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
 	esac
 	;;
-  status)
-	status_of_proc "$DAEMON" "$NAME" && exit 0 || exit $?
-	;;
   restart|force-reload)
 	#
 	# If the "reload" option is implemented then remove the
@@ -113,7 +110,7 @@ case "$1" in
 	esac
 	;;
 
-	init|list|download|sync|desync)
+	status|init|list|download|sync|desync)
 		command sudo -u "${USER}" -- "${DAEMON}" ${@}
 	;;
 
