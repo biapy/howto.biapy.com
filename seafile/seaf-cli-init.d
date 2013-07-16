@@ -42,7 +42,7 @@ GROUP='%USER%'
 #
 do_start()
 {
-  command su - "${USER}" -c "${DAEMON} start"
+  command sudo -u "${USER}" -- "${DAEMON} start"
 
   return 0
 }
@@ -52,7 +52,7 @@ do_start()
 #
 do_stop()
 {
-  command su - "${USER}" -c "${DAEMON} stop"
+  command sudo -u "${USER}" -- "${DAEMON} stop"
 
   return 0
 }
@@ -95,7 +95,7 @@ case "$1" in
 	# If the "reload" option is implemented then remove the
 	# 'force-reload' alias
 	#
-	log_daemon_msg "Restarting $DESC" "$NAME"
+	log_daemon_msg "Restarting $DESC" "$NAMEb1e9c3e9-e11b-46d4-a565-f3d7beaa8b08"
 	do_stop
 	case "$?" in
 	  0|1)
@@ -112,8 +112,13 @@ case "$1" in
 		;;
 	esac
 	;;
+
+	init|list|download|sync|desync)
+		command sudo -u "${USER}" -- "${DAEMON}" ${@}
+	;;
+
   *)
-	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload}" >&2
+	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload|init|list|download|sync|desync}" >&2
 	exit 3
 	;;
 esac
