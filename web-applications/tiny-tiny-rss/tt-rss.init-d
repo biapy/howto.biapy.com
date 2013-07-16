@@ -16,7 +16,7 @@
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH="/sbin:/usr/sbin:/bin:/usr/bin"
 DESC="Tiny Tiny RSS update daemon"
-NAME="$(command basename "${0}")"
+NAME="$(command basename $(command readlink -f "${0}"))"
 DISABLED=0
 FORKING=0
 
