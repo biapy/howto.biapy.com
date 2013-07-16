@@ -42,7 +42,7 @@ GROUP='%USER%'
 #
 do_start()
 {
-  command sudo -u "${USER}" -- "${DAEMON} start"
+  command sudo -u "${USER}" -- "${DAEMON}" 'start'
 
   return 0
 }
@@ -52,7 +52,7 @@ do_start()
 #
 do_stop()
 {
-  command sudo -u "${USER}" -- "${DAEMON} stop"
+  command sudo -u "${USER}" -- "${DAEMON}" 'stop'
 
   return 0
 }
