@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.4"
+VERSION="1.2.5"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -28,7 +28,7 @@ This tool automates the download of software latest version from sourceforge or 
 
 Usage :
 
-  ${SCRIPT_NAME} [ --sourceforge | --googlecode | --ckeditor ] \\
+  ${SCRIPT_NAME} [ --sourceforge | --googlecode | --ckeditor | --generic='http://domain.com/download'  ] \\
         [ --download | --zip | --tgz | --tbz2 | --version ] \\
         [ --strip-components=NUMBER | -s NUMBER ] \\
         [ --output-directory=/path | -d /path ] \\
@@ -46,9 +46,11 @@ Usage :
   Available options are :
     * --help | -h   : Display this message.
     * --sourceforge : Fetch files from sourceforge.net (default).
-    * --sf-alt : Fetch files from sourceforge.net, alternative version detection method.
+    * --sf-alt      : Fetch files from sourceforge.net, alternative version detection method.
     * --googlecode  : Fetch files from googlecode.com.
     * --ckeditor    : Fetch ckeditor files from cksource.com.
+    * --generic     : Fetch files from custom source. Take as argument the URL of
+                      page containing links to the file to download.
     * --download    : Download the project sources archive.
     * --tgz         : Download the sources archive and decompress it as tar.gz.
     * --tbz2        : Download the sources archive and decompress it as tar.bz2.
@@ -455,11 +457,12 @@ check_binary "dirname" "coreutils"
 check_binary "sed" "sed"
 #check_binary "wget" "wget"
 
-USER_AGENT="Mozilla/5.0 (X11; U; Linux $(command uname --machine); rv:5.0) Gecko/20100101 Firefox/5.0"
+USER_AGENT="Mozilla/5.0 (X11; U; Linux $(command uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
 
 BASE_DB_NAME=""
 ACTION=""
 FORGE="sourceforge"
+GENERIC_URL=""
 DB_PREFIX=""
 USER_PREFIX=""
 BASE_USER_NAME=""
@@ -478,7 +481,7 @@ STRIP_COMPONENTS="0"
 
 ACTION="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt googlecode ckeditor download-template: strip-components: s: output-directory: d:" "${@}"; do
+while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt googlecode ckeditor generic: download-template: strip-components: s: output-directory: d:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -494,6 +497,10 @@ while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt google
       ;;
     'ckeditor' )
       FORGE="ckeditor"
+      ;;
+    'generic' )
+      FORGE="generic"
+      GENERIC_URL="${OPTARG}"
       ;;
     'version' | 'v' )
       ACTION="print-version"
@@ -581,6 +588,29 @@ case "${FORGE}" in
         ;;
       wget | * )
         SOURCE_URL="$(command wget "http://ckeditor.com/download" \
+            --quiet --output-document=- \
+            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            )"
+        ;;
+    esac
+
+    VERSION="$(command echo "${SOURCE_URL}" \
+        | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+        )"
+    ;;
+
+  'generic' )
+    case "${DOWNLOAD_COMMAND}" in
+      curl )
+        SOURCE_URL="$(command curl "${GENERIC_URL}" \
+            --silent --location --output "-" \
+            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            )"
+        ;;
+      wget | * )
+        SOURCE_URL="$(command wget "${GENERIC_URL}" \
             --quiet --output-document=- \
             | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
