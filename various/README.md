@@ -19,4 +19,4 @@ Contents
 * __mount_ntfs3g__ : Script to mount NTFS partition with read/write permissions on Mac OS X (see [Installer NTFS-3G via MacPorts sur Mac OS X (fr)](http://howto.biapy.com/fr/mac-os-x/guides/installer-ntfs-3g-via-macports-sur-mac-os-x))
 * __add-ftp-account__ : Add a vsFTPd user account (see [Installer le serveur FTP vsFTPd sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/autres/installer-le-serveur-ftp-vsftpd-sur-debian))
 * __remove-ftp-account__ : Remove a vsFTPd user account (see [Installer le serveur FTP vsFTPd sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/autres/installer-le-serveur-ftp-vsftpd-sur-debian))
-
+* __ampache_transcode.cfg__ : Ampache configuration snippet for transcoding (see [Installer Ampache sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/applications-web/multimedia/installer-la-plateforme-de-streaming-ampache-sur-debian/)
