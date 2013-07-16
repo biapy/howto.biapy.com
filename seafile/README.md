@@ -10,3 +10,4 @@ Contents
 * __seahub-default__ : Seahub init.d configuration file.
 * __seahub-init.d__ : Seahub init.d script.
 * __seafile-init.d__ : Seafile init.d file.
+* __seaf-cli-init.d__ : Seafile client init.d file.
