@@ -1,0 +1,31 @@
+#!/bin/sh
+############################################################################
+#This is ampaches daily cron job.  This will add and clean your catalog
+#every day.  This only runs add and clean.  Keeping performance in mine I
+#have limited the default bahavior to be daily and to only use clean and add.
+#Unless you are adding large amounts of music to your catalog clean and add
+#run fairly quickly.
+#
+#You can override the update interval by creating your own
+#crontab.  Please see man crontab for an explanation of how to create
+#your own crontab.
+#
+#You can also specify which catalog to run catalog_update.inc on.  For
+#example if you have a catlog named "music" #you can use
+#"php /usr/share/ampache/www/bin/catalog_update.inc music -c -a" and this only
+#update the catalog named "music".  This way if you have multiple catalogs
+#and are adding heavily to only one you can specify which catalog to run
+#catalog_update.inc on.
+#
+#Usage: catalog_update.inc [CATALOG NAME] [-c|-v|-a|-g|-t]
+#if no catalog name is given, catalog_update.inc will act on all availble
+#catalogs.
+#		Default behavior is to do all
+#	-c	Clean Catalogs
+#	-v	Verify Catalogs
+#	-a	Add to Catalogs
+#	-g	Gather Art
+#	-t	Generate Thumbnails
+############################################################################
+
+php /usr/share/ampache/www/bin/catalog_update.inc -a -c
