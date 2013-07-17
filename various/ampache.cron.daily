@@ -28,4 +28,5 @@
 #	-t	Generate Thumbnails
 ############################################################################
 
-php /usr/share/ampache/www/bin/catalog_update.inc -a -c
+command test -x '/usr/bin/php' -a -e '%INSTALL_PATH%/bin/catalog_update.inc' \
+  && command php '%INSTALL_PATH%/bin/catalog_update.inc' -a -c
