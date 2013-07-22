@@ -4,7 +4,7 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-VERSION=2.0.3
+VERSION=2.0.4
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -314,6 +314,11 @@ REVERSE_PROXY_TEMPLATE="
 
       # Declare the current request protocol.
       RequestHeader set X-Forwarded-Proto \"http\"
+
+      <Proxy TARGET_VALUE>
+        # Rise timeout values for failsafe on some applications (Horde ActiveSync or Plone, for example).
+        ProxySet connectiontimeout=600 timeout=4000
+      </Proxy>
 
       # Here is the magic that proxyfy the LAN server. 
       # The first line is .... i don't remember what...
@@ -786,7 +791,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
       IS_REMOVAL="1"
       ;;
 
-    help | h )
+    help | h | * )
       usage
       exit 0
       ;;
