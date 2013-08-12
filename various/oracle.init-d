@@ -19,12 +19,14 @@ export ORACLE_BASE="%ORACLE_BASE%"
 export ORACLE_HOME="%ORACLE_HOME%"
 export ORACLE_OWNER="oracle"
 
-PATH=/sbin:/usr/sbin:/bin:/usr/bin
-DESC="Oracle Database server"
-NAME=oracle
+PATH='/sbin:/usr/sbin:/bin:/usr/bin'
+DESC='Oracle Database server'
+NAME='oracle'
 
 ORACLE_DBSTART="${ORACLE_HOME}/bin/dbstart"
 ORACLE_DBSHUT="${ORACLE_HOME}/bin/dbshut"
+
+ORACLE_LSNRCTL="${ORACLE_HOME}/bin/lsnrctl"
 
 SCRIPTNAME=/etc/init.d/$NAME
 
@@ -34,7 +36,7 @@ SCRIPTNAME=/etc/init.d/$NAME
 [ -x "${ORACLE_DBSHUT}" ] || exit 0
 
 # Read configuration variable file if it is present
-[ -r "/etc/default/$NAME" ] && . "/etc/default/$NAME"
+[ -r "/etc/default/${NAME}" ] && . "/etc/default/${NAME}"
 
 # Load the VERBOSE setting and other rcS variables
 . /lib/init/vars.sh
@@ -51,6 +53,8 @@ do_start()
 	# Return
 	#   0 if daemon has been started
 	#   2 if daemon could not be started
+	command su "${ORACLE_OWNER}" -c "${ORACLE_LSNRCTL} start" \
+		|| return 2
 	command su "${ORACLE_OWNER}" -c "${ORACLE_DBSTART} ${ORACLE_HOME}" \
 		|| return 2
 	# Add code here, if necessary, that waits for the process to be ready
@@ -66,6 +70,8 @@ do_stop()
 	# Return
 	#   0 if daemon has been stopped
 	#   2 if daemon could not be stopped
+	command su "${ORACLE_OWNER}" -c "${ORACLE_LSNRCTL} stop" \
+		|| return 2
 	command su "${ORACLE_OWNER}" -c "${ORACLE_DBSHUT} ${ORACLE_HOME}" \
 		|| return 2
 
