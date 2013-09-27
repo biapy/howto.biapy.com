@@ -27,7 +27,7 @@ usage() {
 }
 
 # Check the arguments passed to this script
-if [ $# -ne 3 ]; then
+if [ $# -ne 4 ]; then
     usage
 fi
 
@@ -43,9 +43,9 @@ export DESTINATION_IP
 ACTION="$1"
 export ACTION
 
-case "${ACTION}"
+case "${ACTION}" in
   "start" )
-    command curl -X GET \
+    command curl -X POST \
         -H "Authorization: Bearer ${API_TOKEN}" \
         -H "X-Pretty-JSON: 1" \
         --data "source=${FAILOVER_IP}&destination=${DESTINATION_IP}" \
