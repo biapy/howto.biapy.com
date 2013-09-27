@@ -1,0 +1,65 @@
+#!/bin/bash
+#
+# 
+# Description:	Online.net REST API client for failover IP change.
+#
+# Author:	Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
+# Support:      contact@biapy.fr
+# License:      GNU General Public License (GPL)
+# Copyright:	(C) 2013 Biapy
+#
+# usage: ./OnlineFailoverIP <API token> <Failover IP> <Destination/Local IP> {start|stop|status}
+#
+#<API token>            : Online.net REST API token.
+#<Failover IP>          : Online.net failover IP address.
+#<Destination/Local IP> : Online.net failover IP destination IP.
+#
+#
+# An example usage in /etc/ha.d/haresources: 
+#       node1  10.0.0.170 OnlineFailoverIP::fsqjioveridmjgdfhqds24949fddkjdqfsfiorf::10.0.0.170::192.168.1.10
+#
+
+. /etc/ha.d/resource.d//hto-mapfuncs
+
+usage() {
+    echo "usage: $0 <API token> <Failover IP> <Destination/Local IP> $LEGAL_ACTIONS"
+    exit 1
+}
+
+# Check the arguments passed to this script
+if [ $# -ne 3 ]; then
+    usage
+fi
+
+API_TOKEN="$1"; shift 
+export API_TOKEN
+
+FAILOVER_IP="$1"; shift 
+export FAILOVER_IP
+
+DESTINATION_IP="$1"; shift 
+export DESTINATION_IP
+
+ACTION="$1"
+export ACTION
+
+case "${ACTION}"
+  "start" )
+    command curl -X GET \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "X-Pretty-JSON: 1" \
+        --data "source=${FAILOVER_IP}&destination=${DESTINATION_IP}" \
+        "https://api.online.net/api/v1/server/failover/edit"
+    ;;
+  "status" )
+    command curl -X GET \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "X-Pretty-JSON: 1" \
+        "https://api.online.net/api/v1/server/failover"
+     ;;
+  "stop")
+      exit 0
+    ;;
+esac
+
+exit 0

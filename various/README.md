@@ -21,3 +21,5 @@ Contents
 * __remove-ftp-account__ : Remove a vsFTPd user account (see [Installer le serveur FTP vsFTPd sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/autres/installer-le-serveur-ftp-vsftpd-sur-debian))
 * __ampache_transcode.cfg__ : Ampache configuration snippet for transcoding (see [Installer Ampache sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/applications-web/multimedia/installer-la-plateforme-de-streaming-ampache-sur-debian/)
 * __oracle.init-d__ : Oracle Database server init.d script (see [Installer un serveur Oracle sur Debian (fr)](https://howto.biapy.com/fr/debian-gnu-linux/serveurs/bases-de-donnees/installer-un-serveur-oracle-11g-sur-debian/)
+* __OnlineFailoverIP__ : Online IP Failover change script for Heartbeat (see [Configurer une IP failover online.net avec Heartbeat sur Debian (fr)](http://howto.biapy.com/fr/debian-gnu-linux/serveurs/autres/configurer-une-ip-failover-online-net-avec-heartbeat-sur-debian/)
+
