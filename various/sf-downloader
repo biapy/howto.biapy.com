@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.5"
+VERSION="1.2.6"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -605,14 +605,14 @@ case "${FORGE}" in
       curl )
         SOURCE_URL="$(command curl "${GENERIC_URL}" \
             --silent --location --output "-" \
-            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+            | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
         ;;
       wget | * )
         SOURCE_URL="$(command wget "${GENERIC_URL}" \
-            --quiet --output-document=- \
-            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
+            --quiet --no-check-certificate --output-document=- \
+            | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
         ;;
