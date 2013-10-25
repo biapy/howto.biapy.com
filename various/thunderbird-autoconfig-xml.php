@@ -38,7 +38,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </incomingServer>
     <?php
-      ;;
+      break;
       case 'imaps':
     ?>
     <incomingServer type="imap">
@@ -49,7 +49,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </incomingServer>
     <?php
-      ;;
+      break;
       case 'pop3/tls':
     ?>
     <incomingServer type="pop3">
@@ -60,7 +60,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </incomingServer>
     <?php
-      ;;
+      break;
       case 'pop3s':
     ?>
     <incomingServer type="pop3">
@@ -71,7 +71,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </incomingServer>
     <?php
-      ;;
+      break;
       case 'smtp/tls-587':
     ?>
     <outgoingServer type="smtp">
@@ -82,7 +82,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </outgoingServer>
     <?php
-      ;;
+      break;
       case 'smtp/tls':
     ?>
     <outgoingServer type="smtp">
@@ -93,7 +93,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </outgoingServer>
     <?php
-      ;;
+      break;
       case 'smtps':
     ?>
     <outgoingServer type="smtp">
@@ -104,7 +104,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
       <username>%EMAILADDRESS%</username>
     </outgoingServer>
     <?php
-      ;;
+      break;
     ?>
   <?php endswitch ?>
 <?php endforeach ?>
