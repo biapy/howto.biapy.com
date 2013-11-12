@@ -1,7 +1,7 @@
 #! /bin/bash
 ### BEGIN INIT INFO
 # Provides:          ttrss-DOMAIN
-# Required-Start:    $local_fs $remote_fs networking
+# Required-Start:    $local_fs $remote_fs networking mysql
 # Required-Stop:     $local_fs $remote_fs
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
