@@ -601,10 +601,14 @@ case "${FORGE}" in
     ;;
 
   'generic' )
+    # Compute root url.
+    ROOT_URL="$(command echo "${GENERIC_URL}" | command cut --delimiter='/' --fields=1-3)"
+
     case "${DOWNLOAD_COMMAND}" in
       curl )
         SOURCE_URL="$(command curl "${GENERIC_URL}" \
             --silent --location --output "-" \
+            | command sed -e "s|href=\"/|href=\"${ROOT_URL}/|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
@@ -612,6 +616,7 @@ case "${FORGE}" in
       wget | * )
         SOURCE_URL="$(command wget "${GENERIC_URL}" \
             --quiet --no-check-certificate --output-document=- \
+            | command sed -e "s|href=\"/|href=\"${ROOT_URL}/|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
