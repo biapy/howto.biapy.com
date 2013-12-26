@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.6"
+VERSION="1.2.7"
 
 SCRIPT_NAME="$(command basename ${0})"
 
