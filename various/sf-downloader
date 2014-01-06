@@ -610,7 +610,7 @@ case "${FORGE}" in
         SOURCE_URL="$(command curl "${GENERIC_URL}" \
             --silent --location --output "-" \
             | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
-            | command sed -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
+            		  -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=[\"']\([^\"']*\)|\"'].*|\1|" \
             )"
@@ -619,7 +619,7 @@ case "${FORGE}" in
         SOURCE_URL="$(command wget "${GENERIC_URL}" \
             --quiet --no-check-certificate --output-document=- \
             | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
-            | command sed -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
+            		  -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
             | command sed -e "s|.*href=[\"']\([^\"']*\)|\"'].*|\1|" \
             )"
