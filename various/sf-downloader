@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.8"
+VERSION="1.2.9"
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -609,18 +609,19 @@ case "${FORGE}" in
       curl22 )
         SOURCE_URL="$(command curl "${GENERIC_URL}" \
             --silent --location --output "-" \
-            | command sed -e "s|href=\"/|href=\"${ROOT_URL}/|g" \
+            | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
+            | command sed -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            | command sed -e "s|.*href=[\"']\([^\"']*\)|\"'].*|\1|" \
             )"
         ;;
       wget | * )
         SOURCE_URL="$(command wget "${GENERIC_URL}" \
             --quiet --no-check-certificate --output-document=- \
-            | command sed -e "s|href=\"/|href=\"${ROOT_URL}/|g" \
-            | command sed -e "s|href=\"\([^:\"]*\)\"|href=\"${BASE_URL}/\1\"|g" \
+            | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
+            | command sed -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            | command sed -e "s|.*href=[\"']\([^\"']*\)|\"'].*|\1|" \
             )"
          ;;
     esac
