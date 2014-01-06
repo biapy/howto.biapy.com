@@ -606,22 +606,22 @@ case "${FORGE}" in
     BASE_URL="$(command echo "${GENERIC_URL}" | command sed -e 's|/[^/]*$||')"
 
     case "${DOWNLOAD_COMMAND}" in
-      curl22 )
+      curl )
         SOURCE_URL="$(command curl "${GENERIC_URL}" \
             --silent --location --output "-" \
             | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
-            		  -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
+            		  -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${BASE_URL}/\1\"|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=[\"']\([^\"']*\)|\"'].*|\1|" \
+            | command sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
             )"
         ;;
       wget | * )
         SOURCE_URL="$(command wget "${GENERIC_URL}" \
             --quiet --no-check-certificate --output-document=- \
             | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
-            		  -e "s|href=[\"']\([^:\"']*\)|\"']|href=\"${BASE_URL}/\1\"|g" \
+                          -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${BASE_URL}/\1\"|g" \
             | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=[\"']\([^\"']*\)|\"'].*|\1|" \
+            | command sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
             )"
          ;;
     esac
