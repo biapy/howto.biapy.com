@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.0.0"
+VERSION="2.0.1"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -1822,7 +1822,7 @@ export KEY_EMAIL='${KEY_EMAIL}'
 
     # Compute protocol
     PROTO="tcp"
-    if [ "${1}" = 'true' ]; then
+    if [ "${UDP}" = 'true' ]; then
       PROTO="udp"
     fi
 
