@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.0.1"
+VERSION="2.0.2"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -1751,7 +1751,7 @@ export KEY_EMAIL='${KEY_EMAIL}'
     command mkdir -p "${INSTANCE_FILES_PATH}"
     command mkdir -p "${INSTANCE_KEYS_PATH}"
     command mkdir -p "${INSTANCE_CLIENT_CONFIGS_PATH}"
-    command mkdir -p "${INSTANCE_CLIENT_EXPORT_PATH}"
+    command mkdir -p "${INSTANCE_EXPORT_PATH}"
 
     # Create logs and lib directories
     command mkdir -p "${OVPN_LOG_PATH}"
