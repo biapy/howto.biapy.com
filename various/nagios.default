@@ -1,0 +1,18 @@
+# /etc/default/nagios
+
+# Enable Nagios at boottime? ("no" disables nagios3)
+# compatibility note: if this variable is _not_ found Nagios will start
+ENABLED="yes"
+
+# location of the nagios configuration file
+NAGIOSCFG="/etc/nagios/nagios.cfg"
+
+# location of the CGI configuration file
+CGICFG="/etc/nagios/cgi.cfg"
+
+# nicelevel to run nagios daemon with
+NICENESS=5
+
+# if you use pam_tmpdir, you need to explicitly set TMPDIR:
+#TMPDIR=/tmp
+
