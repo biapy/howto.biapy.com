@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.0.4"
+VERSION="2.0.5"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -2012,6 +2012,8 @@ CURRENT_BIND='${BIND}'
     # Update the configuration variables.
     update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
 
+    echo "OpenVPN '${DOMAIN}' instance status:"
+
     set_server_hostname
     set_port
     set_udp
@@ -2022,6 +2024,8 @@ CURRENT_BIND='${BIND}'
     set_gateway
     setup_iptables_nat
     set_bind
+
+    echo " - Instance hosting $(command cat "${INSTANCE_CLIENTS_LIST_PATH}" | command wc -l) clients."
 
     exit 0
     ;;
