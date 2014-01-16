@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.0.5"
+VERSION="2.1.0"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -110,8 +110,8 @@ INSTANCE_UNIX_EXPORT_PATH_EXPORT_TEMPLATE
 INSTANCE_UNIX_COMPAT_EXPORT_PATH_EXPORT_TEMPLATE"
 
 
-# Path to the easy RSA scripts.
-EASYRSA_PATH='/usr/share/doc/openvpn/examples/easy-rsa/2.0'
+# Path to the Easy-RSA v3 scripts.
+EASYRSA_PATH='/etc/openvpn/easy-rsa/easyrsa3'
 
 # Path to OpenVPN server configuration files.
 OVPN_PATH='/etc/openvpn'
@@ -143,12 +143,12 @@ INSTANCE_DETAILS_PATH="${INSTANCE_FILES_PATH}/openvpn-tools.cnf"
 # Path to OpenVPN instance Certificate Authority.
 INSTANCE_CA_PATH="${INSTANCE_KEYS_PATH}/ca.crt"
 # Path to OpenVPN instance public key.
-INSTANCE_PUBLIC_KEY_PATH="${INSTANCE_KEYS_PATH}/|INSTANCE|.crt"
+INSTANCE_PUBLIC_KEY_PATH="${INSTANCE_KEYS_PATH}/issued/|INSTANCE|.crt"
 # Path to OpenVPN instance public key.
-INSTANCE_PRIVATE_KEY_PATH="${INSTANCE_KEYS_PATH}/|INSTANCE|.key"
+INSTANCE_PRIVATE_KEY_PATH="${INSTANCE_KEYS_PATH}/private/|INSTANCE|.key"
 
 # Path to OpenVPN instance Diffie Hellman key.
-INSTANCE_DH_KEY_PATH="${INSTANCE_KEYS_PATH}/dh|SIZE|.pem"
+INSTANCE_DH_KEY_PATH="${INSTANCE_KEYS_PATH}/dh.pem"
 
 # Path to OpenVPN instance TA key.
 INSTANCE_TA_KEY_PATH="${INSTANCE_KEYS_PATH}/ta.key"
@@ -176,11 +176,11 @@ INSTANCE_CLIENTS_LIST_PATH="${INSTANCE_FILES_PATH}/clients.list"
 
 ## For the clients
 # Path to OpenVPN instance client private key.
-INSTANCE_CLIENT_PRIVATE_KEY_PATH="${INSTANCE_CLIENTS_FILES_PATH}/|CLIENT_LONG_NAME|.key"
+INSTANCE_CLIENT_PRIVATE_KEY_PATH="${INSTANCE_CLIENTS_FILES_PATH}/private/|CLIENT_LONG_NAME|.key"
 # Path to OpenVPN instance client certificate signing request.
-INSTANCE_CLIENT_CSR_PATH="${INSTANCE_CLIENTS_FILES_PATH}/|CLIENT_LONG_NAME|.csr"
+INSTANCE_CLIENT_CSR_PATH="${INSTANCE_CLIENTS_FILES_PATH}/reqs/|CLIENT_LONG_NAME|.csr"
 # Path to OpenVPN instance client public key.
-INSTANCE_CLIENT_PUBLIC_KEY_PATH="${INSTANCE_CLIENTS_FILES_PATH}/|CLIENT_LONG_NAME|.crt"
+INSTANCE_CLIENT_PUBLIC_KEY_PATH="${INSTANCE_CLIENTS_FILES_PATH}/issued/|CLIENT_LONG_NAME|.crt"
 # Path to OpenVPN instance client specific server configuration
 INSTANCE_CLIENT_SPECIFIC_CONFIG_PATH="${INSTANCE_CLIENT_CONFIGS_PATH}/|CLIENT_LONG_NAME|"
 
@@ -1455,7 +1455,13 @@ check_binary "zip" "zip"
 check_binary "openvpn" "openvpn"
 check_binary "unix2dos" "dos2unix"
 
-
+# Test EasyRSA presence.
+if [ ! -d "${EASYRSA_PATH}" ]; then
+  echo "Error : Easy-RSA v3 is missing. Please install it with:
+  command apt-get -y install 'git'
+  command git clone 'https://github.com/OpenVPN/easy-rsa' '/etc/openvpn/easy-rsa'" >&2
+  exit 1
+fi
 
 # Application defaults
 ACTION=""
@@ -1474,7 +1480,7 @@ UDP=""
 CIPHER="AES-256-CBC"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h initialize init i create: c: destroy: x: list. l. status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind." "${@}"; do
+while getoptex "help h initialize init i create: c: destroy: x: list. l. status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind. convert-20-21." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -1657,6 +1663,17 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
       fi
       ;;
 
+
+    ###############################
+    # Undocumented conversion options.
+    'convert-20-21' )
+      ACTION='convert-20-21'
+
+      if [ -n "${OPTARG}" ]; then
+        DOMAIN="${OPTARG}"
+      fi
+      ;;
+
     'help' | 'h' | * )
       usage 0
       ;;
@@ -1815,28 +1832,37 @@ export KEY_EMAIL='${KEY_EMAIL}'
 
 
     ## Generate instance certificates.
-    # Load EasyRSA
-    pushd "${EASYRSA_PATH}" > '/dev/null'
-    source "${EASYRSA_PATH}/vars" > '/dev/null'
-    popd > '/dev/null'
+    # Load EasyRSA defaults
+    export EASYRSA="${EASYRSA_PATH}"
+    if [ -e "${EASYRSA_PATH}/vars" ]; then
+      pushd "${EASYRSA_PATH}" > '/dev/null'
+      source "${EASYRSA_PATH}/vars" > '/dev/null'
+      popd > '/dev/null'
+    fi
 
     # load EasyRSA openvpn configuration.
     source "${EASYRSA_CONFIG_PATH}"
 
     # set EasyRSA path for instance.
-    export KEY_DIR="${INSTANCE_KEYS_PATH}"
-    export KEY_CN="${DOMAIN}"
+    #export KEY_DIR="${INSTANCE_KEYS_PATH}"
+    #export KEY_CN="${DOMAIN}"
+    export EASYRSA_PKI="${INSTANCE_KEYS_PATH}"
+    export EASYRSA_REQ_CN="${DOMAIN}"
 
-    command sh "${EASYRSA_PATH}/clean-all" > '/dev/null' 2>&1
+    # command sh "${EASYRSA_PATH}/clean-all" > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'init-pki' > '/dev/null' 2>&1
 
     # Build certificate authority.
-    command sh "${EASYRSA_PATH}/pkitool" --initca > '/dev/null' 2>&1
+    # command sh "${EASYRSA_PATH}/pkitool" --initca > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'build-ca' 'nopass' > '/dev/null' 2>&1
 
     # Build server certificate.
-    command sh "${EASYRSA_PATH}/pkitool" --server "${DOMAIN}" > '/dev/null' 2>&1
+    #command sh "${EASYRSA_PATH}/pkitool" --server "${DOMAIN}" > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'build-server-full' "${DOMAIN}" 'nopass' > '/dev/null' 2>&1
 
     # Build Diffie Hellman
-    command sh "${EASYRSA_PATH}/build-dh" > '/dev/null' 2>&1
+    #command sh "${EASYRSA_PATH}/build-dh" > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'gen-dh' > '/dev/null' 2>&1
 
     # Create TLS key (for HSA firewall)
     command openvpn --genkey --secret "${INSTANCE_TA_KEY_PATH}" > '/dev/null' 2>&1
@@ -1879,11 +1905,11 @@ cipher ${CIPHER}" \
 # Revoked certificate list
 crl-verify ${INSTANCE_CRL_PATH}" \
       >> "${INSTANCE_CONFIG_PATH}"
-    export KEY_CN=""
-    export KEY_OU=""
-    export KEY_NAME=""${INSTANCE_CONFIG_PATH}
-    command openssl ca -gencrl -out "${INSTANCE_CRL_PATH}" -config "${KEY_CONFIG}"
-
+    #export KEY_CN=""
+    #export KEY_OU=""
+    #export KEY_NAME=""${INSTANCE_CONFIG_PATH}
+    #command openssl ca -gencrl -out "${INSTANCE_CRL_PATH}" -config "${KEY_CONFIG}"
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'gen-crl' > '/dev/null' 2>&1
 
     ## Fixing permissions for key dir and "user nobody" options.
     command chmod go+rx "${INSTANCE_KEYS_PATH}"
@@ -2070,28 +2096,31 @@ CURRENT_BIND='${BIND}'
     update_config_vars 'CLIENT_LONG_NAME' "${CLIENT_LONG_NAME}"
 
     ## Generate client certificate.
-    # Load EasyRSA
-    pushd "${EASYRSA_PATH}" > '/dev/null'
-    source "${EASYRSA_PATH}/vars" > '/dev/null'
-    popd > '/dev/null'
+    # Load EasyRSA defaults
+    export EASYRSA="${EASYRSA_PATH}"
+    if [ -e "${EASYRSA_PATH}/vars" ]; then
+      pushd "${EASYRSA_PATH}" > '/dev/null'
+      source "${EASYRSA_PATH}/vars" > '/dev/null'
+      popd > '/dev/null'
+    fi
 
 
     # load EasyRSA openvpn configuration.
     source "${EASYRSA_CONFIG_PATH}"
 
     # set EasyRSA path for instance.
-    export KEY_DIR="${INSTANCE_FILES_PATH}"
-    export KEY_CN="${CLIENT_LONG_NAME}"
-
-    export KEY_DIR="${INSTANCE_CLIENTS_FILES_PATH}"
-
+    #export KEY_DIR="${INSTANCE_CLIENTS_FILES_PATH}"
+    #export KEY_CN="${CLIENT_LONG_NAME}"
+    export EASYRSA_PKI="${INSTANCE_CLIENTS_FILES_PATH}"
+    export EASYRSA_REQ_CN="${CLIENT_LONG_NAME}"
 
     if [ -n "$(command grep "^${CLIENT_LONG_NAME} " "${INSTANCE_CLIENTS_LIST_PATH}" )" ]; then
       echo "Error : Client '${CLIENT_NAME}' already exists in instance '${DOMAIN}'." >&2
       exit 1
     fi
 
-    command sh "${EASYRSA_PATH}/pkitool" "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
+    #command sh "${EASYRSA_PATH}/pkitool" "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'build-client-full' "${CLIENT_LONG_NAME}" 'nopass' > '/dev/null' 2>&1
 
     # Computing client IP ID.
     IP_ID=5
@@ -2153,23 +2182,30 @@ Windows 64bits configuration:
     update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
     update_config_vars 'CLIENT_LONG_NAME' "${CLIENT_LONG_NAME}"
 
-    # Load EasyRSA
-    pushd "${EASYRSA_PATH}" > '/dev/null'
-    source "${EASYRSA_PATH}/vars" > '/dev/null'
-    popd > '/dev/null'
+    # Load EasyRSA defaults
+    export EASYRSA="${EASYRSA_PATH}"
+    if [ -e "${EASYRSA_PATH}/vars" ]; then
+      pushd "${EASYRSA_PATH}" > '/dev/null'
+      source "${EASYRSA_PATH}/vars" > '/dev/null'
+      popd > '/dev/null'
+    fi
 
     # load EasyRSA openvpn configuration.
     source "${EASYRSA_CONFIG_PATH}"
 
     # set EasyRSA path for instance.
-    export KEY_DIR="${INSTANCE_CLIENTS_FILES_PATH}"
+    #export KEY_DIR="${INSTANCE_CLIENTS_FILES_PATH}"
+    export EASYRSA_PKI="${INSTANCE_CLIENTS_FILES_PATH}"
+    export EASYRSA_REQ_CN="${CLIENT_LONG_NAME}"
+
 
     if [ -z "$(command grep "^${CLIENT_LONG_NAME} " "${INSTANCE_CLIENTS_LIST_PATH}" )" ]; then
       echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN}'." >&2
       exit 1
     fi  
 
-    command sh "${EASYRSA_PATH}/revoke-full" "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
+    #command sh "${EASYRSA_PATH}/revoke-full" "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'revoke' "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
 
     # Remove client from client list.
     command sed -i -e "/^${CLIENT_LONG_NAME} /d" "${INSTANCE_CLIENTS_LIST_PATH}"
@@ -2239,6 +2275,67 @@ Windows 64bits configuration:
 
 
 
+
+  #################################
+  #
+  # Convert a domain from OpenVPN-Tools v2.0
+  # to OpenVPN-Tools v2.1 file structure.
+  # Undocumented action.
+  #
+  #################################
+  'convert-20-21' )
+    # Update the configuration variables.
+    update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
+
+    if [ -e "${INSTANCE_KEYS_PATH}/private/${DOMAIN}.key" ]; then
+      echo "Error: instance '${DOMAIN}' is already in v2.1 format." >&2
+      exit 1
+    fi
+
+    command mkdir -p "${INSTANCE_KEYS_PATH}/certs_by_serial"
+    command chmod go-rwx "${INSTANCE_KEYS_PATH}/certs_by_serial"
+    command mkdir -p "${INSTANCE_KEYS_PATH}/issued"
+    command chmod go-rwx "${INSTANCE_KEYS_PATH}/issued"
+    command mkdir -p "${INSTANCE_KEYS_PATH}/private"
+    command chmod go-rwx "${INSTANCE_KEYS_PATH}/private"
+    command mkdir -p "${INSTANCE_KEYS_PATH}/reqs"
+    command chmod go-rwx "${INSTANCE_KEYS_PATH}/reqs"
+
+    command find "${INSTANCE_KEYS_PATH}" -maxdepth 1 -type f -name '*.key' \
+        | command xargs -iFILE mv FILE "${INSTANCE_KEYS_PATH}/private/"
+    command find "${INSTANCE_KEYS_PATH}" -maxdepth 1 -type f -name '*.crt' \
+        | command xargs -iFILE mv FILE "${INSTANCE_KEYS_PATH}/issued/"
+    command find "${INSTANCE_KEYS_PATH}" -maxdepth 1 -type f -name '*.pem' \
+        | command xargs -iFILE mv FILE "${INSTANCE_KEYS_PATH}/certs_by_serial/"
+
+    command find "${INSTANCE_KEYS_PATH}" -maxdepth 1 -type f -name '*.csr' \
+        | sed -e "s|^${INSTANCE_KEYS_PATH}/||" \
+              -e 's|.csr$||' \
+              -e "s|^\(.*\)\$|mv ${INSTANCE_KEYS_PATH}/\1.csr ${INSTANCE_KEYS_PATH}/reqs/\1.req|" \
+        | command xargs -iCOMMAND sh -c "COMMAND"
+
+    command mv "${INSTANCE_KEYS_PATH}/certs_by_serial/dh1024.pem" "${INSTANCE_DH_KEY_PATH}"
+    command mv "${INSTANCE_KEYS_PATH}/certs_by_serial/crl.pem" "${INSTANCE_CRL_PATH}"
+    command mv "${INSTANCE_KEYS_PATH}/issued/ca.crt" "${INSTANCE_CA_PATH}"
+    command mv "${INSTANCE_KEYS_PATH}/private/ta.key" "${INSTANCE_TA_KEY_PATH}"
+
+    ## Update server configuration file.
+    command sed -i \
+            -e "s|^ca[\t ].*|ca ${INSTANCE_CA_PATH}|" \
+            -e "s|^cert[\t ].*|cert ${INSTANCE_PUBLIC_KEY_PATH}|" \
+            -e "s|^key[\t ].*|key ${INSTANCE_PRIVATE_KEY_PATH}|" \
+            -e "s|^dh[\t ].*|dh ${INSTANCE_DH_KEY_PATH}|" \
+            -e "s|^[; ]*tls-auth[\t ].*|tls-auth ${INSTANCE_TA_KEY_PATH} 0|" \
+        "${INSTANCE_CONFIG_PATH}"
+
+    echo "Restarting the VPN instance..."
+    /etc/init.d/openvpn restart "${DOMAIN}"
+
+    exit 0
+    ;;
+
+
+
   * )
     echo "Error : '${1}' is not a valid action." >&2
     usage 1
@@ -2246,4 +2343,3 @@ Windows 64bits configuration:
 esac
 
 exit 0
-export_all_clients
