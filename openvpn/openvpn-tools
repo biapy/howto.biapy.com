@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.0.3"
+VERSION="2.0.4"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -1474,7 +1474,7 @@ UDP=""
 CIPHER="AES-256-CBC"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h initialize init i create: c: destroy: x: status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind. list. l." "${@}"; do
+while getoptex "help h initialize init i create: c: destroy: x: list. l. status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -1675,9 +1675,10 @@ fi
 # Test if domain is specified.
 if [ -z "${DOMAIN}" \
       -a "${ACTION}" != 'initialize' \
+      -a "${ACTION}" != 'list' \
       -a "${ACTION}" != 'help' ]; then
   echo "Error: domain must be specified." >&2
-  usage 1
+  exit 1
 fi
 
 
