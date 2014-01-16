@@ -342,7 +342,7 @@ function detect_instance_protocol
 # @return 1 if port changed, 0 otherwise.
 function set_udp
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   detect_instance_protocol
 
@@ -377,7 +377,7 @@ function set_udp
 # @return 1 if port changed, 0 otherwise.
 function set_port
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" ]; then
     if [ ${1} -ne ${CURRENT_PORT} ]; then
@@ -414,7 +414,7 @@ function set_port
 # @return 1 if hostname changed, 0 otherwise.
 function set_server_hostname
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" -a "${1}" != "${CURRENT_SERVER_HOSTNAME}" ]; then
     echo " + Instance is now listening on ${1}."
@@ -441,7 +441,7 @@ function set_server_hostname
 # @return 1 if IP range changed, 0 otherwise.
 function set_ip_range
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" -a "${1}" != "${CURRENT_IP_RANGE}" ]; then
 
@@ -488,7 +488,7 @@ function set_ip_range
 # @param string $c2c 'true' to enable, 'false' to disable.
 function set_client2client
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" ]; then
     # Update server details for clients configuration.
@@ -534,7 +534,7 @@ function set_client2client
 # @see setup_iptables_nat()
 function set_nat
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" ]; then
     # Detect local net range.
@@ -585,7 +585,7 @@ function set_nat
 # @see setup_iptables_nat()
 function set_gateway
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" ]; then
     # Update server details for Internet gateway.
@@ -674,7 +674,7 @@ command iptables -t nat -C POSTROUTING -s '${CURRENT_IP_RANGE}.0/24' \\
 # @param string $bind 'true' to enable, 'false' to disable.
 function set_bind
 {
-  command test ${#} -ne 1 && exit 1
+  command test ${#} -gt 1 && exit 1
 
   if [ -n "${1}" ]; then
     # Update server details for Bind DNS.
