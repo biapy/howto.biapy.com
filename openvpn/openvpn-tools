@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.0.2"
+VERSION="2.0.3"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -17,24 +17,28 @@ This tool ease OpenVPN administration from command line.
 Usage :
 
   ${SCRIPT_NAME} [ --help ] [ --initialize | --init | -i ]
-      [ { --create='domain' | -c 'domain' }
+      [ { --create='instance' | -c 'instance' }
           [ --udp | -u ] [ --hostname='hostname' | -h 'hostname' ]
           [ --range='xxx.xxx.xxx' ] ]
-      [ --destroy='domain' | -x 'domain']
-      [ --domain='domain' | -d 'domain' ]
+      [ --destroy='instance' | -x 'instance']
+      [ --status='instance' | -s 'instance' ]
+      [ --list[='instance'] | -l [ 'instance' ] ]
+      [ --domain='instance' | -d 'instance' ]
       [ --c2c={1|0|y|n} ] [ --nat={1|0|y]n} ]
       [ --gateway={1|0|y|n} ] [ --bind={1|0|y|n} ]
       [ --add='client' | -a 'client' ] [ --remove='client' | -r 'client' ]
-      [ --export-configs='domain' | -b 'domain' ]
-      [ --export-hosts='domain' | -h 'domain' ]
+      [ --export-configs='instance' ]
+      [ --export-hosts='instance' ]
 
   Available options are :
-    * --domain | -d   : Specify the domain concerned by the changes.
+    * --domain | -d   : Specify the instance concerned by the changes.
     * --hostname | -h : Specify the server hostname (a valid FQDN or a IP).
                         Default to server public IP.
     * --udp | -u      : Specify the use of UDP for the server (default to TCP).
-    * --port | -p     : Specify the server port (default to 1194 if available, random otherwise);
-    * --range         : Specify the first 3 digits of the VPN IP range, default to random range.
+    * --port | -p     : Specify the server port (default to 1194 if available,
+                        random otherwise);
+    * --range         : Specify the first 3 digits of the VPN IP range, default
+                        to random range.
     * --c2c           : (dis)allow the Client to Client communication.
     * --nat           : (dis)allow the client access to VPN server LAN.
     * --gateway       : (dis)allow the client Internet access via VPN network.
@@ -43,10 +47,13 @@ Usage :
   Available actions are :
     * --help               : Display this message.
     * --initialize | -i    : Initialize OpenVPN tools environment.
-    * --create | -c        : Create a VPN server.
-    * --destroy | -x       : Destroy a VPN server.
-    * --add | -a           : Add a client to a VPN server.
-    * --remove | -r        : Remove a client from a VPN server.
+    * --create | -c        : Create a VPN instance.
+    * --destroy | -x       : Destroy a VPN instance.
+    * --status | -s        : Summarize a VPN instance configuration.
+    * --add | -a           : Add a client to a VPN instance.
+    * --remove | -r        : Remove a client from a VPN instance.
+    * --list | -l          : List VPN instances,
+                             or clients if instance name is provided.
     * --export-configs     : Create the clients configuration files for a
                              OpenVPN server.
     * --export-hosts       : Create the hosts file extract for a OpenVPN
@@ -1467,16 +1474,16 @@ UDP=""
 CIPHER="AES-256-CBC"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a: remove: r: hostname: h: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind." "${@}"; do
+while getoptex "help h initialize init i create: c: destroy: x: status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind. list. l." "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
   case "${OPTOPT}" in
-    initialize | init | i )
+    'initialize' | 'init' | 'i' )
       ACTION="initialize"
       ;;
 
-    create | c )
+    'create' | 'c' )
       ACTION="create"
 
       if [ -n "${OPTARG}" ]; then
@@ -1484,7 +1491,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    destroy | x )
+    'destroy' | 'x' )
       ACTION="destroy"
 
       if [ -n "${OPTARG}" ]; then
@@ -1492,13 +1499,29 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    domain | d )
+    'status' | 's' )
+      ACTION="status"
+
       if [ -n "${OPTARG}" ]; then
         DOMAIN="${OPTARG}"
       fi
       ;;
 
-    add | a )
+    'list' | 'l' )
+      ACTION='list'
+
+      if [ -n "${OPTARG}" ]; then
+        DOMAIN="${OPTARG}"
+      fi
+      ;;
+
+    'domain' | 'd' )
+      if [ -n "${OPTARG}" ]; then
+        DOMAIN="${OPTARG}"
+      fi
+      ;;
+
+    'add' | 'a' )
       ACTION="add"
 
       if [ -n "${OPTARG}" ]; then
@@ -1506,7 +1529,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    remove | r )
+    'remove' | 'r' )
       ACTION="remove"
 
       if [ -n "${OPTARG}" ]; then
@@ -1514,7 +1537,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    export-configs )
+    'export-configs' )
       ACTION="export-configs"
 
       if [ -n "${OPTARG}" ]; then
@@ -1522,7 +1545,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    export-hosts )
+    'export-hosts' )
       ACTION="export-hosts"
 
       if [ -n "${OPTARG}" ]; then
@@ -1530,7 +1553,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    hostname | h )
+    'hostname' | 'h' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1540,7 +1563,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    port | p )
+    'port' | 'p' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1550,7 +1573,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    range )
+    'range' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1564,7 +1587,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    c2c )
+    'c2c' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1578,7 +1601,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    nat )
+    'nat' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1592,7 +1615,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    gateway )
+    'gateway' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1606,7 +1629,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    bind )
+    'bind' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1620,7 +1643,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    udp | u )
+    'udp' | 'u' )
       if [ -z "${ACTION}" ]; then
         ACTION="update"
       fi
@@ -1634,7 +1657,7 @@ while getoptex "help initialize init i create: c: destroy: x: domain: d: add: a:
       fi
       ;;
 
-    help | * )
+    'help' | 'h' | * )
       usage 0
       ;;
   esac
@@ -1670,7 +1693,7 @@ if [ -n "${DOMAIN}" ]; then
       -a "${ACTION}" != 'help' \
       -a ! -e "${INSTANCE_CONFIG_PATH}" ]; then
     echo "Error : instance '${DOMAIN}' does not exists." >&2
-    usage 1
+    exit 1
   fi
 
   # Loading server details.
@@ -1687,7 +1710,7 @@ case "${ACTION}" in
   # Create the easy-rsa configuration file.
   #
   #################################
-  initialize )
+  'initialize' )
     # Setting up defaults.
 
     if [ -e "${EASYRSA_CONFIG_PATH}" ]; then
@@ -1978,6 +2001,55 @@ CURRENT_BIND='${BIND}'
     ;;
 
 
+  #################################
+  #
+  # Display a VPN server status.
+  #
+  #################################
+  'status' )
+
+    # Update the configuration variables.
+    update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
+
+    set_server_hostname
+    set_port
+    set_udp
+    set_ip_range
+
+    set_client2client
+    set_nat
+    set_gateway
+    setup_iptables_nat
+    set_bind
+
+    exit 0
+    ;;
+
+  #################################
+  #
+  # Display a VPN server status.
+  #
+  #################################
+  'list' )
+
+    if [ -z "${DOMAIN}" ]; then
+      # List existing domains.
+      echo "OpenVPN instances:"
+      command find "${OVPN_PATH}" -name 'openvpn-tools.cnf' \
+          | command cut --delimiter='/' --fields=4 \
+          | command sed -e 's/^/ * /'
+
+    else
+      # List selected domain clients.
+      echo "OpenVPN '${DOMAIN}' instance clients:"
+      command sed \
+          -e "s/\.${DOMAIN}[ \t]*.*$//" \
+          -e "s/^/ - /" \
+        "${INSTANCE_CLIENTS_LIST_PATH}"
+    fi
+
+    exit 0
+    ;;
 
   #################################
   #
@@ -2088,7 +2160,7 @@ Windows 64bits configuration:
     export KEY_DIR="${INSTANCE_CLIENTS_FILES_PATH}"
 
     if [ -z "$(command grep "^${CLIENT_LONG_NAME} " "${INSTANCE_CLIENTS_LIST_PATH}" )" ]; then
-      echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN_NAME}'." >&2
+      echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN}'." >&2
       exit 1
     fi  
 
