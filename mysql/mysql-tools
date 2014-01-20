@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.1.6"
+VERSION="1.1.7"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -65,8 +65,9 @@ Usage :
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path.
-REALPATH=""
 function realpath {
+  declare -g REALPATH=''
+
   command test ${#} -ne 1 && exit 1
   REALPATH="$(command readlink -f "${1}")"
 } # realpath
@@ -79,8 +80,9 @@ function realpath {
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=""
 function realpath_check {
+  declare -g REALPATH=''
+
   command test ${#} -ne 1 && exit 1
 
   realpath "${1}"
@@ -102,8 +104,9 @@ function realpath_check {
 # @param string $interface The network interface (for example: eth0).
 #
 # @return A IP address.
-INTERFACE_IP=""
 function interface_ip {
+  declare -g INTERFACE_IP=''
+
   command test ${#} -ne 1 && exit 1
 
   INTERFACE="${1}"
@@ -375,7 +378,7 @@ while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: dr
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
   case "${OPTOPT}" in
-    create | c )
+    'create' | 'c' )
       ACTION="create"
 
       if [ -n "${OPTARG}" ]; then
@@ -383,7 +386,7 @@ while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: dr
       fi
       ;;
 
-    drop | d )
+    'drop' | 'd' )
       MANDATORY_PASSWORD="true"
       ACTION="drop"
 
@@ -392,7 +395,7 @@ while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: dr
       fi
       ;;
 
-    empty | e )
+    'empty' | 'e' )
       MANDATORY_PASSWORD="true"
       ACTION="empty"
 
@@ -401,11 +404,11 @@ while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: dr
       fi
       ;;
 
-    db-prefix | dp )
+    'db-prefix' | 'dp' )
       BASE_DB_PREFIX="${OPTARG}"
       ;;
 
-    database | db )
+    'database' | 'db' )
       if [ -n "${OPTARG}" ]; then
         case "${ACTION}" in
           "create" | "drop" | "empty" )
@@ -421,62 +424,62 @@ while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: dr
       fi
       ;;
 
-    user-prefix | up )
+    'user-prefix' | 'up' )
       BASE_USER_PREFIX="${OPTARG}"
       ;;
 
-    adduser | a )
+    'adduser' | 'a' )
       BASE_USER_NAME="${OPTARG}"
       ACTION="adduser"
       MANDATORY_DB="false"
       ;;
 
-    grant | g )
+    'grant' | 'g' )
       if [ -n "${OPTARG}" ]; then
         PRIVILEGES="${PRIVILEGES} ${OPTARG}"
       fi
       ;;
 
-    deluser )
+    'deluser' )
       BASE_USER_NAME="${OPTARG}"
       ACTION="deluser"
       MANDATORY_DB="false"
       ;;
 
-    host | h )
+    'host' | 'h' )
       if [ -n "${OPTARG}" ]; then
         USER_HOSTS="${USER_HOSTS} ${OPTARG}"
       fi
       ;;
 
-    auto-hosts )
+    'auto-hosts' )
       AUTO_HOSTS="true"
       ;;
 
-    server | s )
+    'server' | 's' )
       if [ -n "${OPTARG}" ]; then
         MYSQL_HOST="${OPTARG}"
       fi
       ;;
 
-    mysql | m )
+    'mysql' | 'm' )
       if [ -n "${OPTARG}" ]; then
         MYSQL_CLIENT="${OPTARG}"
       fi
       ;;
 
-    with-ssh | r )
+    'with-ssh' | 'r' )
       WITH_SSH="true"
       if [ -n "${OPTARG}" ]; then
         WITH_SSH_USER="${OPTARG}"
       fi
       ;;
 
-    user | u)
+    'user' | 'u' )
       MYSQL_USER="${OPTARG}"
       ;;
 
-    password | p)
+    'password' | 'p' )
       MYSQL_PASSWORD="${OPTARG}"
 
       if [ -z "${MYSQL_PASSWORD}" ]; then
@@ -484,9 +487,8 @@ while getoptex "help create: c: db-prefix: dp: database: db: user-prefix: up: dr
       fi
       ;;
 
-    help | * )
-      usage
-      exit 0
+    'help' | '*' )
+      usage 0
       ;;
   esac
 done
@@ -495,7 +497,7 @@ shift $[OPTIND-1]
 
 if [ -z "${BASE_DB_NAME}" -a "${MANDATORY_DB}" = "true" ]; then
   echo "Error: Database name is missing." >&2
-  usage 1
+  exit 1
 fi
 
 
@@ -551,7 +553,7 @@ fi
 
 # Retrocompatibility.
 case "${BASE_DB_NAME}" in
-  create-db )
+  'create-db' )
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
@@ -563,7 +565,7 @@ case "${BASE_DB_NAME}" in
     exit 0
     ;;
 
-  create-domain-db )
+  'create-domain-db' )
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
@@ -577,7 +579,7 @@ case "${BASE_DB_NAME}" in
     exit 0
     ;;
 
-  create-user )
+  'create-user' )
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
@@ -589,7 +591,7 @@ case "${BASE_DB_NAME}" in
     ${0} --password="${ROOT_PASSWORD}" --host="${ALLOWED_HOSTS}" --adduser "${USER_NAME}"
     ;;
 
-  clear-db )
+  'clear-db' )
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
@@ -601,7 +603,7 @@ case "${BASE_DB_NAME}" in
     exit 0
     ;;
 
-  drop-db )
+  'drop-db' )
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
@@ -612,7 +614,7 @@ case "${BASE_DB_NAME}" in
     exit 0
     ;;
 
-  drop-domain-db )
+  'drop-domain-db' )
     # Check if valid number of arguments given.
     command test ${#} -lt 2 && usage 1
 
@@ -696,10 +698,10 @@ if [ "${WITH_SSH}" = "true" \
     # Building remote mysql-tools arguments list.
     ACTION_ARGUMENT=""
     case "${ACTION}" in
-      adduser | deluser )
+      'adduser' | 'deluser' )
         ACTION_ARGUMENT="--${ACTION}='${BASE_USER_NAME}'"
         ;;
-      create | drop | empty )
+      'create' | 'drop' | 'empty' )
         ACTION_ARGUMENT="--${ACTION}='${BASE_DB_NAME}'"
         ;;
       * )
@@ -733,7 +735,12 @@ fi
 
 
 case "${ACTION}" in
-  create )
+  ###############
+  #
+  # Create a new database and its dedicated user.
+  #
+  ###############
+  'create' )
     SQL_QUERY="CREATE DATABASE \`${DB_NAME}\`
                     DEFAULT CHARACTER SET utf8
                     DEFAULT COLLATE utf8_unicode_ci;"
@@ -763,7 +770,12 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 
 
 
-  drop )
+  ###############
+  #
+  # Drop a database and its dedicated user.
+  #
+  ###############
+  'drop' )
     SQL_QUERY="SELECT \`user\`, \`host\`
                     FROM \`mysql\`.\`user\`
                     WHERE \`user\` = '${DB_USER}';"
@@ -798,8 +810,24 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 
 
 
-  empty )
+  ###############
+  #
+  # Empty a database.
+  #
+  ###############
+  'empty' )
+    # List existing views and prepare drop queries.
     SQL_QUERY="$(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+        "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+        --batch --skip-column-names \
+        --skip-line-numbers --skip-pager \
+        "${DB_NAME}" --execute="SHOW FULL TABLES WHERE TABLE_TYPE LIKE 'VIEW%';" \
+        | command cut --fields=1
+        | command sed -e 's/^.*$/DROP VIEW `&`;/')"
+
+    # List existing tables and prepare drop queries.
+    SQL_QUERY="${SQL_QUERY}
+      $(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
         "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
@@ -828,7 +856,12 @@ SET FOREIGN_KEY_CHECKS = 1;"
 
 
 
-  adduser )
+  ###############
+  #
+  # Add a new MySQL user.
+  #
+  ###############
+  'adduser' )
     SQL_QUERY=""
     for ALLOWED_HOST in ${USER_HOSTS}; do
       if [ -z "${BASE_DB_NAME}" ]; then
@@ -875,7 +908,12 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 
 
 
-  deluser )
+  ###############
+  #
+  # Delete an existing MySQL user.
+  #
+  ###############
+  'deluser' )
     SQL_QUERY="SELECT \`user\`, \`host\`
                     FROM \`mysql\`.\`user\`
                     WHERE \`user\` = '${DB_USER}';"
@@ -900,6 +938,11 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
 
 
 
+  ###############
+  #
+  # Handle everything else.
+  #
+  ###############
   * )
     echo "Error : '${1}' is not a valid action." >&2
     usage 1
