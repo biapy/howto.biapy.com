@@ -822,7 +822,7 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
         "${DB_NAME}" --execute="SHOW FULL TABLES WHERE TABLE_TYPE LIKE 'VIEW%';" \
-        | command cut --fields=1
+        | command cut --fields=1 \
         | command sed -e 's/^.*$/DROP VIEW `&`;/')"
 
     # List existing tables and prepare drop queries.
