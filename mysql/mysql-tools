@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="1.1.7"
+VERSION="1.1.8"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -825,9 +825,23 @@ MYSQL_PASSWORD=${DB_PASSWORD}"
         | command cut --fields=1 \
         | command sed -e 's/^.*$/DROP VIEW `&`;/')"
 
+    if [ -n "${SQL_QUERY}" ]; then
+      SQL_QUERY="SET FOREIGN_KEY_CHECKS = 0;
+${SQL_QUERY}
+SET FOREIGN_KEY_CHECKS = 1;"
+
+      if mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+            "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
+            "${DB_NAME}" --execute="${SQL_QUERY}"; then
+        echo "Views dropped successfully from database '${DB_NAME}'."
+      else
+        echo "Error: unable to drop views from database '${DB_NAME}'." >&2
+        exit 1
+      fi
+    fi
+
     # List existing tables and prepare drop queries.
-    SQL_QUERY="${SQL_QUERY}
-      $(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
+    SQL_QUERY="$(mysql_call "${MYSQL_CLIENT}" "${MYSQL_HOST}" \
         "${MYSQL_USER}" "${MYSQL_PASSWORD}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
