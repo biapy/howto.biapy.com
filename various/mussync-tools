@@ -8,7 +8,7 @@
 # Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
 # finding a script name.
 #
-VERSION="1.0.1"
+VERSION="1.0.2"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -130,10 +130,6 @@ ENO_RECVSIG=3; ETXT[3]="ENO_RECVSIG"
 BASE_LOCK_PATH="/var/lock"
 LOCK_PATH="${BASE_LOCK_PATH}/${LOCK_DIR}"
 
-# start un/locking attempt
-#trap 'ECODE=$?; echo "[statsgen] Exit: ${ETXT[ECODE]}($ECODE)" >&2' 0
-
-
 # Lock the system.
 #
 # @param string $base_lock_path Optionnal custom path to lock file.
@@ -153,7 +149,7 @@ function lock {
         # lock succeeded, install signal handlers before storing the PID just in case
         # storing the PID fails
         trap 'ECODE=$?;
-            echo "[statsgen] Removing lock. Exit: ${ETXT[ECODE]}($ECODE)" >&2
+            echo "[${SCRIPT_NAME}] Removing lock. Exit: ${ETXT[ECODE]}($ECODE)" >&2
             test -d "${LOCK_PATH}" && rm -rf "${LOCK_PATH}"' 0
 
         # lock succeeded, store the PID
@@ -162,7 +158,7 @@ function lock {
         # the following handler will exit the script on receiving these signals
         # the trap on "0" (EXIT) from above will be triggered by this trap's
         # "exit" command!
-        trap 'echo "[statsgen] Killed by a signal." >&2
+        trap 'echo "[${SCRIPT_NAME}] Killed by a signal." >&2
               exit ${ENO_RECVSIG}' 1 2 3 15
 
         return ${ENO_SUCCESS}
@@ -443,7 +439,7 @@ command find "${INPUT_PATH}" -type 'f' -iname "*.${INPUT_EXTENSION}" \
   OUTPUT_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_FILENAME}"
 
   SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
-  SHORT_OUTPUT_FILE="${SHORT_PATH}/${OUTPUT_FILENAME}"
+  SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
 
   CONVERSION_NEEDED='False'
   # Check if output file already exists.
@@ -520,7 +516,7 @@ if [ "${SYNC_DELETE}" = 'True' ]; then
     INPUT_FILE="${INPUT_FILE_PATH}/${INPUT_FILENAME}"
 
     SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
-    SHORT_OUTPUT_FILE="${SHORT_PATH}/${OUTPUT_FILENAME}"
+    SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
 
     ## Check for input file existance.
     if [ ! -e "${INPUT_FILE}" ]; then
