@@ -1,0 +1,452 @@
+#!/bin/bash
+#
+# Music library convert and sync.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+# Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
+# finding a script name.
+#
+VERSION="1.0.0"
+
+SCRIPT_NAME="$(command basename "${0}")"
+
+# Print this script help.
+function usage {
+  command echo "Music library convert and sync v${VERSION}
+This tool convert a input (Flac) music library to an output (MP3) music folder
+and keep the folder structure.
+
+Usage :
+
+  ${SCRIPT_NAME} [ --help ] [ --quiet ]
+      [ --input-path='/path/to/flac/library' ]
+      [ --output-path='/path/to/mp3/library' ]
+      [ --input-format='flac' ] [ --output-format='mp3' ]
+      [ --bitrate='320k' ] [ --sync-delete ]
+      [ --avconv-options='--more --avconv --options' ]
+
+  Available options are :
+    * --help | -h                   : Display this message.
+    * --input-path  | --in  | -i    : Set the path to the source library
+                                      (default to current)
+    * --output-path | --out | -o    : Set the path to the target library
+                                      (default to current)
+    * --input-format  | --if | -s   : Set the input format. Default to Flac.
+    * --output-format | --of | -e   : Set the output format. Default to MP3.
+    * --bitrate | -b                : Set the bitrate. Default to 320k.
+    * --sync-delete | --delete | -d : Propagate file deletion from input
+                                      library to output library.
+                                      Any output file without equivalence in
+                                      input library is deleted.
+    * --avconv-options | -a         : Additionnal options for avconv.
+                                      See avconv man page.
+    * --threads | -t                : Threads number.
+                                      Default to (2 * CPU cores) (or 2 if
+                                      detection fails).
+    * --quiet | -q                  : Disable almost all outputs.
+"
+
+  test -n "${1}" && exit ${1}
+} # usage
+
+
+
+# Get the absolute path for a file or directory.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path.
+function realpath {
+  declare -g REALPATH=''
+
+  command test ${#} -ne 1 && exit 1
+  REALPATH="$(command readlink -f "${1}")"
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+function realpath_check {
+  declare -g REALPATH=''
+
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binary to check.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary {
+  command test ${#} -ne 2 && exit 1
+
+  # Test the binary presence.
+  if [ -z "$(command which "${1}")" ]; then
+    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
+    exit 1
+  fi
+} # check_binary
+
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let OPTIND || OPTIND=1
+  [ $OPTIND -lt $# ] || return 1
+  shift $OPTIND
+  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
+  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
+  then
+    local o
+    o="-${1#-$OPTOFS}"
+    for opt in ${optlist#;}
+    do
+      OPTOPT="${opt%[;.:]}"
+      unset OPTARG
+      local opttype="${opt##*[^;:.]}"
+      [ -z "$opttype" ] && opttype=";"
+      if [ ${#OPTOPT} -gt 1 ]
+      then # long-named option
+        case $o in
+          "--$OPTOPT")
+            if [ "$opttype" != ":" ]; then return 0; fi
+            OPTARG="$2"
+            if [ -z "$OPTARG" ];
+            then # error: must have an agrument
+              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT";
+              OPTOPT="?"
+              return 1;
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "--$OPTOPT="*)
+            if [ "$opttype" = ";" ];
+            then  # error: must not have arguments
+              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTARG=${o#"--$OPTOPT="}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-$OPTOPT")
+            unset OPTOFS
+            [ "$opttype" != ":" ] && return 0
+            OPTARG="$2"
+            if [ -z "$OPTARG" ]
+            then
+              echo "$0: error: -$OPTOPT must have an argument" >&2
+              OPTARG="$OPTOPT"
+              OPTOPT="?"
+              return 1
+            fi
+            OPTIND=$[OPTIND+1] # skip option's argument
+            return 0
+          ;;
+          "-$OPTOPT"*)
+            if [ $opttype = ";" ]
+            then # an option with no argument is in a chain of options
+              OPTOFS="$OPTOFS?" # move to the next option in the chain
+              OPTIND=$[OPTIND-1] # the chain still has other options
+              return 0
+            else
+              unset OPTOFS
+              OPTARG="${o#-$OPTOPT}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage
+    exit 1
+  fi; fi
+  OPTOPT="?"
+  unset OPTARG
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
+  while [ -n "$l" ]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [ -n "${l%%[^:.;]*}" ]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo $r
+}
+function getopt()
+{
+  local optlist=`optlistex "$1"`
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils"
+check_binary "dirname" "coreutils"
+check_binary "mktemp" "mktemp"
+check_binary "sed" "sed"
+check_binary "avconv" "libav-tools"
+
+# Application defaults
+INPUT_PATH="$(command pwd)"
+OUTPUT_PATH="$(command pwd)"
+
+INPUT_FORMAT="flac"
+OUTPUT_FORMAT="mp3"
+
+BITRATE="320k"
+
+if [ -e '/proc/cpuinfo' ]; then
+  THREADS="$((2 * $(command grep --count '^processor' '/proc/cpuinfo')))"
+else
+  THREADS="2"
+fi
+
+AVCONV_OPTIONS=""
+
+SYNC_DELETE='False'
+
+QUIET="False"
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: s: output-format: of: e: bitrate: b: threads: t: avconv-options: a: sync-delete delete d quiet q" "${@}"; do
+  # Options debuging.
+  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+
+  case "${OPTOPT}" in
+    'input-path' | 'in' | 'i' )
+      realpath_check "${OPTARG}"
+      INPUT_PATH="${REALPATH}"
+      ;;
+
+    'output-path' | 'out' | 'o' )
+      realpath_check "${OPTARG}"
+      OUTPUT_PATH="${REALPATH}"
+      ;;
+
+    'input-format' | 'if' | 's' )
+      if [ -n "${OPTARG}" ]; then
+        INPUT_FORMAT="${OPTARG}"
+      fi
+      ;;
+
+    'output-format' | 'of' | 'e' )
+      if [ -n "${OPTARG}" ]; then
+        OUTPUT_FORMAT="${OPTARG}"
+      fi
+      ;;
+
+    'bitrate' | 'b' )
+      if [ -n "${OPTARG}" ]; then
+        BITRATE="${OPTARG}"
+      fi
+      ;;
+
+    'threads' | 't' )
+      if [ -n "${OPTARG}" ]; then
+        THREADS="${OPTARG}"
+      fi
+      ;;
+
+    'avconv-options' | 'a' )
+      if [ -n "${OPTARG}" ]; then
+        AVCONV_OPTIONS="${OPTARG}"
+      fi
+      ;;
+
+    'sync-delete' | 'delete' | 'd' )
+      SYNC_DELETE='True'
+      ;;
+
+    'quiet' | 'q' )
+      QUIET='True'
+      ;;
+
+    'help' | 'h' | * )
+      usage 0
+      ;;
+  esac
+done
+
+shift $[OPTIND-1]
+
+# TODO : implement a less basic extension detection based on format.
+INPUT_EXTENSION="${INPUT_FORMAT}"
+OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
+
+###############################
+#
+# Convert input files to output format.
+#
+################################
+command find "${INPUT_PATH}" -type 'f' -iname "*.${INPUT_EXTENSION}" \
+  | while read INPUT_FILE; do
+
+  ## Build output file path based on input file path.
+  INPUT_FILE_PATH="$(command dirname "${INPUT_FILE}")"
+  OUTPUT_FILE_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}|${OUTPUT_PATH}|")"
+  SHORT_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}||")"
+
+  INPUT_FILENAME="$(command basename "${INPUT_FILE}")"
+  OUTPUT_FILENAME="${INPUT_FILENAME//\.${INPUT_EXTENSION}/.${OUTPUT_EXTENSION}}"
+
+  OUTPUT_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_FILENAME}"
+
+  SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
+  SHORT_OUTPUT_FILE="${SHORT_PATH}/${OUTPUT_FILENAME}"
+
+  CONVERSION_NEEDED='False'
+  # Check if output file already exists.
+  if [ ! -e "${OUTPUT_FILE}" ]; then
+    CONVERSION_NEEDED='True'
+  else
+    test "${QUIET}" != 'True' && echo -n "'${SHORT_OUTPUT_FILE}' exists... "
+
+    # Check if output file is older than input file.
+    if [ "${INPUT_FILE}" -nt "${OUTPUT_FILE}" ]; then
+      test "${QUIET}" != 'True' && echo "Updating."
+      CONVERSION_NEEDED='True'
+    else
+      test "${QUIET}" != 'True' && echo "Skipping."
+    fi
+  fi
+
+  if [ "${CONVERSION_NEEDED}" = 'True' ]; then
+    if [ -e "${INPUT_FILE}" ]; then
+      command mkdir -p "${OUTPUT_FILE_PATH}"
+
+      if [ -d "${OUTPUT_FILE_PATH}" ]; then
+        # Remove output file if it already exists.
+        if [ -e "${OUTPUT_FILE}" ]; then
+          command rm "${OUTPUT_FILE}"
+        fi
+
+        if [ "${INPUT_FORMAT}" = "${OUTPUT_FORMAT}" ]; then
+          # Copy input to output (format is the same).
+          test "${QUIET}" != 'True' && echo -n "Copying '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
+          command cp "${INPUT_FILE}" "${OUTPUT_FILE}"
+        else
+          # Convert input to output
+          test "${QUIET}" != 'True' && echo -n "Converting '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
+          if ! command avconv -i "${INPUT_FILE}" \
+                  -ab "${BITRATE}" \
+                  -threads "${THREADS}" \
+                  -map_metadata 0 \
+                  -loglevel 'quiet' \
+                  ${AVCONV_OPTIONS} \
+                  "${OUTPUT_FILE}"; then
+            test "${QUIET}" != 'True' && echo "Failed."
+            test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+          else
+            test "${QUIET}" != 'True' && echo "Done."
+          fi
+        fi
+      else
+        echo "Error: unable to create folder '${OUTPUT_FILE_PATH}'." >&2
+      fi
+    else
+      test "${QUIET}" != 'True' && echo "'${INPUT_FILE}' not found... Skipping."
+    fi
+  fi
+done
+
+###############################
+#
+# Check for removed input files.
+#
+################################
+if [ "${SYNC_DELETE}" = 'True' ]; then
+  command find "${OUTPUT_PATH}" -type 'f' -iname "*.${OUTPUT_EXTENSION}" \
+    | while read OUTPUT_FILE; do
+
+    ## Build input file path based on output file path.
+    OUTPUT_FILE_PATH="$(command dirname "${OUTPUT_FILE}")"
+    INPUT_FILE_PATH="$(command echo "${OUTPUT_FILE_PATH}" | sed -e "s|^${OUTPUT_PATH}|${INPUT_PATH}|")"
+    SHORT_PATH="$(command echo "${OUTPUT_FILE_PATH}" | sed -e "s|^${OUTPUT_PATH}||")"
+
+    OUTPUT_FILENAME="$(command basename "${OUTPUT_FILE}")"
+    INPUT_FILENAME="${OUTPUT_FILENAME//\.${OUTPUT_EXTENSION}/.${INPUT_EXTENSION}}"
+
+    INPUT_FILE="${INPUT_FILE_PATH}/${INPUT_FILENAME}"
+
+    SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
+    SHORT_OUTPUT_FILE="${SHORT_PATH}/${OUTPUT_FILENAME}"
+
+    ## Check for input file existance.
+    if [ ! -e "${INPUT_FILE}" ]; then
+
+      ## Input file does not seems to exists.
+      ## double check using find with case insensitive search.
+      if [ -z "$(command find "${INPUT_FILE_PATH}" -maxdepth 1 -type 'f' -iname "${INPUT_FILENAME}")" ]; then
+
+        # Input file not found. Removing output file.
+        test "${QUIET}" != 'True' && echo -n "File '${SHORT_INPUT_FILE}' disappeared.
+  -> Removing '${SHORT_OUTPUT_FILE}'... "
+        command test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+
+        if [ -e "${OUTPUT_FILE}" ]; then
+          test "${QUIET}" != 'True' && echo "Failed."
+        else
+          test "${QUIET}" != 'True' && echo "Done."
+        fi
+
+      fi
+
+    fi
+  done
+fi
