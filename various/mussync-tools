@@ -8,7 +8,7 @@
 # Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
 # finding a script name.
 #
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -109,6 +109,97 @@ function check_binary {
 } # check_binary
 
 
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from http://wiki.grzegorz.wierzowiecki.pl/code:mutex-in-bash
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# lock dirs/files
+LOCK_DIR=".${SCRIPT_NAME}.lock"
+PID_FILE="${SCRIPT_NAME}.pid"
+
+# exit codes and text for them - additional features nobody needs :-)
+ENO_SUCCESS=0; ETXT[0]="ENO_SUCCESS"
+ENO_GENERAL=1; ETXT[1]="ENO_GENERAL"
+ENO_LOCKFAIL=2; ETXT[2]="ENO_LOCKFAIL"
+ENO_RECVSIG=3; ETXT[3]="ENO_RECVSIG"
+
+BASE_LOCK_PATH="/var/lock"
+LOCK_PATH="${BASE_LOCK_PATH}/${LOCK_DIR}"
+
+# start un/locking attempt
+#trap 'ECODE=$?; echo "[statsgen] Exit: ${ETXT[ECODE]}($ECODE)" >&2' 0
+
+
+# Lock the system.
+#
+# @param string $base_lock_path Optionnal custom path to lock file.
+#                               Default to /var/lock.
+# 
+# @return unlock (rm) error code.
+function lock {
+    if [ -n "${1}" ]; then
+      realpath_check "${1}"
+      BASE_LOCK_PATH="${REALPATH}"
+    fi
+
+    LOCK_PATH="${BASE_LOCK_PATH}/${LOCK_DIR}"
+    local PID_PATH="${LOCK_PATH}/${PID_FILE}"
+
+    if mkdir "${LOCK_PATH}" &>'/dev/null'; then
+        # lock succeeded, install signal handlers before storing the PID just in case
+        # storing the PID fails
+        trap 'ECODE=$?;
+            echo "[statsgen] Removing lock. Exit: ${ETXT[ECODE]}($ECODE)" >&2
+            test -d "${LOCK_PATH}" && rm -rf "${LOCK_PATH}"' 0
+
+        # lock succeeded, store the PID
+        echo "$$" >"${PID_PATH}"
+
+        # the following handler will exit the script on receiving these signals
+        # the trap on "0" (EXIT) from above will be triggered by this trap's
+        # "exit" command!
+        trap 'echo "[statsgen] Killed by a signal." >&2
+              exit ${ENO_RECVSIG}' 1 2 3 15
+
+        return ${ENO_SUCCESS}
+    else
+        # lock failed, now check if the other PID is alive
+        OTHER_PID="$(command cat "${PID_PATH}" 2>'/dev/null')"
+
+        # if cat wasn't able to read the file anymore, another instance probably is
+        # about to remove the lock -- exit, we're *still* locked
+        # Thanks to Grzegorz Wierzowiecki for pointing this race condition out on
+        # http://wiki.grzegorz.wierzowiecki.pl/code:mutex-in-bash
+        if [ ${?} != 0 ]; then
+            # Pid file does not exists - probably directory is beeing deleted
+            exit ${ENO_LOCKFAIL}
+        fi
+
+        if ! kill -0 ${OTHER_PID} &>'/dev/null'; then
+            # lock is stale, remove it and restart
+            unlock
+            lock "${BASE_LOCK_PATH}"
+            return $?
+        else
+            # lock is valid and OTHERPID is active - exit, we're locked!
+            echo "lock failed, PID ${OTHER_PID} is active" >&2
+            exit ${ENO_LOCKFAIL}
+        fi
+    fi
+    return 0
+}
+
+# Unlock the system.
+# 
+# @return unlock (rm) error code.
+function unlock {
+    test -d "${LOCK_PATH}" && rm -r "${LOCK_PATH}" &>'/dev/null'
+    return $?
+}
 
 #######################################################################################
 #######################################################################################
@@ -329,6 +420,10 @@ shift $[OPTIND-1]
 INPUT_EXTENSION="${INPUT_FORMAT}"
 OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
 
+
+## Lock output path for this script.
+lock "${OUTPUT_PATH}"
+
 ###############################
 #
 # Convert input files to output format.
@@ -450,3 +545,6 @@ if [ "${SYNC_DELETE}" = 'True' ]; then
     fi
   done
 fi
+
+unlock
+exit 0
