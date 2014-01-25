@@ -8,7 +8,7 @@
 # Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
 # finding a script name.
 #
-VERSION="1.0.2"
+VERSION="1.1.0"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -20,7 +20,7 @@ and keep the folder structure.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --help ] [ --quiet ]
+  ${SCRIPT_NAME} [ --help ] [ --quiet ] [ --verbose ]
       [ --input-path='/path/to/flac/library' ]
       [ --output-path='/path/to/mp3/library' ]
       [ --input-format='flac' ] [ --output-format='mp3' ]
@@ -43,9 +43,9 @@ Usage :
     * --avconv-options | -a         : Additionnal options for avconv.
                                       See avconv man page.
     * --threads | -t                : Threads number.
-                                      Default to (2 * CPU cores) (or 2 if
-                                      detection fails).
+                                      Default to 1 thread by CPU.
     * --quiet | -q                  : Disable almost all outputs.
+    * --verbose | -v                : Enable debug outputs.
 "
 
   test -n "${1}" && exit ${1}
@@ -108,6 +108,384 @@ function check_binary {
   fi
 } # check_binary
 
+
+
+# Transfert cover art from input file to output file.
+# Reset all cover art in output file.
+#
+# @param string $input_file The audio input file.
+# @param string $output_file The audio output file.
+#
+# @return Exit with error if conversion failed.
+function mussync-tools-transfert_images {
+  command test ${#} -ne 2 && exit 1
+
+  local INPUT_FILE="${1}"
+  local OUTPUT_FILE="${2}"
+
+  # Detect if input file has cover art.
+  local INPUT_FILE_HAS_COVER="$(command mediainfo --Inform="General;%Cover%" "${INPUT_FILE}")"
+
+  if [ "${INPUT_FILE_HAS_COVER}" = 'Yes' ]; then
+    test "${QUIET}" != 'True' && echo -n "Transfering cover art to $(command basename "${OUTPUT_FILE}")... "
+
+    # Detect Cover MIME type.
+    local IMAGE_MIME_TYPE="$(command mediainfo --Inform="General;%Cover_Mime%" "${INPUT_FILE}")"
+    local IMAGE_EXTENSION=''
+
+    case "${IMAGE_MIME_TYPE}" in
+      'image/png'   ) IMAGE_EXTENSION='png';;
+      'image/jpeg'  ) IMAGE_EXTENSION='jpeg';;
+      'image/gif'   ) IMAGE_EXTENSION='gif';;
+      'image/x-ico' ) IMAGE_EXTENSION='ico';;
+    esac
+
+    if [ -z "${IMAGE_EXTENSION}" ]; then
+      # Unable to determine cover mime type.
+      test "${QUIET}" != 'True' && echo "Failed (MIME type unsupported (${IMAGE_MIME_TYPE}))."
+      return 1
+    fi
+
+    # Create image folder.
+    local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX.${IMAGE_EXTENSION}")"
+
+    # Detect input file format and audio format.
+    local INPUT_FILE_FORMAT="$(command mediainfo --Inform="General;%Format%" "${INPUT_FILE}")"
+    local INPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${INPUT_FILE}")"
+
+    test "${QUIET}" != 'True' && echo -n "Extracting... "
+
+    case "${INPUT_FILE_FORMAT}" in
+      'FLAC' )
+        # File is Flac
+
+        # List IMAGE metadata blocs.
+        # Assume first bloc is cover art.
+        local BLOCK_NUMBER="$(command metaflac --list --block-type='PICTURE' "${INPUT_FILE}" \
+            | command grep --max-count=1 '^METADATA block' \
+            | command sed -e 's/^.*#//')"
+
+        # Determine cover image MIME type.
+        IMAGE_MIME_TYPE="$(command metaflac --block-number="${BLOCK_NUMBER}" --list "${INPUT_FILE}" \
+            | command grep "MIME type:" \
+            | command sed -e 's/.*MIME type: //g')"
+
+        # Extract cover image from file.
+        command metaflac --block-number="${BLOCK_NUMBER}" \
+            --export-picture-to="${IMAGE_PATH}" "${INPUT_FILE}"
+        ;;
+
+      'MPEG Audio' )
+        # File is MP3
+        local MP3_IMAGE_PATH="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+
+        if [ "${VERBOSE}" = 'True' ]; then
+          command eyeD3 --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}"
+        else
+          command eyeD3 --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}" > '/dev/null' 2>&1
+        fi
+
+        if [ -e "${MP3_IMAGE_PATH}/FRONT_COVER.${IMAGE_EXTENSION}" ]; then
+          command mv "${MP3_IMAGE_PATH}/FRONT_COVER.${IMAGE_EXTENSION}" "${IMAGE_PATH}"
+        fi
+
+        command rm -r "${MP3_IMAGE_PATH}"
+        ;;
+
+      'OGG' )
+        # File is an OGG container.
+        case "${INPUT_FILE_AUDIO_FORMAT}" in
+
+          'Vorbis' )
+            # File is OGG Vorbis.
+
+            local IMAGE_WITH_HEADERS_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+
+            command vorbiscomment --list --raw "${INPUT_FILE}" \
+                | command grep --max-count=1 '^metadata_block_picture=' \
+                | command sed -e 's/^metadata_block_picture=//' \
+                | command base64 --decode --wrap=0 \
+              > "${IMAGE_WITH_HEADERS_PATH}"
+
+            # Fetch data lengths.
+            local IMIME_LENGTH="$(command dd skip=4 count=4 iflag='skip_bytes,count_bytes' \
+                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
+                | command xxd -p -g0 \
+                | command xargs -iHEX printf "%d" '0xHEX')"
+            local IDESCRIPTION_SKIP="$((8 + ${MIME_LENGTH}))"
+            local IDESCRIPTION_LENGTH="$(command dd skip=${DESCRIPTION_SKIP} count=4 iflag='skip_bytes,count_bytes' \
+                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
+                | command xxd -p -g0 \
+                | command xargs -iHEX printf "%d" '0xHEX')"
+            local IIMAGE_LENGTH_SKIP="$((${DESCRIPTION_SKIP} + ${DESCRIPTION_LENGTH} + 20))"
+            local IIMAGE_LENGTH="$(command dd skip=${IMAGE_LENGTH_SKIP} count=4 iflag='skip_bytes,count_bytes' \
+                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
+                | command xxd -p -g0 \
+                | command xargs -iHEX printf "%d" '0xHEX')"
+
+            local IMAGE_SKIP="$((${IMAGE_LENGTH_SKIP} + 4))"
+            # Extract image.
+
+            if [ "${VERBOSE}" = 'True' ]; then
+              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} iflag='skip_bytes,count_bytes' \
+                  if="${IMAGE_WITH_HEADERS_PATH}" of="${IMAGE_PATH}"
+            else
+              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} iflag='skip_bytes,count_bytes' \
+                  if="${IMAGE_WITH_HEADERS_PATH}" of="${IMAGE_PATH}" 2>'/dev/null'
+             fi
+
+            # Delete vorbiscomment raw file.
+            test -e "${IMAGE_WITH_HEADERS_PATH}" && command rm "${IMAGE_WITH_HEADERS_PATH}"
+            ;;
+
+          * )
+            test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+            test "${QUIET}" != 'True' && echo "Failed (Ogg audio encoding unsupported (${INPUT_FILE_AUDIO_FORMAT}))."
+            return 1
+            ;;
+
+        esac
+
+        ;;
+
+      * )
+        test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+
+        test "${QUIET}" != 'True' && echo "Failed (Input file format unsupported (${INPUT_FILE_FORMAT}))."
+        return 1
+        ;;
+
+    esac
+
+    # Test if an image has been extracted from INPUT_FILE and if we have an OUTPUT_FILE.
+    if [ -s "${IMAGE_PATH}" -a -e "${OUTPUT_FILE}" ]; then
+      test "${QUIET}" != 'True' && echo -n "Importing... "
+
+      # Detect output file format and audio format.
+      local OUTPUT_FILE_FORMAT="$(command mediainfo --Inform="General;%Format%" "${OUTPUT_FILE}")"
+      local OUTPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${OUTPUT_FILE}")"
+
+      case "${OUTPUT_FILE_FORMAT}" in
+        'FLAC' )
+          # File is Flac
+          # Remove existing images.
+          command metaflac --block-type='PICTURE' --dont-use-padding --remove "${OUTPUT_FILE}"
+          # Insert cover image from file.
+          command metaflac --import-picture-from="${IMAGE_PATH}" "${OUTPUT_FILE}"
+          ;;
+
+        'MPEG Audio' )
+          # File is MP3
+          if [ "${VERBOSE}" = 'True' ]; then
+            # Remove existing images.
+            command eyeD3 --remove-images "${OUTPUT_FILE}"
+            # Insert cover image from file
+            command eyeD3 --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}"
+          else
+            # Remove existing images.
+            command eyeD3 --remove-images "${OUTPUT_FILE}" > '/dev/null' 2>&1
+            # Insert cover image from file
+            command eyeD3 --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}" > '/dev/null' 2>&1
+          fi
+          ;;
+
+        'OGG' )
+          # File is an OGG container.
+          case "${OUTPUT_FILE_AUDIO_FORMAT}" in
+
+            'Vorbis' )
+              # File is OGG Vorbis.
+
+              # Export existing comments to file.
+              local COMMENTS_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+              command vorbiscomment --list --raw "${OUTPUT_FILE}" > "${COMMENTS_PATH}"
+
+              # Remove existing images.
+              command sed -i -e '/^metadata_block_picture/d' "${COMMENTS_PATH}"
+
+              # Insert cover image from file.
+
+              # metadata_block_picture format.
+              # See: https://xiph.org/flac/format.html#metadata_block_picture
+
+              local IMAGE_WITH_HEADER="$(command mktemp -t "tmp.XXXXXXXXXX")"
+              local DESCRIPTION=""
+
+              # Reset cache file.
+              echo -n "" > "${IMAGE_WITH_HEADER}"
+
+              # Picture type <32>.
+              command printf "0: %.8x" 3 | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Mime type length <32>.
+              command printf "0: %.8x" $(echo -n "${IMAGE_MIME_TYPE}" | command wc -c) \
+                        | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Mime type (n * 8)
+              echo -n "${IMAGE_MIME_TYPE}" >> "${IMAGE_WITH_HEADER}"
+              # Description length <32>.
+              command printf "0: %.8x" $(echo -n "${DESCRIPTION}" | command wc -c) \
+                        | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Description (n * 8)
+              echo -n "${DESCRIPTION}" >> "${IMAGE_WITH_HEADER}"
+              # Picture with <32>.
+              command printf "0: %.8x" 0 | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Picture height <32>.
+              command printf "0: %.8x" 0 | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Picture color depth <32>.
+              command printf "0: %.8x" 0 | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Picture color count <32>.
+              command printf "0: %.8x" 0 | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Image file size <32>.
+              command printf "0: %.8x" $(command wc -c "${IMAGE_PATH}" \
+                        | command cut --delimiter=' ' --fields=1) \
+                        | command xxd -r -g0 \
+                      >> "${IMAGE_WITH_HEADER}"
+              # Image file.
+              command cat "${IMAGE_PATH}" >> "${IMAGE_WITH_HEADER}"
+
+              echo "metadata_block_picture=$(command base64 --wrap=0 < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
+
+              # Update vorbis file comments.
+              command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
+
+              # Delete cache file.
+              command rm "${IMAGE_WITH_HEADER}"
+              # Delete comments file.
+              command rm "${COMMENTS_PATH}"
+              ;;
+
+            * )
+              test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+              test "${QUIET}" != 'True' && echo "Failed (Ogg audio encoding unsupported (${OUTPUT_FILE_AUDIO_FORMAT}))."
+              return 1
+              ;;
+
+          esac
+
+          ;;
+
+        * )
+          test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+
+          test "${QUIET}" != 'True' && echo "Failed (Output file format unsupported (${OUTPUT_FILE_FORMAT}))."
+          return 1
+          ;;
+
+      esac
+ 
+    fi
+
+    test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+
+
+    test "${QUIET}" != 'True' && echo "Done."
+  fi
+
+  return 0
+} # mussync-tools-transfert_images()
+
+export -f 'mussync-tools-transfert_images'
+
+
+# Convert an audio file from source library to target library.
+#
+# @param string $input_file The audio input file.
+#
+# @return Exit with error if conversion failed.
+function mussync-tools-convert_file {
+  command test ${#} -ne 1 && exit 1
+
+  local INPUT_FILE="${1}"
+
+  ## Build output file path based on input file path.
+  local INPUT_FILE_PATH="$(command dirname "${INPUT_FILE}")"
+  local OUTPUT_FILE_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}|${OUTPUT_PATH}|")"
+  local SHORT_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}||")"
+
+  local INPUT_FILENAME="$(command basename "${INPUT_FILE}")"
+  local OUTPUT_FILENAME="${INPUT_FILENAME//\.${INPUT_EXTENSION}/.${OUTPUT_EXTENSION}}"
+
+  local OUTPUT_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_FILENAME}"
+
+  local SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
+  local SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
+
+  local CONVERSION_NEEDED='False'
+  # Check if output file already exists.
+  if [ ! -e "${OUTPUT_FILE}" ]; then
+    CONVERSION_NEEDED='True'
+  else
+    test "${QUIET}" != 'True' && echo -n "'${SHORT_OUTPUT_FILE}' exists... "
+
+    # Check if output file is older than input file.
+    if [ "${INPUT_FILE}" -nt "${OUTPUT_FILE}" ]; then
+      test "${QUIET}" != 'True' && echo "Updating."
+      CONVERSION_NEEDED='True'
+    else
+      test "${QUIET}" != 'True' && echo "Skipping."
+    fi
+  fi
+
+  if [ "${CONVERSION_NEEDED}" = 'True' ]; then
+    if [ -e "${INPUT_FILE}" ]; then
+      command mkdir -p "${OUTPUT_FILE_PATH}"
+
+      if [ -d "${OUTPUT_FILE_PATH}" ]; then
+        # Remove output file if it already exists.
+        if [ -e "${OUTPUT_FILE}" ]; then
+          command rm "${OUTPUT_FILE}"
+        fi
+
+        if [ "${INPUT_FORMAT}" = "${OUTPUT_FORMAT}" ]; then
+          # Copy input to output (format is the same).
+          test "${QUIET}" != 'True' && echo -n "Copying '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
+          command cp "${INPUT_FILE}" "${OUTPUT_FILE}"
+        else
+          # Convert input to output
+          test "${QUIET}" != 'True' && echo -n "Converting '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
+
+          local LOG_LEVEL='quiet'
+          if [ "${VERBOSE}" = 'True' ]; then
+            LOG_LEVEL='info'
+          fi
+
+          if ! command avconv -i "${INPUT_FILE}" \
+                  -ab "${BITRATE}" -vn -sn \
+                  -map_metadata 0 \
+                  -loglevel "${LOG_LEVEL}" \
+                  ${AVCONV_OPTIONS} \
+                  "${OUTPUT_FILE}"; then
+            test "${QUIET}" != 'True' && echo "Failed."
+            test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+
+            return 1
+          else
+            test "${QUIET}" != 'True' && echo "Done."
+
+            mussync-tools-transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
+          fi
+        fi
+      else
+        echo "Error: unable to create folder '${OUTPUT_FILE_PATH}'." >&2
+
+        return 1
+      fi
+    else
+      test "${QUIET}" != 'True' && echo "'${INPUT_FILE}' not found... Skipping."
+    fi
+  fi
+
+  return 0
+} # mussync-tools-convert_file
+
+# Export mussync-tools-convert_file for usage with Parallel / Sem.
+export -f 'mussync-tools-convert_file'
 
 
 #######################################################################################
@@ -187,7 +565,7 @@ function lock {
         fi
     fi
     return 0
-}
+} # lock()
 
 # Unlock the system.
 # 
@@ -195,7 +573,7 @@ function lock {
 function unlock {
     test -d "${LOCK_PATH}" && rm -r "${LOCK_PATH}" &>'/dev/null'
     return $?
-}
+} # unlock()
 
 #######################################################################################
 #######################################################################################
@@ -328,30 +706,40 @@ check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
 check_binary "avconv" "libav-tools"
+check_binary "parallel" "parallel"
+check_binary "eyeD3" "eyed3"
+check_binary "mediainfo" "mediainfo"
+check_binary "vorbiscomment" "vorbis-tools"
+check_binary "metaflac" "flac"
 
 # Application defaults
-INPUT_PATH="$(command pwd)"
-OUTPUT_PATH="$(command pwd)"
 
-INPUT_FORMAT="flac"
-OUTPUT_FORMAT="mp3"
+# Compute the semaphore name based on SCRIPT_NAME. 
+SEMAPHORE_NAME="${SCRIPT_NAME}"
 
-BITRATE="320k"
+# Export configuration for mussync-tools-convert_file function.
+export INPUT_PATH="$(command pwd)"
+export OUTPUT_PATH="$(command pwd)"
 
-if [ -e '/proc/cpuinfo' ]; then
-  THREADS="$((2 * $(command grep --count '^processor' '/proc/cpuinfo')))"
-else
-  THREADS="2"
-fi
+export INPUT_FORMAT="flac"
+export OUTPUT_FORMAT="mp3"
 
-AVCONV_OPTIONS=""
+export BITRATE="320k"
 
-SYNC_DELETE='False'
+export THREADS="100%"
 
-QUIET="False"
+export AVCONV_OPTIONS=""
+
+export SYNC_DELETE='False'
+
+export QUIET="False"
+export VERBOSE="False"
+
+export INPUT_EXTENSION="${INPUT_FORMAT}"
+export OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: s: output-format: of: e: bitrate: b: threads: t: avconv-options: a: sync-delete delete d quiet q" "${@}"; do
+while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: s: output-format: of: e: bitrate: b: threads: t: avconv-options: a: sync-delete delete d quiet q verbose v" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -404,6 +792,10 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
       QUIET='True'
       ;;
 
+    'verbose' | 'v' )
+      VERBOSE='True'
+      ;;
+
     'help' | 'h' | * )
       usage 0
       ;;
@@ -413,9 +805,20 @@ done
 shift $[OPTIND-1]
 
 # TODO : implement a less basic extension detection based on format.
-INPUT_EXTENSION="${INPUT_FORMAT}"
-OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
+export INPUT_EXTENSION="${INPUT_FORMAT}"
+export OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
 
+# Specific needs for some output formats/
+case "${OUTPUT_FORMAT}" in
+  'ogg' )
+    # Set vorbis as default codec for ogg.
+    AVCONV_OPTIONS="${AVCONV_OPTIONS} -codec:a libvorbis"
+    ;;
+
+  '*' )
+    # Do nothing.
+    ;;
+esac
 
 ## Lock output path for this script.
 lock "${OUTPUT_PATH}"
@@ -425,76 +828,10 @@ lock "${OUTPUT_PATH}"
 # Convert input files to output format.
 #
 ################################
-command find "${INPUT_PATH}" -type 'f' -iname "*.${INPUT_EXTENSION}" \
-  | while read INPUT_FILE; do
 
-  ## Build output file path based on input file path.
-  INPUT_FILE_PATH="$(command dirname "${INPUT_FILE}")"
-  OUTPUT_FILE_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}|${OUTPUT_PATH}|")"
-  SHORT_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}||")"
+command find "${INPUT_PATH}" -type 'f' -iname "*.${INPUT_EXTENSION}" -print0 \
+  | command parallel --jobs ${THREADS} --null 'mussync-tools-convert_file'
 
-  INPUT_FILENAME="$(command basename "${INPUT_FILE}")"
-  OUTPUT_FILENAME="${INPUT_FILENAME//\.${INPUT_EXTENSION}/.${OUTPUT_EXTENSION}}"
-
-  OUTPUT_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_FILENAME}"
-
-  SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
-  SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
-
-  CONVERSION_NEEDED='False'
-  # Check if output file already exists.
-  if [ ! -e "${OUTPUT_FILE}" ]; then
-    CONVERSION_NEEDED='True'
-  else
-    test "${QUIET}" != 'True' && echo -n "'${SHORT_OUTPUT_FILE}' exists... "
-
-    # Check if output file is older than input file.
-    if [ "${INPUT_FILE}" -nt "${OUTPUT_FILE}" ]; then
-      test "${QUIET}" != 'True' && echo "Updating."
-      CONVERSION_NEEDED='True'
-    else
-      test "${QUIET}" != 'True' && echo "Skipping."
-    fi
-  fi
-
-  if [ "${CONVERSION_NEEDED}" = 'True' ]; then
-    if [ -e "${INPUT_FILE}" ]; then
-      command mkdir -p "${OUTPUT_FILE_PATH}"
-
-      if [ -d "${OUTPUT_FILE_PATH}" ]; then
-        # Remove output file if it already exists.
-        if [ -e "${OUTPUT_FILE}" ]; then
-          command rm "${OUTPUT_FILE}"
-        fi
-
-        if [ "${INPUT_FORMAT}" = "${OUTPUT_FORMAT}" ]; then
-          # Copy input to output (format is the same).
-          test "${QUIET}" != 'True' && echo -n "Copying '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
-          command cp "${INPUT_FILE}" "${OUTPUT_FILE}"
-        else
-          # Convert input to output
-          test "${QUIET}" != 'True' && echo -n "Converting '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
-          if ! command avconv -i "${INPUT_FILE}" \
-                  -ab "${BITRATE}" \
-                  -threads "${THREADS}" \
-                  -map_metadata 0 \
-                  -loglevel 'quiet' \
-                  ${AVCONV_OPTIONS} \
-                  "${OUTPUT_FILE}"; then
-            test "${QUIET}" != 'True' && echo "Failed."
-            test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
-          else
-            test "${QUIET}" != 'True' && echo "Done."
-          fi
-        fi
-      else
-        echo "Error: unable to create folder '${OUTPUT_FILE_PATH}'." >&2
-      fi
-    else
-      test "${QUIET}" != 'True' && echo "'${INPUT_FILE}' not found... Skipping."
-    fi
-  fi
-done
 
 ###############################
 #
