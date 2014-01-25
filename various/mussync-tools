@@ -208,6 +208,7 @@ function mussync_tools_transfert_images {
     test "${QUIET}" != 'True' && echo -n "Extracting... "
 
     case "${INPUT_FILE_FORMAT}" in
+
       'FLAC' )
         # File is Flac
 
@@ -336,6 +337,7 @@ function mussync_tools_transfert_images {
       local OUTPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${OUTPUT_FILE}")"
 
       case "${OUTPUT_FILE_FORMAT}" in
+
         'FLAC' )
           # File is Flac
           # Remove existing images.
@@ -368,6 +370,7 @@ function mussync_tools_transfert_images {
 
               # Export existing comments to file.
               local COMMENTS_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+
               command vorbiscomment --list --raw "${OUTPUT_FILE}" > "${COMMENTS_PATH}"
 
               # Remove existing images.
@@ -419,7 +422,7 @@ function mussync_tools_transfert_images {
               # Image file.
               command cat "${IMAGE_PATH}" >> "${IMAGE_WITH_HEADER}"
 
-              echo "metadata_block_picture= $(command ${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
+              echo "metadata_block_picture=$(command ${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
 
               # Update vorbis file comments.
               command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
@@ -581,9 +584,17 @@ function mussync_tools_convert_file {
             LOG_LEVEL='info'
           fi
 
+          local MAP_METADATA=' 0:g'
+          if [ "${INPUT_FILE_MIMETYPE}" = 'application/ogg' ]; then
+            MAP_METADATA=' 0:s:0'
+          fi
+          if [ "${OUTPUT_FORMAT}" = 'ogg' ]; then
+            MAP_METADATA=":s:a ${MAP_METADATA}"
+          fi
+
           if ! command ${AVCONV} -i "${INPUT_FILE}" \
                   -ab "${BITRATE}" -vn -sn \
-                  -map_metadata 0:s \
+                  -map_metadata${MAP_METADATA} \
                   -loglevel "${LOG_LEVEL}" \
                   ${AVCONV_OPTIONS} \
                   "${OUTPUT_FILE}"; then
