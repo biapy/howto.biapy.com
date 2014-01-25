@@ -8,7 +8,11 @@
 # Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
 # finding a script name.
 #
-VERSION="1.1.4"
+# Thanks to GNU Parallel.
+#  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
+#  ;login: The USENIX Magazine, February 2011:42-47.
+#
+VERSION="1.1.5"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -60,11 +64,24 @@ Usage :
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path.
+REALPATH=''
 function realpath {
-  declare -g REALPATH=''
+  # declare -g REALPATH=''
+  REALPATH=''
 
   command test ${#} -ne 1 && exit 1
-  REALPATH="$(command readlink -f "${1}")"
+
+  case "$(command uname)" in
+    'Linux' )
+      REALPATH="$(command readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      REALPATH="$(command stat -f '%N' "${1}")"
+      ;;
+    * )
+      REALPATH="$(command realpath "${1}")"
+      ;;
+  esac
 } # realpath
 
 
@@ -75,8 +92,10 @@ function realpath {
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=''
 function realpath_check {
-  declare -g REALPATH=''
+  # declare -g REALPATH=''
+  REALPATH=''
 
   command test ${#} -ne 1 && exit 1
 
@@ -100,14 +119,27 @@ function realpath_check {
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
+BINARY=""
 function check_binary {
+  # declare -g BINARY=''
+  BINARY=''
+
   command test ${#} -ne 2 && exit 1
 
+  local PRIMARY="$(echo "${1}" | command cut -d ';' -f 1)"
+  local BINARIES="";
+
+  IFS=';' command read -a BINARIES <<< "${1}"
+
   # Test the binary presence.
-  if [ -z "$(command which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
+  for BINARY in ${BINARIES[@]}; do
+    if [ -n "$(command which "${BINARY}")" ]; then
+      return 0
+    fi
+  done
+
+  echo "Error : '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  exit 1
 } # check_binary
 
 
@@ -119,11 +151,25 @@ function check_binary {
 # @param string $output_file The audio output file.
 #
 # @return Exit with error if conversion failed.
-function mussync-tools-transfert_images {
+function mussync_tools_transfert_images {
   command test ${#} -ne 2 && exit 1
 
   local INPUT_FILE="${1}"
   local OUTPUT_FILE="${2}"
+
+  # Detect base64 command line based on OS.
+  case "$(command uname)" in
+    'Darwin' )
+      local BASE64="$(command which base64) --break=0"
+      local EYE3D_REMOVE_ALL="${EYED3} --remove-all-images"
+      ;;
+    'Linux' | * )
+      local BASE64="$(command which base64) --wrap=0"
+      local EYE3D_REMOVE_ALL="${EYED3} --remove-images"
+      ;;
+  esac
+
+
 
   # Detect if input file has cover art.
   local INPUT_FILE_HAS_COVER="$(command mediainfo --Inform="General;%Cover%" "${INPUT_FILE}")"
@@ -140,7 +186,7 @@ function mussync-tools-transfert_images {
 
     # Detect Cover MIME type.
     local IMAGE_MIME_TYPE="$(command mediainfo --Inform="General;%Cover_Mime%" "${INPUT_FILE}")"
-    local IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut --delimiter='/' --fields=2)"
+    local IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut -d '/' -f 2)"
 
     if [ -z "${IMAGE_EXTENSION}" ]; then
       if [ "${METADATA_BLOCK_PICTURE}" != 'True' ]; then
@@ -150,7 +196,9 @@ function mussync-tools-transfert_images {
       fi
     else
       # Create image folder.
-      local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX.${IMAGE_EXTENSION}")"
+      local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+      command mv "${IMAGE_PATH}" "${IMAGE_PATH}.${IMAGE_EXTENSION}"
+      IMAGE_PATH="${IMAGE_PATH}.${IMAGE_EXTENSION}"
     fi
 
     # Detect input file format and audio format.
@@ -184,9 +232,9 @@ function mussync-tools-transfert_images {
         local MP3_IMAGE_PATH="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
 
         if [ "${VERBOSE}" = 'True' ]; then
-          command eyeD3 --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}"
+          command ${EYED3} --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}"
         else
-          command eyeD3 --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}" > '/dev/null' 2>&1
+          command ${EYED3} --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}" > '/dev/null' 2>&1
         fi
 
         if [ -e "${MP3_IMAGE_PATH}/FRONT_COVER.${IMAGE_EXTENSION}" ]; then
@@ -208,20 +256,20 @@ function mussync-tools-transfert_images {
             command vorbiscomment --list --raw "${INPUT_FILE}" \
                 | command grep --max-count=1 '^metadata_block_picture=' \
                 | command sed -e 's/^metadata_block_picture=//' \
-                | command base64 --decode --wrap=0 \
+                | command ${BASE64} --decode \
               > "${IMAGE_WITH_HEADERS_PATH}"
 
             # Fetch data lengths.
             local MIME_LENGTH="$(command dd skip=4 count=4 bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
                 | command xxd -p -g0 \
-                | command xargs -iHEX printf "%d" '0xHEX')"
+                | command xargs -IHEX printf "%d" '0xHEX')"
 
             IMAGE_MIME_TYPE="$(command dd skip=8 count="${MIME_LENGTH}" bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null')"
 
             # Now we try to detect extension and create the temporary image file.
-            IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut --delimiter='/' --fields=2)"
+            IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut -d '/' -f 2)"
             if [ -z "${IMAGE_EXTENSION}" ]; then
               # Unable to determine cover mime type.
               test -e "${IMAGE_WITH_HEADERS_PATH}" && command rm "${IMAGE_WITH_HEADERS_PATH}"
@@ -230,18 +278,20 @@ function mussync-tools-transfert_images {
               return 1
             fi
 
-            IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX.${IMAGE_EXTENSION}")"
+            IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+            command mv "${IMAGE_PATH}" "${IMAGE_PATH}.${IMAGE_EXTENSION}"
+            IMAGE_PATH="${IMAGE_PATH}.${IMAGE_EXTENSION}"
 
             local DESCRIPTION_SKIP="$((8 + ${MIME_LENGTH}))"
             local DESCRIPTION_LENGTH="$(command dd skip=${DESCRIPTION_SKIP} count=4 bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
                 | command xxd -p -g0 \
-                | command xargs -iHEX printf "%d" '0xHEX')"
+                | command xargs -IHEX printf "%d" '0xHEX')"
             local IMAGE_LENGTH_SKIP="$((${DESCRIPTION_SKIP} + ${DESCRIPTION_LENGTH} + 20))"
             local IMAGE_LENGTH="$(command dd skip=${IMAGE_LENGTH_SKIP} count=4 bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
                 | command xxd -p -g0 \
-                | command xargs -iHEX printf "%d" '0xHEX')"
+                | command xargs -IHEX printf "%d" '0xHEX')"
 
             local IMAGE_SKIP="$((${IMAGE_LENGTH_SKIP} + 4))"
             # Extract image.
@@ -298,14 +348,14 @@ function mussync-tools-transfert_images {
           # File is MP3
           if [ "${VERBOSE}" = 'True' ]; then
             # Remove existing images.
-            command eyeD3 --remove-images "${OUTPUT_FILE}"
+            command ${EYE3D_REMOVE_ALL} "${OUTPUT_FILE}"
             # Insert cover image from file
-            command eyeD3 --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}"
+            command ${EYED3} --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}"
           else
             # Remove existing images.
-            command eyeD3 --remove-images "${OUTPUT_FILE}" > '/dev/null' 2>&1
+            command ${EYE3D_REMOVE_ALL} "${OUTPUT_FILE}" > '/dev/null' 2>&1
             # Insert cover image from file
-            command eyeD3 --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}" > '/dev/null' 2>&1
+            command ${EYED3} --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}" > '/dev/null' 2>&1
           fi
           ;;
 
@@ -321,7 +371,7 @@ function mussync-tools-transfert_images {
               command vorbiscomment --list --raw "${OUTPUT_FILE}" > "${COMMENTS_PATH}"
 
               # Remove existing images.
-              command sed -i -e '/^metadata_block_picture/d' "${COMMENTS_PATH}"
+              command sed -i '' -e '/^metadata_block_picture/d' "${COMMENTS_PATH}"
 
               # Insert cover image from file.
 
@@ -363,13 +413,13 @@ function mussync-tools-transfert_images {
                       >> "${IMAGE_WITH_HEADER}"
               # Image file size <32>.
               command printf "0: %.8x" $(command wc -c "${IMAGE_PATH}" \
-                        | command cut --delimiter=' ' --fields=1) \
+                        | command cut -d ' ' -f 1) \
                         | command xxd -r -g0 \
                       >> "${IMAGE_WITH_HEADER}"
               # Image file.
               command cat "${IMAGE_PATH}" >> "${IMAGE_WITH_HEADER}"
 
-              echo "metadata_block_picture=$(command base64 --wrap=0 < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
+              echo "metadata_block_picture= $(command${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
 
               # Update vorbis file comments.
               command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
@@ -408,9 +458,9 @@ function mussync-tools-transfert_images {
   fi
 
   return 0
-} # mussync-tools-transfert_images()
+} # mussync_tools_transfert_images()
 
-export -f 'mussync-tools-transfert_images'
+export -f 'mussync_tools_transfert_images'
 
 
 
@@ -419,7 +469,7 @@ export -f 'mussync-tools-transfert_images'
 # @param string $input_file The audio input file.
 #
 # @return Exit with error if conversion failed.
-function mussync-tools-convert_file {
+function mussync_tools_convert_file {
   command test ${#} -ne 1 && exit 1
 
   local INPUT_FILE="${1}"
@@ -448,7 +498,7 @@ function mussync-tools-convert_file {
   # Test if input file is an audio file.
   if [ "${INPUT_FILE_MIMETYPE}" != 'application/ogg' \
       -a "$(command echo -n "${INPUT_FILE_MIMETYPE}" \
-            | cut --delimiter='/' --fields=1)" != 'audio' ]; then
+            | cut -d '/' -f 1)" != 'audio' ]; then
     # Input file is not an audio file.
     test "${QUIET}" != 'True' && echo -n "'${SHORT_INPUT_FILE}' is not a audio file... "
 
@@ -531,7 +581,7 @@ function mussync-tools-convert_file {
             LOG_LEVEL='info'
           fi
 
-          if ! command avconv -i "${INPUT_FILE}" \
+          if ! command ${AVCONV} -i "${INPUT_FILE}" \
                   -ab "${BITRATE}" -vn -sn \
                   -map_metadata 0:s \
                   -loglevel "${LOG_LEVEL}" \
@@ -544,7 +594,7 @@ function mussync-tools-convert_file {
           else
             test "${QUIET}" != 'True' && echo "Done."
 
-            mussync-tools-transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
+            mussync_tools_transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
           fi
         fi
       else
@@ -558,10 +608,10 @@ function mussync-tools-convert_file {
   fi
 
   return 0
-} # mussync-tools-convert_file
+} # mussync_tools_convert_file
 
-# Export mussync-tools-convert_file for usage with Parallel / Sem.
-export -f 'mussync-tools-convert_file'
+# Export mussync_tools_convert_file for usage with Parallel / Sem.
+export -f 'mussync_tools_convert_file'
 
 
 #######################################################################################
@@ -781,9 +831,11 @@ check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
-check_binary "avconv" "libav-tools"
+check_binary "avconv;ffmpeg" "libav-tools"
+export AVCONV="${BINARY}"
 check_binary "parallel" "parallel"
-check_binary "eyeD3" "eyed3"
+check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
+export EYED3="${BINARY}"
 check_binary "mediainfo" "mediainfo"
 check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
@@ -793,7 +845,7 @@ check_binary "metaflac" "flac"
 # Compute the semaphore name based on SCRIPT_NAME. 
 SEMAPHORE_NAME="${SCRIPT_NAME}"
 
-# Export configuration for mussync-tools-convert_file function.
+# Export configuration for mussync_tools_convert_file function.
 export INPUT_PATH="$(command pwd)"
 export OUTPUT_PATH="$(command pwd)"
 
@@ -911,7 +963,7 @@ lock "${OUTPUT_PATH}"
 ################################
 
 command find "${INPUT_PATH}" -type 'f' -print0 \
-  | command parallel --jobs ${THREADS} --null 'mussync-tools-convert_file'
+  | command parallel --no-notice --jobs ${THREADS} --null 'mussync_tools_convert_file'
 
 
 ###############################
