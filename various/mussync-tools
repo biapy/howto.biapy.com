@@ -8,7 +8,7 @@
 # Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
 # finding a script name.
 #
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -475,7 +475,7 @@ function mussync-tools-convert_file {
 
           if ! command avconv -i "${INPUT_FILE}" \
                   -ab "${BITRATE}" -vn -sn \
-                  -map_metadata 0 \
+                  -map_metadata 0:s \
                   -loglevel "${LOG_LEVEL}" \
                   ${AVCONV_OPTIONS} \
                   "${OUTPUT_FILE}"; then
