@@ -419,7 +419,7 @@ function mussync_tools_transfert_images {
               # Image file.
               command cat "${IMAGE_PATH}" >> "${IMAGE_WITH_HEADER}"
 
-              echo "metadata_block_picture= $(command${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
+              echo "metadata_block_picture= $(command ${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
 
               # Update vorbis file comments.
               command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
