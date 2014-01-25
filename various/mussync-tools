@@ -8,7 +8,7 @@
 # Thanks to m31z0nyx on irc.freenode.net #debian-facile for his help i
 # finding a script name.
 #
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -125,29 +125,31 @@ function mussync-tools-transfert_images {
 
   # Detect if input file has cover art.
   local INPUT_FILE_HAS_COVER="$(command mediainfo --Inform="General;%Cover%" "${INPUT_FILE}")"
+  local METADATA_BLOCK_PICTURE='False'
+
+  if [ "${INPUT_FILE_HAS_COVER}" != 'Yes' \
+      -a -n "$(command mediainfo "${INPUT_FILE}" | command grep '^metadata_block_picture')" ]; then
+    INPUT_FILE_HAS_COVER='Yes'
+    METADATA_BLOCK_PICTURE='True'
+  fi
 
   if [ "${INPUT_FILE_HAS_COVER}" = 'Yes' ]; then
     test "${QUIET}" != 'True' && echo -n "Transfering cover art to $(command basename "${OUTPUT_FILE}")... "
 
     # Detect Cover MIME type.
     local IMAGE_MIME_TYPE="$(command mediainfo --Inform="General;%Cover_Mime%" "${INPUT_FILE}")"
-    local IMAGE_EXTENSION=''
-
-    case "${IMAGE_MIME_TYPE}" in
-      'image/png'   ) IMAGE_EXTENSION='png';;
-      'image/jpeg'  ) IMAGE_EXTENSION='jpeg';;
-      'image/gif'   ) IMAGE_EXTENSION='gif';;
-      'image/x-ico' ) IMAGE_EXTENSION='ico';;
-    esac
+    local IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut --delimiter='/' --fields=2)"
 
     if [ -z "${IMAGE_EXTENSION}" ]; then
-      # Unable to determine cover mime type.
-      test "${QUIET}" != 'True' && echo "Failed (MIME type unsupported (${IMAGE_MIME_TYPE}))."
-      return 1
+      if [ "${METADATA_BLOCK_PICTURE}" != 'True' ]; then
+        # Unable to determine cover mime type.
+        test "${QUIET}" != 'True' && echo "Failed (MIME type unsupported (${IMAGE_MIME_TYPE}))."
+        return 1
+      fi
+    else
+      # Create image folder.
+      local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX.${IMAGE_EXTENSION}")"
     fi
-
-    # Create image folder.
-    local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX.${IMAGE_EXTENSION}")"
 
     # Detect input file format and audio format.
     local INPUT_FILE_FORMAT="$(command mediainfo --Inform="General;%Format%" "${INPUT_FILE}")"
@@ -208,17 +210,33 @@ function mussync-tools-transfert_images {
               > "${IMAGE_WITH_HEADERS_PATH}"
 
             # Fetch data lengths.
-            local IMIME_LENGTH="$(command dd skip=4 count=4 iflag='skip_bytes,count_bytes' \
+            local MIME_LENGTH="$(command dd skip=4 count=4 bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
                 | command xxd -p -g0 \
                 | command xargs -iHEX printf "%d" '0xHEX')"
-            local IDESCRIPTION_SKIP="$((8 + ${MIME_LENGTH}))"
-            local IDESCRIPTION_LENGTH="$(command dd skip=${DESCRIPTION_SKIP} count=4 iflag='skip_bytes,count_bytes' \
+
+            IMAGE_MIME_TYPE="$(command dd skip=8 count="${MIME_LENGTH}" bs=1 \
+                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null')"
+
+            # Now we try to detect extension and create the temporary image file.
+            IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut --delimiter='/' --fields=2)"
+            if [ -z "${IMAGE_EXTENSION}" ]; then
+              # Unable to determine cover mime type.
+              test -e "${IMAGE_WITH_HEADERS_PATH}" && command rm "${IMAGE_WITH_HEADERS_PATH}"
+
+              test "${QUIET}" != 'True' && echo "Failed (MIME type unsupported (${IMAGE_MIME_TYPE}))."
+              return 1
+            fi
+
+            IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX.${IMAGE_EXTENSION}")"
+
+            local DESCRIPTION_SKIP="$((8 + ${MIME_LENGTH}))"
+            local DESCRIPTION_LENGTH="$(command dd skip=${DESCRIPTION_SKIP} count=4 bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
                 | command xxd -p -g0 \
                 | command xargs -iHEX printf "%d" '0xHEX')"
-            local IIMAGE_LENGTH_SKIP="$((${DESCRIPTION_SKIP} + ${DESCRIPTION_LENGTH} + 20))"
-            local IIMAGE_LENGTH="$(command dd skip=${IMAGE_LENGTH_SKIP} count=4 iflag='skip_bytes,count_bytes' \
+            local IMAGE_LENGTH_SKIP="$((${DESCRIPTION_SKIP} + ${DESCRIPTION_LENGTH} + 20))"
+            local IMAGE_LENGTH="$(command dd skip=${IMAGE_LENGTH_SKIP} count=4 bs=1 \
                 if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
                 | command xxd -p -g0 \
                 | command xargs -iHEX printf "%d" '0xHEX')"
@@ -227,10 +245,10 @@ function mussync-tools-transfert_images {
             # Extract image.
 
             if [ "${VERBOSE}" = 'True' ]; then
-              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} iflag='skip_bytes,count_bytes' \
+              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} bs=1 \
                   if="${IMAGE_WITH_HEADERS_PATH}" of="${IMAGE_PATH}"
             else
-              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} iflag='skip_bytes,count_bytes' \
+              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} bs=1 \
                   if="${IMAGE_WITH_HEADERS_PATH}" of="${IMAGE_PATH}" 2>'/dev/null'
              fi
 
@@ -355,9 +373,9 @@ function mussync-tools-transfert_images {
               command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
 
               # Delete cache file.
-              command rm "${IMAGE_WITH_HEADER}"
+              test -e "${IMAGE_WITH_HEADER}" && command rm "${IMAGE_WITH_HEADER}"
               # Delete comments file.
-              command rm "${COMMENTS_PATH}"
+              test -e "${COMMENTS_PATH}" && command rm "${COMMENTS_PATH}"
               ;;
 
             * )
