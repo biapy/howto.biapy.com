@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.1.7"
+VERSION="1.1.8"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -527,7 +527,7 @@ function mussync_tools_convert_file {
         fi
       fi
     else
-      test "${QUIET}" != 'True' && echo -n "Skipping."
+      test "${QUIET}" != 'True' && echo "Skipping."
     fi
 
     if [ "${COPY_NEEDED}" = 'True' ]; then
