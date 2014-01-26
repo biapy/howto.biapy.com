@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.1.6"
+VERSION="1.1.7"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -845,6 +845,7 @@ check_binary "sed" "sed"
 check_binary "avconv;ffmpeg" "libav-tools"
 export AVCONV="${BINARY}"
 check_binary "parallel" "parallel"
+PARALLEL="${BINARY}"
 check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
 export EYED3="${BINARY}"
 check_binary "mediainfo" "mediainfo"
@@ -973,8 +974,19 @@ lock "${OUTPUT_PATH}"
 #
 ################################
 
+# Detect parallel command line based on OS.
+case "$(command uname)" in
+  'Darwin' )
+    PARALLEL="${PARALLEL} --no-notice"
+    ;;
+  'Linux' | * )
+    # Nothing to do.
+    ;;
+esac
+
+
 command find "${INPUT_PATH}" -type 'f' -print0 \
-  | command parallel --no-notice --jobs ${THREADS} --null 'mussync_tools_convert_file'
+  | command ${PARALLEL} --jobs ${THREADS} --null 'mussync_tools_convert_file'
 
 
 ###############################
