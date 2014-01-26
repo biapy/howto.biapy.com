@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# Filename: Refresh Thumbnails
+# Date: 2008/02/02 15:10:34
+# Licence: GNU GPL
+# Dependency: zenity
+# Author: Pierre-Yves Landuré <pierre-yves dot landure at biapy.fr>
+
+declare -a THUMBNAIL_PATHS
+THUMBNAIL_PATHS[0]="${HOME}/.thumbnails"
+THUMBNAIL_PATHS[1]="${HOME}/.cache/thumbnails"
+
+declare -g DELETE_COUNT=0
+
+case "${LANG}" in
+  'fr' | 'fr_'* )
+    err_title="Erreur"
+    err_files="Aucun fichier sélectionné"
+    info_title="Vignettes effacées"
+    info_thumbnails_deleted="|COUNT| vignettes ont été supprimée(s)."
+    ;;
+  * )
+    err_title="Error"
+    err_files="No file selected"
+    info_title="Thumbnails deleted"
+    info_thumbnails_deleted="|COUNT| thumbnails have been deleted."
+    ;;
+esac
+
+if [ -z "${1}" ]; then
+  command zenity --error --title "${err_title}" --text "${err_files}"
+  exit 1
+fi
+
+for FILE_URI in ${NAUTILUS_SCRIPT_SELECTED_URIS[@]}; do
+
+  THUMBNAIL_FILE="$(command echo -n "${FILE_URI}" \
+    | command md5sum \
+    | command cut --delimiter=' ' --fields=1).png"
+
+  for THUMBNAIL_PATH in ${THUMBNAIL_PATHS[@]}; do
+    if [ -d "${THUMBNAIL_PATH}" ]; then
+
+      command find "${THUMBNAIL_PATH}" -type f -name "${THUMBNAIL_FILE}" \
+        | while command read FOUND_FILE; do
+        command rm "${FOUND_FILE}";
+        DELETE_COUNT=$((${DELETE_COUNT} + 1))
+      done
+    fi
+  done
+done
+
+# zenity --info --title "${info_title}" --text "${info_thumbnails_deleted//|COUNT|/${DELETE_COUNT}}"
+
+exit 0
+
