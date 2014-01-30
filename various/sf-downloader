@@ -4,15 +4,15 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.9"
+VERSION="1.2.10"
 
 SCRIPT_NAME="$(command basename ${0})"
 
 # Detect download command.
 DOWNLOAD_COMMAND="false"
-if [ -n "$(command which "wget")" ]; then
+if [ -n "$(command -v 'wget')" ]; then
   DOWNLOAD_COMMAND="wget"
-elif [ -n "$(command which "curl")" ]; then
+elif [ -n "$(command -v 'curl')" ]; then
   DOWNLOAD_COMMAND="curl"
 fi
 
@@ -73,10 +73,24 @@ Usage :
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path.
-REALPATH=""
+REALPATH=''
 function realpath {
+  # declare -g REALPATH=''
+  REALPATH=''
+
   command test ${#} -ne 1 && exit 1
-  REALPATH="$(/bin/readlink -f "${1}")"
+
+  case "$(command uname)" in
+    'Linux' )
+      REALPATH="$(command readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      REALPATH="$(command stat -f '%N' "${1}")"
+      ;;
+    * )
+      REALPATH="$(command realpath "${1}")"
+      ;;
+  esac
 } # realpath
 
 
@@ -87,8 +101,11 @@ function realpath {
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=""
+REALPATH=''
 function realpath_check {
+  # declare -g REALPATH=''
+  REALPATH=''
+
   command test ${#} -ne 1 && exit 1
 
   realpath "${1}"
@@ -107,18 +124,31 @@ function realpath_check {
 
 # Check if a binary is present
 #
-# @param string $binary The binary to check.
+# @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
+BINARY=''
 function check_binary {
+  # declare -g BINARY=''
+  BINARY=''
+
   command test ${#} -ne 2 && exit 1
 
+  local PRIMARY="$(echo "${1}" | command cut -d ';' -f 1)"
+  local BINARIES="";
+
+  IFS=';' command read -a BINARIES <<< "${1}"
+
   # Test the binary presence.
-  if [ -z "$(which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
+  for BINARY in ${BINARIES[@]}; do
+    if [ -n "$(command -v "${BINARY}")" ]; then
+      return 0
+    fi
+  done
+
+  echo "Error : '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  exit 1
 } # check_binary
 
 
@@ -148,7 +178,7 @@ function check_package_file {
 # @param string $path The path where to save the file (need a filename value).
 #
 # @return ${DOWNLOAD_FILE} The path to the downloaded file.
-DOWNLOAD_FILE=""
+DOWNLOAD_FILE=''
 function download_file {
   command test ${#} -lt 1 && exit 1
 
@@ -191,7 +221,7 @@ function download_file {
 # @param string $strip An optionnal strip components value.
 #
 # @return ${DOWNLOAD_TGZ} The path to the extracted content.
-DOWNLOAD_TGZ=""
+DOWNLOAD_TGZ=''
 function download_tgz {
   command test ${#} -lt 1 && exit 1
 
@@ -235,7 +265,7 @@ function download_tgz {
 # @param string $strip An optionnal strip components value.
 #
 # @return ${DOWNLOAD_TBZ2} The path to the extracted content.
-DOWNLOAD_TBZ2=""
+DOWNLOAD_TBZ2=''
 function download_tbz2 {
   check_binary "bzip2" "bzip2"
   command test ${#} -lt 1 && exit 1
@@ -280,7 +310,7 @@ function download_tbz2 {
 # @param string $strip An optionnal strip components value.
 #
 # @return ${DOWNLOAD_ZIP} The path to the extracted content.
-DOWNLOAD_ZIP=""
+DOWNLOAD_ZIP=''
 function download_zip {
   check_binary "unzip" "unzip"
   command test ${#} -lt 1 && exit 1
@@ -629,6 +659,11 @@ case "${FORGE}" in
     VERSION="$(command echo "${SOURCE_URL}" \
         | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
         )"
+
+    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
+      SOURCE_URL="${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    fi
+
     ;;
 
   'sf-alt' )
