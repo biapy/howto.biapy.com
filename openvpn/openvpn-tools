@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.1.0"
+VERSION="2.1.1"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -242,17 +242,58 @@ INSTANCE_UNIX_COMPAT_EXPORT_PATH_EXPORT_TEMPLATE="${INSTANCE_UNIX_COMPAT_EXPORT_
 ############################################################
 
 
+
 # Get the absolute path for a file or directory.
 #
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path.
+REALPATH=''
 function realpath {
-  declare -g REALPATH=''
+  # declare -g REALPATH=''
+  REALPATH=''
 
   command test ${#} -ne 1 && exit 1
-  REALPATH="$(command readlink -f "${1}")"
-} # realpath()
+
+  case "$(command uname)" in
+    'Linux' )
+      REALPATH="$(command readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      REALPATH="$(command stat -f '%N' "${1}")"
+      ;;
+    * )
+      REALPATH="$(command realpath "${1}")"
+      ;;
+  esac
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+REALPATH=''
+function realpath_check {
+  # declare -g REALPATH=''
+  REALPATH=''
+
+  command test ${#} -ne 1 && exit 1
+
+  realpath "${1}"
+
+  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
+    REALPATH=""
+  fi
+
+  if [ -z "${REALPATH}" ]; then
+    echo "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+} # realpath_check
 
 
 
@@ -262,15 +303,28 @@ function realpath {
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
+BINARY=""
 function check_binary {
+  # declare -g BINARY=''
+  BINARY=''
+
   command test ${#} -ne 2 && exit 1
 
+  local PRIMARY="$(echo "${1}" | command cut -d ';' -f 1)"
+  local BINARIES="";
+
+  IFS=';' command read -a BINARIES <<< "${1}"
+
   # Test the binary presence.
-  if [ -z "$(command which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
-} # check_binary()
+  for BINARY in ${BINARIES[@]}; do
+    if [ -n "$(command -v "${BINARY}")" ]; then
+      return 0
+    fi
+  done
+
+  echo "Error : '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary
 
 
 
