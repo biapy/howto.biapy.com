@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.1.8"
+VERSION="1.2.0"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -25,9 +25,9 @@ and keep the folder structure.
 Usage :
 
   ${SCRIPT_NAME} [ --help ] [ --quiet ] [ --verbose ]
-      [ --input-path='/path/to/flac/library' ]
-      [ --output-path='/path/to/mp3/library' ]
-      [ --input-format='flac' ] [ --output-format='mp3' ]
+      [ --input-path='/path/to/original/library' ]
+      [ --output-path='/path/to/converted/library' ]
+      [ --input-format='*' ] [ --output-format='mp3' ]
       [ --bitrate='320k' ] [ --sync-delete ] [ --copy-all ]
       [ --avconv-options='--more --avconv --options' ]
 
@@ -37,9 +37,13 @@ Usage :
                                       (default to current)
     * --output-path | --out | -o    : Set the path to the target library
                                       (default to current)
-    * --input-format  | --if | -s   : Set the input format. Default to *.
+    * --input-format  | --if        : Set the input format. Default to *.
     * --output-format | --of | -e   : Set the output format. Default to MP3.
-    * --bitrate | -b                : Set the bitrate. Default to 320k.
+    * --bitrate | -b                : Set the CBR bitrate. Default to 192k.
+                                      Trigger CBR encoding.
+    * --quality | -q                : Set the VBR quality. Default to 4.
+                                      0 is the lowest, 9 the highest.
+                                      Trigger VBR encoding (default).
     * --sync-delete | --delete | -d : Propagate file deletion from input
                                       library to output library.
                                       Any output file without equivalence in
@@ -50,8 +54,16 @@ Usage :
                                       See avconv man page.
     * --threads | -t                : Threads number.
                                       Default to 1 thread by CPU.
-    * --quiet | -q                  : Disable almost all outputs.
+    * --quiet | --silent | -s       : Disable almost all outputs.
     * --verbose | -v                : Enable debug outputs.
+
+  Completly supported formats are :
+    * MP3 (mp3)
+    * Flac (flac)
+    * Ogg/Vorbis (ogg)
+
+    When converting from/to this formats, metadatas an cover art will be
+    transfered to the created files.
 "
 
   test -n "${1}" && exit ${1}
@@ -106,7 +118,7 @@ function realpath_check {
   fi
 
   if [ -z "${REALPATH}" ]; then
-    echo "Error : File '${1}' does not exists." >&2
+    echo "Error: File '${1}' does not exists." >&2
     exit 1
   fi
 } # realpath_check
@@ -115,11 +127,11 @@ function realpath_check {
 
 # Check if a binary is present
 #
-# @param string $binary The binary to check.
+# @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-BINARY=""
+BINARY=''
 function check_binary {
   # declare -g BINARY=''
   BINARY=''
@@ -133,12 +145,12 @@ function check_binary {
 
   # Test the binary presence.
   for BINARY in ${BINARIES[@]}; do
-    if [ -n "$(command which "${BINARY}")" ]; then
+    if [ -n "$(command -v "${BINARY}")" ]; then
       return 0
     fi
   done
 
-  echo "Error : '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  echo "Error: '${PRIMARY}' is missing. Please install package '${2}'." >&2
   exit 1
 } # check_binary
 
@@ -151,7 +163,7 @@ function check_binary {
 # @param string $output_file The audio output file.
 #
 # @return Exit with error if conversion failed.
-function mussync_tools_transfert_images {
+function transfert_images {
   command test ${#} -ne 2 && exit 1
 
   local INPUT_FILE="${1}"
@@ -160,11 +172,11 @@ function mussync_tools_transfert_images {
   # Detect base64 command line based on OS.
   case "$(command uname)" in
     'Darwin' )
-      local BASE64="$(command which base64) --break=0"
+      local BASE64="$(command -v base64) --break=0"
       local EYE3D_REMOVE_ALL="${EYED3} --remove-all-images"
       ;;
     'Linux' | * )
-      local BASE64="$(command which base64) --wrap=0"
+      local BASE64="$(command -v base64) --wrap=0"
       local EYE3D_REMOVE_ALL="${EYED3} --remove-images"
       ;;
   esac
@@ -374,7 +386,7 @@ function mussync_tools_transfert_images {
               command vorbiscomment --list --raw "${OUTPUT_FILE}" > "${COMMENTS_PATH}"
 
               # Remove existing images.
-              command sed -i '' -e '/^metadata_block_picture/d' "${COMMENTS_PATH}"
+              command sed -i'' -e '/^METADATA_BLOCK_PICTURE/Id' "${COMMENTS_PATH}"
 
               # Insert cover image from file.
 
@@ -422,7 +434,7 @@ function mussync_tools_transfert_images {
               # Image file.
               command cat "${IMAGE_PATH}" >> "${IMAGE_WITH_HEADER}"
 
-              echo "metadata_block_picture=$(command ${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
+              echo "METADATA_BLOCK_PICTURE=$(command ${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
 
               # Update vorbis file comments.
               command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
@@ -461,9 +473,9 @@ function mussync_tools_transfert_images {
   fi
 
   return 0
-} # mussync_tools_transfert_images()
+} # transfert_images()
 
-export -f 'mussync_tools_transfert_images'
+export -f 'transfert_images'
 
 
 
@@ -472,7 +484,7 @@ export -f 'mussync_tools_transfert_images'
 # @param string $input_file The audio input file.
 #
 # @return Exit with error if conversion failed.
-function mussync_tools_convert_file {
+function convert_file {
   command test ${#} -ne 1 && exit 1
 
   local INPUT_FILE="${1}"
@@ -485,7 +497,6 @@ function mussync_tools_convert_file {
   local INPUT_FILENAME="$(command basename "${INPUT_FILE}")"
   local OUTPUT_FILENAME="$(command echo -n "${INPUT_FILENAME}" \
         | command sed -e "s/\.[^\.]*$/\.${OUTPUT_EXTENSION}/")"
-
   local INPUT_FILE_MIMETYPE="$(command file --brief --mime-type "${INPUT_FILE}")"
 
   # Detect input extension
@@ -496,6 +507,18 @@ function mussync_tools_convert_file {
 
   local SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
   local SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
+
+  # Generate a temporary filename for processing cache.
+  # Created on the same hard drive (same path) as the target file.
+  # Use the same extension to make sure format detection work properly.
+  local OUTPUT_TEMP_FILENAME="$(command echo -n "${INPUT_FILENAME}" \
+        | command sed -e "s/\.[^\.]*$/-${RANDOM}-${RANDOM}\.${OUTPUT_EXTENSION}/")"
+  local OUTPUT_TEMP_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_TEMP_FILENAME}"
+  while [ -e "${OUTPUT_TEMP_FILE}" ]; do
+    OUTPUT_TEMP_FILENAME="$(command echo -n "${INPUT_FILENAME}" \
+        | command sed -e "s/\.[^\.]*$/-${RANDOM}-${RANDOM}\.${OUTPUT_EXTENSION}/")"
+    OUTPUT_TEMP_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_TEMP_FILENAME}"
+  done
 
 
   # Test if input file is an audio file.
@@ -581,31 +604,110 @@ function mussync_tools_convert_file {
 
           local LOG_LEVEL='quiet'
           if [ "${VERBOSE}" = 'True' ]; then
-            LOG_LEVEL='info'
+            LOG_LEVEL='debug'
           fi
+
+          local ENCODING_OPTIONS=''
+          # Specific options for encoding mode.
+          case "${ENCODING_MODE}" in
+            'CBR' )
+              # Constant bitrate selected.
+              ENCODING_OPTIONS="-b:a ${ENCODING_BITRATE}"
+             ;;
+
+            'VBR' | * )
+              # Variable bitrate selected. Default.
+              ENCODING_OPTIONS="-q:a ${ENCODING_QUALITY}"
+              ;;
+          esac
 
           local MAP_METADATA=' 0:g'
-          if [ "${INPUT_FILE_MIMETYPE}" = 'application/ogg' ]; then
-            MAP_METADATA=' 0:s:0'
-          fi
-          if [ "${OUTPUT_FORMAT}" = 'ogg' ]; then
-            MAP_METADATA=":s:a ${MAP_METADATA}"
-          fi
+          # Specific needs for some input formats/
+          case "${INPUT_FILE_MIMETYPE}" in
+            'application/ogg' )
+              # Get input metadata from first audio stream and direct it to global.
+              # See https://bugs.kde.org/show_bug.cgi?id=306895
+              MAP_METADATA=' 0:s:0'
+              ;;
 
+            * )
+              # Do nothing.
+              # MAP_METADATA=' 0:g'
+              ;;
+          esac
+
+          # Specific needs for some output formats/
+          local OUTPUT_OPTIONS="-f ${OUTPUT_FORMAT}"
+          case "${OUTPUT_FORMAT}" in
+            'flac' )
+              # No encoding options needed.
+              ENCODING_OPTIONS=""
+              # OUTPUT_OPTIONS="-f ${OUTPUT_FORMAT}"
+              ;;
+
+            'ogg' | 'vorbis' )
+              # Set vorbis as default codec for ogg.
+              OUTPUT_OPTIONS="-codec:a libvorbis -f ogg"
+              # Map input metadata to all audio streams in ogg container.
+              # See https://bugs.kde.org/show_bug.cgi?id=306895
+              if [ "${INPUT_FILE_MIMETYPE}" = 'application/ogg' ]; then
+                MAP_METADATA=" 0:s:0"
+              else
+                MAP_METADATA=":s:a 0:s:0"
+              fi
+              ;;
+
+            'mp3' )
+              # Force libmp3lame use.
+              OUTPUT_OPTIONS="-codec:a libmp3lame ${OUTPUT_OPTIONS}"
+              ;;
+
+            * )
+              # Do nothing.
+              # MAP_METADATA="${MAP_METADATA}"
+              # OUTPUT_OPTIONS="-f ${OUTPUT_FORMAT}"
+              ;;
+          esac
+
+          # Fix for mp3 cbr format, harmless for other formats.
+          # Write output on pipe and then directed to file.
+          # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
+          #
+          # Note: log output is alway on 2. avconv keep 1 empty.
           if ! command ${AVCONV} -i "${INPUT_FILE}" \
-                  -ab "${BITRATE}" -vn -sn \
-                  -map_metadata${MAP_METADATA} \
-                  -loglevel "${LOG_LEVEL}" \
-                  ${AVCONV_OPTIONS} \
-                  "${OUTPUT_FILE}"; then
+                     -vn -sn \
+                    -map_metadata${MAP_METADATA} \
+                    -loglevel "${LOG_LEVEL}" \
+                    ${AVCONV_OPTIONS} \
+                    ${OUTPUT_OPTIONS} \
+                    ${ENCODING_OPTIONS} \
+                    - > "${OUTPUT_TEMP_FILE}"; then
             test "${QUIET}" != 'True' && echo "Failed."
-            test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+            test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
 
             return 1
           else
             test "${QUIET}" != 'True' && echo "Done."
 
-            mussync_tools_transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
+            # Test if fix for MP3 VBR is needed.
+            # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
+            if [ "${OUTPUT_FORMAT}" = 'mp3' -a "${ENCODING_MODE}" != 'CBR' ]; then
+              # Output file is MP3 and VBR. Apply header fix.
+              if [ "${VERBOSE}" = 'True' ]; then
+                command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
+              else
+                command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}" >'/dev/null' 2>&1
+              fi
+            else
+              # Nothing to do but rename the file.
+              command mv "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
+            fi
+
+            # Delete temporary file if it is still present.
+            test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
+
+            # Fetch cover art from input file.
+            transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
           fi
         fi
       else
@@ -619,10 +721,10 @@ function mussync_tools_convert_file {
   fi
 
   return 0
-} # mussync_tools_convert_file
+} # convert_file
 
-# Export mussync_tools_convert_file for usage with Parallel / Sem.
-export -f 'mussync_tools_convert_file'
+# Export convert_file for usage with Parallel / Sem.
+export -f 'convert_file'
 
 
 #######################################################################################
@@ -851,20 +953,23 @@ export EYED3="${BINARY}"
 check_binary "mediainfo" "mediainfo"
 check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
+check_binary "vbrfix" "vbrfix"
 
 # Application defaults
 
 # Compute the semaphore name based on SCRIPT_NAME. 
 SEMAPHORE_NAME="${SCRIPT_NAME}"
 
-# Export configuration for mussync_tools_convert_file function.
+# Export configuration for convert_file function.
 export INPUT_PATH="$(command pwd)"
 export OUTPUT_PATH="$(command pwd)"
 
 export INPUT_FORMAT="*"
 export OUTPUT_FORMAT="mp3"
 
-export BITRATE="320k"
+export ENCODING_MODE="VBR"
+export ENCODING_BITRATE="192k"
+export ENCODING_QUALITY="4"
 
 export THREADS="100%"
 
@@ -880,7 +985,7 @@ export INPUT_EXTENSION="${INPUT_FORMAT}"
 export OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: s: output-format: of: e: bitrate: b: threads: t: avconv-options: a: sync-delete delete d copy-all copy c quiet q verbose v" "${@}"; do
+while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: output-format: of: e: bitrate. b. quality. q. threads: t: avconv-options: a: sync-delete delete d copy-all copy c quiet silent s verbose v" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
@@ -895,7 +1000,7 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
       OUTPUT_PATH="${REALPATH}"
       ;;
 
-    'input-format' | 'if' | 's' )
+    'input-format' | 'if' )
       if [ -n "${OPTARG}" ]; then
         INPUT_FORMAT="${OPTARG}"
       fi
@@ -908,8 +1013,18 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
       ;;
 
     'bitrate' | 'b' )
+      ENCODING_MODE="CBR"
+
       if [ -n "${OPTARG}" ]; then
-        BITRATE="${OPTARG}"
+        ENCODING_BITRATE="${OPTARG}"
+      fi
+      ;;
+
+    'quality' | 'q' )
+      ENCODING_MODE="VBR"
+
+      if [ -n "${OPTARG}" ]; then
+        ENCODING_QUALITY="${OPTARG}"
       fi
       ;;
 
@@ -933,7 +1048,7 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
       COPY_ALL='True'
       ;;
 
-    'quiet' | 'q' )
+    'quiet' | 'silent' | 's' )
       QUIET='True'
       ;;
 
@@ -949,20 +1064,44 @@ done
 
 shift $[OPTIND-1]
 
+if [ "${VERBOSE}" = 'True' ]; then
+  QUIET='False'
+fi
+
+# Render formats with lowercase.
+INPUT_FORMAT="$(command echo "${INPUT_FORMAT}" | command tr '[:upper:]' '[:lower:]')"
+OUTPUT_FORMAT="$(command echo "${OUTPUT_FORMAT}" | command tr '[:upper:]' '[:lower:]')"
+
+
 # TODO : implement a less basic extension detection based on format.
+
 export INPUT_EXTENSION="${INPUT_FORMAT}"
+case "${INPUT_FORMAT}" in
+  'vorbis' | 'ogg' )
+    INPUT_EXTENSION='ogg'
+    ;;
+esac
+
 export OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
-
-# Specific needs for some output formats/
 case "${OUTPUT_FORMAT}" in
+  'flac' | 'aiff' )
+    # Defaults are good.
+    ;;
+  'mp3' )
+    # Invert quality setting (9 is lowest, 0 highest).
+    # This way mp3 and ogg/vorbis quality is set the same way.
+    ENCODING_QUALITY=$((9 - ${ENCODING_QUALITY}))
+    ;;
   'ogg' )
-    # Set vorbis as default codec for ogg.
-    AVCONV_OPTIONS="${AVCONV_OPTIONS} -codec:a libvorbis"
+    OUTPUT_EXTENSION='ogg'
+    OUTPUT_FORMAT='vorbis'
     ;;
-
-  '*' )
-    # Do nothing.
+  'vorbis' )
+    OUTPUT_EXTENSION='ogg'
     ;;
+  * )
+    echo "Error: unsupported output format '${OUTPUT_FORMAT}'." >&2
+    exit 1
 esac
 
 ## Lock output path for this script.
@@ -986,7 +1125,7 @@ esac
 
 
 command find "${INPUT_PATH}" -type 'f' -print0 \
-  | command ${PARALLEL} --jobs ${THREADS} --null 'mussync_tools_convert_file'
+  | command ${PARALLEL} --jobs ${THREADS} --null 'convert_file'
 
 
 ###############################
