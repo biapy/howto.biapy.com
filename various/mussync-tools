@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.2.1"
+VERSION="1.2.2"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -28,7 +28,7 @@ Usage :
       [ --input-path='/path/to/original/library' ]
       [ --output-path='/path/to/converted/library' ]
       [ --input-format='*' ] [ --output-format='mp3' ]
-      [ --bitrate='320k' | --quality=6 ]
+      [ --bitrate='320k' | --quality=5 ]
       [ --sync-delete ] [ --copy-all ]
       [ --avconv-options='--more --avconv --options' ]
 
@@ -195,7 +195,7 @@ function transfert_images {
   fi
 
   if [ "${INPUT_FILE_HAS_COVER}" = 'Yes' ]; then
-    test "${QUIET}" != 'True' && echo -n "Transfering cover art to $(command basename "${OUTPUT_FILE}")... "
+    test "${QUIET}" != 'True' && echo -n " -> Transfering cover art to $(command basename "${OUTPUT_FILE}")... "
 
     # Detect Cover MIME type.
     local IMAGE_MIME_TYPE="$(command mediainfo --Inform="General;%Cover_Mime%" "${INPUT_FILE}")"
@@ -208,7 +208,7 @@ function transfert_images {
         return 1
       fi
     else
-      # Create image folder.
+      # Create image temporary file. 
       local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
       command mv "${IMAGE_PATH}" "${IMAGE_PATH}.${IMAGE_EXTENSION}"
       IMAGE_PATH="${IMAGE_PATH}.${IMAGE_EXTENSION}"
@@ -510,17 +510,11 @@ function convert_file {
   local SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
 
   # Generate a temporary filename for processing cache.
-  # Created on the same hard drive (same path) as the target file.
   # Use the same extension to make sure format detection work properly.
-  local OUTPUT_TEMP_FILENAME="$(command echo -n "${INPUT_FILENAME}" \
-        | command sed -e "s/\.[^\.]*$/-${RANDOM}-${RANDOM}\.${OUTPUT_EXTENSION}/")"
-  local OUTPUT_TEMP_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_TEMP_FILENAME}"
-  while [ -e "${OUTPUT_TEMP_FILE}" ]; do
-    OUTPUT_TEMP_FILENAME="$(command echo -n "${INPUT_FILENAME}" \
-        | command sed -e "s/\.[^\.]*$/-${RANDOM}-${RANDOM}\.${OUTPUT_EXTENSION}/")"
-    OUTPUT_TEMP_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_TEMP_FILENAME}"
-  done
 
+  local OUTPUT_TEMP_FILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
+  command mv "${OUTPUT_TEMP_FILE}" "${OUTPUT_TEMP_FILE}.${OUTPUT_EXTENSION}"
+  OUTPUT_TEMP_FILE="${OUTPUT_TEMP_FILE}.${OUTPUT_EXTENSION}"
 
   # Test if input file is an audio file.
   if [ "${INPUT_FILE_MIMETYPE}" != 'application/ogg' \
@@ -685,6 +679,7 @@ function convert_file {
                     - > "${OUTPUT_TEMP_FILE}"; then
             test "${QUIET}" != 'True' && echo "Failed."
             test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
+            test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
 
             return 1
           else
@@ -693,12 +688,39 @@ function convert_file {
             # Test if fix for MP3 VBR is needed.
             # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
             if [ "${OUTPUT_FORMAT}" = 'mp3' -a "${ENCODING_MODE}" != 'CBR' ]; then
-              # Output file is MP3 and VBR. Apply header fix.
-              if [ "${VERBOSE}" = 'True' ]; then
-                command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
-              else
-                command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}" >'/dev/null' 2>&1
-              fi
+              local OUTPUT_FILE_AUDIO_FORMAT=""
+              local VBRFIX_COUNT=0
+              while [ "${OUTPUT_FILE_AUDIO_FORMAT}" != 'MPEG Audio' ]; do
+
+                # 5 tries maximum.
+                if [ ${VBRFIX_COUNT} -gt 5 ]; then
+                  test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
+                  test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+
+                  test "${QUIET}" != 'True' && echo "Failed. Removing output file."
+                  return 1
+                  break;
+                fi
+
+                if [ ${VBRFIX_COUNT} -gt 0 ]; then
+                  test "${QUIET}" != 'True' && echo "Failed."
+                fi
+
+                command let VBRFIX_COUNT+=1
+                test "${QUIET}" != 'True' && echo -n " -> Fixing '${SHORT_OUTPUT_FILE}' VBR header (try ${VBRFIX_COUNT})..."
+
+                # Output file is MP3 and VBR. Apply header fix.
+                if [ "${VERBOSE}" = 'True' ]; then
+                  command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
+                else
+                  command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}" >'/dev/null' 2>&1
+                fi
+
+                # Check that vbrfix has done his job correctly.
+                OUTPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${OUTPUT_FILE}")"
+              done
+
+              test "${QUIET}" != 'True' -a -e "${OUTPUT_FILE}" && echo "Done."
             else
               # Nothing to do but rename the file.
               command mv "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
@@ -708,7 +730,9 @@ function convert_file {
             test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
 
             # Fetch cover art from input file.
-            transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
+            if [ -e "${INPUT_FILE}" -a -e "${OUTPUT_FILE}" ]; then
+              transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
+            fi
           fi
         fi
       else
@@ -970,7 +994,7 @@ export OUTPUT_FORMAT="mp3"
 
 export ENCODING_MODE="VBR"
 export ENCODING_BITRATE="192k"
-export ENCODING_QUALITY="6"
+export ENCODING_QUALITY="5"
 
 export THREADS="100%"
 
