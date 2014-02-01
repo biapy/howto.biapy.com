@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -28,7 +28,8 @@ Usage :
       [ --input-path='/path/to/original/library' ]
       [ --output-path='/path/to/converted/library' ]
       [ --input-format='*' ] [ --output-format='mp3' ]
-      [ --bitrate='320k' ] [ --sync-delete ] [ --copy-all ]
+      [ --bitrate='320k' | --quality=6 ]
+      [ --sync-delete ] [ --copy-all ]
       [ --avconv-options='--more --avconv --options' ]
 
   Available options are :
