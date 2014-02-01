@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.2.2"
+VERSION="1.2.3"
 
 SCRIPT_NAME="$(command basename "${0}")"
 
@@ -678,11 +678,17 @@ function convert_file {
                     ${ENCODING_OPTIONS} \
                     - > "${OUTPUT_TEMP_FILE}"; then
             test "${QUIET}" != 'True' && echo "Failed."
+
+            # Force > output to be written on disk.
+            command sync
+
             test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
             test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
 
             return 1
           else
+            # Force > output to be written on disk.
+            command sync
             test "${QUIET}" != 'True' && echo "Done."
 
             # Test if fix for MP3 VBR is needed.
@@ -710,11 +716,18 @@ function convert_file {
                 test "${QUIET}" != 'True' && echo -n " -> Fixing '${SHORT_OUTPUT_FILE}' VBR header (try ${VBRFIX_COUNT})..."
 
                 # Output file is MP3 and VBR. Apply header fix.
+                # enter /tmp since vbrfix create log files in current directory (!)
+                command pushd '/tmp'
                 if [ "${VERBOSE}" = 'True' ]; then
                   command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
                 else
                   command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}" >'/dev/null' 2>&1
                 fi
+                command popd
+
+                # Force output to be written on disk.
+                # May not be necessary here.
+                command sync
 
                 # Check that vbrfix has done his job correctly.
                 OUTPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${OUTPUT_FILE}")"
