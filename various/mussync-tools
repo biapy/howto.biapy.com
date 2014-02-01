@@ -41,7 +41,7 @@ Usage :
     * --output-format | --of | -e   : Set the output format. Default to MP3.
     * --bitrate | -b                : Set the CBR bitrate. Default to 192k.
                                       Trigger CBR encoding.
-    * --quality | -q                : Set the VBR quality. Default to 4.
+    * --quality | -q                : Set the VBR quality. Default to 6.
                                       0 is the lowest, 9 the highest.
                                       Trigger VBR encoding (default).
     * --sync-delete | --delete | -d : Propagate file deletion from input
@@ -969,7 +969,7 @@ export OUTPUT_FORMAT="mp3"
 
 export ENCODING_MODE="VBR"
 export ENCODING_BITRATE="192k"
-export ENCODING_QUALITY="4"
+export ENCODING_QUALITY="6"
 
 export THREADS="100%"
 
