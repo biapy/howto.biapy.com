@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.3.3"
+version="1.4.0"
 
 script_name="$(basename -- "${0}")"
 
@@ -402,7 +402,7 @@ function transfert_images() {
   fi
 
   if [[ "${input_file_has_cover}" = 'Yes' ]]; then
-    echo -n " -> Transfering cover art to "
+    echo -n "     + Transfering cover art to "
     cecho 'magenta' -n "$(basename -z "${output_file}")"
     echo -n "... "
 
@@ -767,6 +767,7 @@ function convert_file() {
       && "$(echo -n "${input_file_mimetype}" \
             | cut -d '/' -f 1)" != 'audio' ]]; then
     # Input file is not an audio file.
+    echo -n '   - '
     cecho 'magenta' -n "${short_input_file}"
     echo -n " is not a audio file... "
 
@@ -813,6 +814,7 @@ function convert_file() {
     if [[ ! -e "${output_file}" ]]; then
       conversion_needed='True'
     else
+      echo -n '   - '
       cecho 'magenta' -n "${short_output_file}"
       echo -n " exists... "
 
@@ -845,11 +847,19 @@ function convert_file() {
 
         if [[ "${input_format}" = "${output_format}" ]]; then
           # Copy input to output (format is the same).
-          echo -n "Copying '${short_input_file}' to '${short_output_file}'... "
+          # Convert input to output
+          echo -n "   - Copying "
+          cecho 'magenta' -n "${short_input_file}"
+          echo -n ' to '
+          cecho 'magenta' -n "${short_output_file}"
+          echo -n '... '
+
           cp "${input_file}" "${output_file}"
+
+          cecho 'green' "Done."
         else
           # Convert input to output
-          echo -n "Converting "
+          echo -n "   - Converting "
           cecho 'magenta' -n "${short_input_file}"
           echo -n ' to '
           cecho 'magenta' -n "${short_output_file}"
@@ -972,7 +982,7 @@ function convert_file() {
                 fi
 
                 let vbrfix_count+=1
-                echo -n ' -> Fixing '
+                echo -n '     + Fixing '
                 cecho 'magenta' -n "${short_output_file}"
                 echo -n " VBR header (try ${vbrfix_count})..."
 
@@ -1064,7 +1074,7 @@ function replaygain_album() {
   shopt -u nullglob dotglob
 
   (( ${#album_files[*]} )) || return 1
-  echo -n "Processing replay gain for album '"
+  echo -n "   + Processing replay gain for album '"
   cecho 'magenta' -n "${album_name}"
   echo -n "'... "
 
@@ -1073,16 +1083,45 @@ function replaygain_album() {
       # reference:
       # mp3gain  -a -t -p -s r -k -f
 
+      local processed_list_log_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+
       if [[ "${verbose}" = 'True' ]]; then
-        mp3gain -a -t -p -k -f "${album_files[@]}"
+        mp3gain -a -t -p -k -f -q "${album_files[@]}" | tee "${processed_list_log_path}"
       else
-        mp3gain -a -t -p -k -f "${album_files[@]}" > '/dev/null' 2>&1
+        mp3gain -a -t -p -k -f -q "${album_files[@]}" > "${processed_list_log_path}" 2>'/dev/null'
       fi
 
-      if [[ ! ${?} ]]; then
+      local error_code=${?}
+
+      if [[ ${error_code} -ne 0 ]]; then
         cecho 'red' 'Failure.'
+
+        if [[ ${error_code} = 139 ]]; then
+          # mp3gain segfaulted. Handling the faulty mp3 file removal and regeneration.
+          local faulty_file_index=$(wc -l "${processed_list_log_path}" \
+                                    | cut --delimiter=' ' --fields=1)
+          local faulty_file="${album_files[${faulty_file_index}]}"
+          if [[ -n "${faulty_file}" ]]; then
+            local faulty_filename="$(basename -z "${faulty_file}")"
+
+            cecho 'red' -n 'File '
+            cecho 'magenta' -n "${faulty_filename}"
+            cecho 'red' -n ' is faulty... '
+            cecho 'red' -n 'Deleting... '
+
+            test -e "${faulty_file}" && rm "${faulty_file}"
+            test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
+
+            cecho 'yellow' 'Regenerating.'
+            return 139
+          fi
+        fi
+
+        test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
         return 1
       fi
+
+      test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
       ;;
     'flac' )
       metaflac --add-replay-gain "${album_files[@]}"
@@ -1135,6 +1174,7 @@ function convert_album() {
   local threads="${1}"
   local replaygain="${2}"
   local input_album_path="${3}"
+  local album_name="$(basename -z "${input_album_path}")"
 
   #------------------------
   # Trap handling function
@@ -1167,21 +1207,48 @@ function convert_album() {
 
   trap "exit_convert_album_on_signal '${input_album_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
-  find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
-    | sort --zero-terminated \
-    | parallel --halt 2 --jobs "${threads}" --null 'convert_file'
+  # Find folder files and put them in a array.
+  # See: http://mywiki.wooledge.org/BashFAQ/020
+  unset files
+  declare -a files
+  while read -d '' -r; do
+    files+=("${REPLY}")
+  done < <(find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
+              | sort --zero-terminated)
 
-  # Warning: when interrupted, parallel does not print threads output
-  # (including the traps output).
-  # use --res /path/to/folder to store and debug tasks outputs.
+  # see : http://mywiki.wooledge.org/UsingFind
+  # Note to self: when -print0 option is not available.
+  # (find "${input_album_path}" -maxdepth 1 -type 'f' -exec printf "%s\0" {} \;)
 
-  # Wait for all files to be done.
-  parallel --wait
+  # Test if folder has files.
+  if [[ ${#files[@]} -gt 0 ]]; then
+    cecho 'bold' -n ' * Processing folder '
+    cecho 'magentabold' -n "${album_name}"
+    cecho 'bold' '...'
 
-  # Compute album replaygain.
-  if [[ "${replaygain}" = 'True' ]]; then
-    replaygain_album "${output_format}" "${output_extension}" \
-                    "${verbose}" "${input_album_path}"
+    # See http://mywiki.wooledge.org/ProcessManagement#I_want_to_process_a_bunch_of_files_in_parallel.2C_and_when_one_finishes.2C_I_want_to_start_the_next._And_I_want_to_make_sure_there_are_exactly_5_jobs_running_at_a_time.
+    parallel --halt 2 --jobs "${threads}" --null 'convert_file' ::: "${files[@]}"
+
+    # Warning: when interrupted, parallel does not print threads output
+    # (including the traps output).
+    # use --res /path/to/folder to store and debug tasks outputs.
+
+    # Wait for all files to be done.
+    parallel --wait
+
+    # Compute album replaygain.
+    if [[ "${replaygain}" = 'True' ]]; then
+      replaygain_album "${output_format}" "${output_extension}" \
+                      "${verbose}" "${input_album_path}"
+
+      local return_code=${?}
+      if [[ ${return_code} = 139 ]]; then
+        # replaygain_album encountered a segfault.
+        # Need another path to regenerated deleted faulty files.
+
+        convert_album "${threads}" "${replaygain}" "${input_album_path}"
+      fi
+    fi
   fi
 
   return 0
