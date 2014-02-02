@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.3.2"
+version="1.3.3"
 
 script_name="$(basename -- "${0}")"
 
@@ -974,7 +974,7 @@ function convert_file() {
                 let vbrfix_count+=1
                 echo -n ' -> Fixing '
                 cecho 'magenta' -n "${short_output_file}"
-                echo -n ' VBR header (try ${vbrfix_count})...'
+                echo -n " VBR header (try ${vbrfix_count})..."
 
                 # Output file is MP3 and VBR. Apply header fix.
                 # enter /tmp since vbrfix create log files in current directory (!)
