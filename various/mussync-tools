@@ -12,25 +12,25 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-VERSION="1.2.4"
+version="1.3.0"
 
-SCRIPT_NAME="$(command basename "${0}")"
+script_name="$(basename -- "${0}")"
 
 # Print this script help.
 function usage {
-  command echo "Music library convert and sync v${VERSION}
+  echo "Music library convert and sync v${version}
 This tool convert a input (Flac) music library to an output (MP3) music folder
 and keep the folder structure.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --help ] [ --quiet ] [ --verbose ]
-      [ --input-path='/path/to/original/library' ]
-      [ --output-path='/path/to/converted/library' ]
-      [ --input-format='*' ] [ --output-format='mp3' ]
-      [ --bitrate='320k' | --quality=5 ]
-      [ --sync-delete ] [ --copy-all ]
-      [ --avconv-options='--more --avconv --options' ]
+  ${script_name} [[ --help ]] [[ --quiet ]] [[ --verbose ]
+      [[ --input-path='/path/to/original/library' ]
+      [[ --output-path='/path/to/converted/library' ]
+      [[ --input-format='*' ]] [[ --output-format='mp3' ]
+      [[ --bitrate='320k' | --quality=5 ]
+      [[ --sync-delete ]] [[ --copy-all ]
+      [[ --avconv-options='--more --avconv --options' ]
 
   Available options are :
     * --help | -h                   : Display this message.
@@ -45,6 +45,8 @@ Usage :
     * --quality | -q                : Set the VBR quality. Default to 5.
                                       0 is the lowest, 9 the highest.
                                       Trigger VBR encoding (default).
+    * --replaygain | --gain | -g    : Apply album replay gain to converted
+                                      files.
     * --sync-delete | --delete | -d : Propagate file deletion from input
                                       library to output library.
                                       Any output file without equivalence in
@@ -63,11 +65,11 @@ Usage :
     * Flac (flac)
     * Ogg/Vorbis (ogg)
 
-    When converting from/to this formats, metadatas an cover art will be
+    When converting from/to this formats, metadatas and cover art are
     transfered to the created files.
 "
 
-  test -n "${1}" && exit ${1}
+  [[ -n "${1}" ]] && exit ${1}
 } # usage
 
 
@@ -76,23 +78,23 @@ Usage :
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path.
-REALPATH=''
-function realpath {
-  # declare -g REALPATH=''
-  REALPATH=''
+# @return ${realpath} A absolute path.
+realpath=''
+function realpath() {
+  # declare -g realpath=''
+  realpath=''
 
-  command test ${#} -ne 1 && exit 1
+  [[ ${#} -ne 1 ]] && exit 1
 
-  case "$(command uname)" in
+  case "$(uname)" in
     'Linux' )
-      REALPATH="$(command readlink -f "${1}")"
+      realpath="$(readlink -f "${1}")"
       ;;
     'Darwin' )
-      REALPATH="$(command stat -f '%N' "${1}")"
+      realpath="$(stat -f '%N' "${1}")"
       ;;
     * )
-      REALPATH="$(command realpath "${1}")"
+      realpath="$(realpath "${1}")"
       ;;
   esac
 } # realpath
@@ -104,21 +106,21 @@ function realpath {
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=''
-function realpath_check {
-  # declare -g REALPATH=''
-  REALPATH=''
+# @return ${realpath} A absolute path or an empty string if file don't exists.
+realpath=''
+function realpath_check() {
+  # declare -g realpath=''
+  realpath=''
 
-  command test ${#} -ne 1 && exit 1
+  [[ ${#} -ne 1 ]] && exit 1
 
   realpath "${1}"
 
-  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
-    REALPATH=""
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=""
   fi
 
-  if [ -z "${REALPATH}" ]; then
+  if [[ -z "${realpath}" ]]; then
     echo "Error: File '${1}' does not exists." >&2
     exit 1
   fi
@@ -132,28 +134,198 @@ function realpath_check {
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-BINARY=''
-function check_binary {
-  # declare -g BINARY=''
-  BINARY=''
+binary=''
+function check_binary() {
+  # declare -g binary=''
+  binary=''
 
-  command test ${#} -ne 2 && exit 1
+  [[ ${#} -ne 2 ]] && exit 1
 
-  local PRIMARY="$(echo "${1}" | command cut -d ';' -f 1)"
-  local BINARIES="";
+  local primary="$(echo "${1}" | cut -d ';' -f 1)"
+  local binaries="";
 
-  IFS=';' command read -a BINARIES <<< "${1}"
+  IFS=';' read -a binaries <<< "${1}"
 
   # Test the binary presence.
-  for BINARY in ${BINARIES[@]}; do
-    if [ -n "$(command -v "${BINARY}")" ]; then
+  for binary in ${binaries[@]}; do
+    if type "${binary}" > '/dev/null'; then
+      binary="$(command -v "${binary}")"
       return 0
     fi
   done
 
-  echo "Error: '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  echo "Error: '${primary}' is missing. Please install package '${2}'." >&2
   exit 1
 } # check_binary
+
+
+
+#
+# Multi platform avconv support.
+#
+function avconv() {
+  if type "avconv" > '/dev/null'; then
+    command avconv "${@}"
+    return ${?}
+  fi
+
+  if type "ffmpeg" > '/dev/null'; then
+    command ffmpeg "${@}"
+    return ${?}
+  fi
+
+  exit 1
+}
+export -f 'avconv'
+
+
+
+#
+# Multi platform parallel support.
+#
+function parallel() {
+  # Detect parallel line based on OS.
+  case "$(uname)" in
+    'Darwin' )
+      command parallel --no-notice "${@}"
+      return ${?}
+      ;;
+    'Linux' | * )
+      # Nothing to do.
+      command parallel "${@}"
+      return ${?}
+      ;;
+  esac
+} # parallel()
+export -f 'parallel'
+
+
+
+#
+# Multi platform base64 support.
+#
+function base64() {
+  # Detect parallel line based on OS.
+  case "$(uname)" in
+    'Darwin' )
+      command base64 --break=0 "${@}"
+      return ${?}
+      ;;
+    'Linux' | * )
+      # Nothing to do.
+      command base64 --wrap=0 "${@}"
+      return ${?}
+      ;;
+  esac
+} # base64()
+export -f 'base64'
+
+
+
+#
+# Multi platform eyed3 support.
+#
+function eyed3() {
+  if type 'eyeD3' > '/dev/null'; then
+    eyeD3 "${@}"
+    return ${?}
+  fi
+
+  if type 'eyeD3-2.7' > '/dev/null'; then
+    eyeD3-2.7 "${@}"
+    return ${?}
+  fi
+
+  if type 'eyeD3-2.6' > '/dev/null'; then
+    eyeD3-2.6 "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # eyed3()
+export -f 'eyed3'
+
+
+
+#
+# Multi platform eyed3 remove all support.
+#
+function eyed3_remove_all() {
+  # Detect parallel line based on OS.
+  case "$(uname)" in
+    'Darwin' )
+      eyed3 --remove-all-images "${@}"
+      return ${?}
+      ;;
+    'Linux' | * )
+      # Nothing to do.
+      eyed3 --remove-images "${@}"
+      return ${?}
+      ;;
+  esac
+} # eyed3_remove_all()
+export -f 'eyed3_remove_all'
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Color and weight definitions.
+  declare -A font
+  font['black']="$(tput 'setaf' 0)"
+  font['red']="$(tput 'setaf' 1)"
+  font['green']="$(tput 'setaf' 2)"
+  font['yellow']="$(tput 'setaf' 3)"
+  font['blue']="$(tput 'setaf' 4)"
+  font['magenta']="$(tput 'setaf' 5)"
+  font['cyan']="$(tput 'setaf' 6)"
+  font['white']="$(tput 'setaf' 7)"
+
+  font['bgBlack']="$(tput 'setaf' 0)"
+  font['bgRed']="$(tput 'setaf' 1)"
+  font['bgGreen']="$(tput 'setaf' 2)"
+  font['bgYellow']="$(tput 'setaf' 3)"
+  font['bgBlue']="$(tput 'setaf' 4)"
+  font['bgMagenta']="$(tput 'setaf' 5)"
+  font['bgCyan']="$(tput 'setaf' 6)"
+  font['bgWhite']="$(tput 'setaf' 7)"
+
+  font['bold']="$(tput 'bold')"
+  font['stout']="$(tput 'smso')" # Standout.
+  font['under']="$(tput 'smul')" # Underline.
+  font['blink']="$(tput 'blink')" # Blinking
+  font['italic']="$(tput 'sitm')"
+
+  # Parse the color string.
+  for key in "${!font[@]}"; do
+    [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
 
 
 
@@ -164,167 +336,206 @@ function check_binary {
 # @param string $output_file The audio output file.
 #
 # @return Exit with error if conversion failed.
-function transfert_images {
-  command test ${#} -ne 2 && exit 1
+function transfert_images() {
+  [[ ${#} -ne 2 ]] && exit 1
 
-  local INPUT_FILE="${1}"
-  local OUTPUT_FILE="${2}"
-
-  # Detect base64 command line based on OS.
-  case "$(command uname)" in
-    'Darwin' )
-      local BASE64="$(command -v base64) --break=0"
-      local EYE3D_REMOVE_ALL="${EYED3} --remove-all-images"
-      ;;
-    'Linux' | * )
-      local BASE64="$(command -v base64) --wrap=0"
-      local EYE3D_REMOVE_ALL="${EYED3} --remove-images"
-      ;;
-  esac
-
-
+  local input_file="${1}"
+  local output_file="${2}"
 
   # Detect if input file has cover art.
-  local INPUT_FILE_HAS_COVER="$(command mediainfo --Inform="General;%Cover%" "${INPUT_FILE}")"
-  local METADATA_BLOCK_PICTURE='False'
+  local input_file_has_cover="$(mediainfo --Inform="General;%Cover%" "${input_file}")"
+  local metadata_block_picture='False'
 
-  if [ "${INPUT_FILE_HAS_COVER}" != 'Yes' \
-      -a -n "$(command mediainfo "${INPUT_FILE}" | command grep '^metadata_block_picture')" ]; then
-    INPUT_FILE_HAS_COVER='Yes'
-    METADATA_BLOCK_PICTURE='True'
+  # temporary files.
+  local image_path=""
+  local image_with_headers_path=""
+  local comments_path=""
+  local mp3_images_path=""
+
+  #------------------------
+  # Trap handling function
+  # use with: trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  #
+  # @param string $output_file The converted/copied output file.
+  # @param string $image_path The extracted image temporary file.
+  function exit_transfert_images_on_signal() {
+    local interrupt=${?}
+
+    local output_file="${1}"
+    local image_path="${2}"
+    local image_with_headers_path="${3}"
+    local comments_path="${4}"
+    local mp3_images_path="${5}"
+
+    local vctemp="${output_file}.vctemp"
+    local output_filename="$(basename -z "${output_file}")"
+
+    cecho 'boldred' "Image transfert to '${output_filename}' interrupted." >&2
+    [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
+    [[ -n "${image_path}" && -e "${image_path}" ]] && rm "${image_path}"
+    [[ -n "${image_with_headers_path}" && -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
+    [[ -n "${comments_path}" && -e "${comments_path}" ]] && rm "${comments_path}"
+    [[ -n "${mp3_images_path}" && -d "${mp3_images_path}" ]] && rm -r "${mp3_images_path}"
+
+    #local running_jobs=($(jobs -p))
+    #if [[ -n "${running_jobs}" ]]; then
+    #  cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
+    #  kill ${running_jobs[@]} 2>'/dev/null'
+    #fi
+
+    if [[ ${interrupt} -eq 2 ]]; then
+      # killing self if catched a SIGINT.
+      # see http://mywiki.wooledge.org/SignalTrap
+      trap - SIGINT
+      kill -INT $$
+    else
+      exit 0
+    fi
+  } # exit_transfert_images_on_signal()
+  #------------------------
+
+
+  if [[ "${input_file_has_cover}" != 'Yes' \
+      && -n "$(mediainfo "${input_file}" | grep --ignore-case '^METADATA_BLOCK_PICTURE')" ]]; then
+    input_file_has_cover='Yes'
+    metadata_block_picture='True'
   fi
 
-  if [ "${INPUT_FILE_HAS_COVER}" = 'Yes' ]; then
-    test "${QUIET}" != 'True' && echo -n " -> Transfering cover art to $(command basename "${OUTPUT_FILE}")... "
+  if [[ "${input_file_has_cover}" = 'Yes' ]]; then
+    echo -n " -> Transfering cover art to $(basename "${output_file}")... "
+
+    # Setup trap since there is processing needed.
+    trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+
 
     # Detect Cover MIME type.
-    local IMAGE_MIME_TYPE="$(command mediainfo --Inform="General;%Cover_Mime%" "${INPUT_FILE}")"
-    local IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut -d '/' -f 2)"
+    local image_mime_type="$(mediainfo --Inform="General;%Cover_Mime%" "${input_file}")"
+    local image_extension="$(echo "${image_mime_type}" | cut -d '/' -f 2)"
 
-    if [ -z "${IMAGE_EXTENSION}" ]; then
-      if [ "${METADATA_BLOCK_PICTURE}" != 'True' ]; then
+    if [[ -z "${image_extension}" ]]; then
+      if [[ "${metadata_block_picture}" != 'True' ]]; then
         # Unable to determine cover mime type.
-        test "${QUIET}" != 'True' && echo "Failed (MIME type unsupported (${IMAGE_MIME_TYPE}))."
+        echo "Failed (MIME type unsupported (${image_mime_type}))."
         return 1
       fi
     else
       # Create image temporary file. 
-      local IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
-      command mv "${IMAGE_PATH}" "${IMAGE_PATH}.${IMAGE_EXTENSION}"
-      IMAGE_PATH="${IMAGE_PATH}.${IMAGE_EXTENSION}"
+      image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+      mv "${image_path}" "${image_path}.${image_extension}"
+      image_path="${image_path}.${image_extension}"
     fi
 
     # Detect input file format and audio format.
-    local INPUT_FILE_FORMAT="$(command mediainfo --Inform="General;%Format%" "${INPUT_FILE}")"
-    local INPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${INPUT_FILE}")"
+    local input_file_format="$(mediainfo --Inform="General;%Format%" "${input_file}")"
+    local input_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${input_file}")"
 
-    test "${QUIET}" != 'True' && echo -n "Extracting... "
+    cecho 'blue' -n "Extracting... "
 
-    case "${INPUT_FILE_FORMAT}" in
+    case "${input_file_format}" in
 
       'FLAC' )
         # File is Flac
 
         # List IMAGE metadata blocs.
         # Assume first bloc is cover art.
-        local BLOCK_NUMBER="$(command metaflac --list --block-type='PICTURE' "${INPUT_FILE}" \
-            | command grep --max-count=1 '^METADATA block' \
-            | command sed -e 's/^.*#//')"
+        local block_number="$(metaflac --list --block-type='PICTURE' "${input_file}" \
+            | grep --max-count=1 '^METADATA block' \
+            | sed -e 's/^.*#//')"
 
         # Determine cover image MIME type.
-        IMAGE_MIME_TYPE="$(command metaflac --block-number="${BLOCK_NUMBER}" --list "${INPUT_FILE}" \
-            | command grep "MIME type:" \
-            | command sed -e 's/.*MIME type: //g')"
+        image_mime_type="$(metaflac --block-number="${block_number}" --list "${input_file}" \
+            | grep "MIME type:" \
+            | sed -e 's/.*MIME type: //g')"
 
         # Extract cover image from file.
-        command metaflac --block-number="${BLOCK_NUMBER}" \
-            --export-picture-to="${IMAGE_PATH}" "${INPUT_FILE}"
+        metaflac --block-number="${block_number}" \
+            --export-picture-to="${image_path}" "${input_file}"
         ;;
 
       'MPEG Audio' )
         # File is MP3
-        local MP3_IMAGE_PATH="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+        mp3_images_path="$(mktemp -d -t "tmp.XXXXXXXXXX")"
 
-        if [ "${VERBOSE}" = 'True' ]; then
-          command ${EYED3} --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}"
+        if [[ "${verbose}" = 'True' ]]; then
+          eyed3 --write-images="${mp3_images_path}" "${input_file}"
         else
-          command ${EYED3} --write-images="${MP3_IMAGE_PATH}" "${INPUT_FILE}" > '/dev/null' 2>&1
+          eyed3 --write-images="${mp3_images_path}" "${input_file}" > '/dev/null' 2>&1
         fi
 
-        if [ -e "${MP3_IMAGE_PATH}/FRONT_COVER.${IMAGE_EXTENSION}" ]; then
-          command mv "${MP3_IMAGE_PATH}/FRONT_COVER.${IMAGE_EXTENSION}" "${IMAGE_PATH}"
+        if [[ -e "${mp3_images_path}/FRONT_COVER.${image_extension}" ]]; then
+          mv "${mp3_images_path}/FRONT_COVER.${image_extension}" "${image_path}"
         fi
 
-        command rm -r "${MP3_IMAGE_PATH}"
+        rm -r "${mp3_images_path}"
         ;;
 
       'OGG' )
         # File is an OGG container.
-        case "${INPUT_FILE_AUDIO_FORMAT}" in
+        case "${input_file_audio_format}" in
 
           'Vorbis' )
             # File is OGG Vorbis.
 
-            local IMAGE_WITH_HEADERS_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+            image_with_headers_path="$(mktemp -t "tmp.XXXXXXXXXX")"
 
-            command vorbiscomment --list --raw "${INPUT_FILE}" \
-                | command grep --max-count=1 '^metadata_block_picture=' \
-                | command sed -e 's/^metadata_block_picture=//' \
-                | command ${BASE64} --decode \
-              > "${IMAGE_WITH_HEADERS_PATH}"
+            vorbiscomment --list --raw "${input_file}" \
+                | grep --ignore-case --max-count=1 '^METADATA_BLOCK_PICTURE=' \
+                | sed -e 's/^METADATA_BLOCK_PICTURE=//I' \
+                | base64 --decode \
+              > "${image_with_headers_path}"
 
             # Fetch data lengths.
-            local MIME_LENGTH="$(command dd skip=4 count=4 bs=1 \
-                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
-                | command xxd -p -g0 \
-                | command xargs -IHEX printf "%d" '0xHEX')"
+            local mime_length="$(dd skip=4 count=4 bs=1 \
+                if="${image_with_headers_path}" 2>'/dev/null' \
+                | xxd -p -g0 \
+                | xargs -IHEX printf "%d" '0xHEX')"
 
-            IMAGE_MIME_TYPE="$(command dd skip=8 count="${MIME_LENGTH}" bs=1 \
-                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null')"
+            image_mime_type="$(dd skip=8 count="${mime_length}" bs=1 \
+                if="${image_with_headers_path}" 2>'/dev/null')"
 
             # Now we try to detect extension and create the temporary image file.
-            IMAGE_EXTENSION="$(echo "${IMAGE_MIME_TYPE}" | command cut -d '/' -f 2)"
-            if [ -z "${IMAGE_EXTENSION}" ]; then
+            image_extension="$(echo "${image_mime_type}" | cut -d '/' -f 2)"
+            if [[ -z "${image_extension}" ]]; then
               # Unable to determine cover mime type.
-              test -e "${IMAGE_WITH_HEADERS_PATH}" && command rm "${IMAGE_WITH_HEADERS_PATH}"
+              [[ -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
 
-              test "${QUIET}" != 'True' && echo "Failed (MIME type unsupported (${IMAGE_MIME_TYPE}))."
+              cecho 'red' "Failed (MIME type unsupported (${image_mime_type}))."
               return 1
             fi
 
-            IMAGE_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
-            command mv "${IMAGE_PATH}" "${IMAGE_PATH}.${IMAGE_EXTENSION}"
-            IMAGE_PATH="${IMAGE_PATH}.${IMAGE_EXTENSION}"
+            image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+            mv "${image_path}" "${image_path}.${image_extension}"
+            image_path="${image_path}.${image_extension}"
 
-            local DESCRIPTION_SKIP="$((8 + ${MIME_LENGTH}))"
-            local DESCRIPTION_LENGTH="$(command dd skip=${DESCRIPTION_SKIP} count=4 bs=1 \
-                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
-                | command xxd -p -g0 \
-                | command xargs -IHEX printf "%d" '0xHEX')"
-            local IMAGE_LENGTH_SKIP="$((${DESCRIPTION_SKIP} + ${DESCRIPTION_LENGTH} + 20))"
-            local IMAGE_LENGTH="$(command dd skip=${IMAGE_LENGTH_SKIP} count=4 bs=1 \
-                if="${IMAGE_WITH_HEADERS_PATH}" 2>'/dev/null' \
-                | command xxd -p -g0 \
-                | command xargs -IHEX printf "%d" '0xHEX')"
+            local description_skip="$((8 + ${mime_length}))"
+            local description_length="$(dd skip=${description_skip} count=4 bs=1 \
+                if="${image_with_headers_path}" 2>'/dev/null' \
+                | xxd -p -g0 \
+                | xargs -IHEX printf "%d" '0xHEX')"
+            local image_length_skip="$((${description_skip} + ${description_length} + 20))"
+            local image_length="$(dd skip=${image_length_skip} count=4 bs=1 \
+                if="${image_with_headers_path}" 2>'/dev/null' \
+                | xxd -p -g0 \
+                | xargs -IHEX printf "%d" '0xHEX')"
 
-            local IMAGE_SKIP="$((${IMAGE_LENGTH_SKIP} + 4))"
+            local image_skip="$((${image_length_skip} + 4))"
             # Extract image.
 
-            if [ "${VERBOSE}" = 'True' ]; then
-              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} bs=1 \
-                  if="${IMAGE_WITH_HEADERS_PATH}" of="${IMAGE_PATH}"
+            if [[ "${verbose}" = 'True' ]]; then
+              dd skip=${image_skip} count=${image_length} bs=1 \
+                  if="${image_with_headers_path}" of="${image_path}"
             else
-              command dd skip=${IMAGE_SKIP} count=${IMAGE_LENGTH} bs=1 \
-                  if="${IMAGE_WITH_HEADERS_PATH}" of="${IMAGE_PATH}" 2>'/dev/null'
+              dd skip=${image_skip} count=${image_length} bs=1 \
+                  if="${image_with_headers_path}" of="${image_path}" 2>'/dev/null'
              fi
 
             # Delete vorbiscomment raw file.
-            test -e "${IMAGE_WITH_HEADERS_PATH}" && command rm "${IMAGE_WITH_HEADERS_PATH}"
+            [[ -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
             ;;
 
           * )
-            test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
-            test "${QUIET}" != 'True' && echo "Failed (Ogg audio encoding unsupported (${INPUT_FILE_AUDIO_FORMAT}))."
+            [[ -e "${image_path}" ]] && rm "${image_path}"
+            cecho 'red' "Failed (Ogg audio encoding unsupported (${input_file_audio_format}))."
             return 1
             ;;
 
@@ -333,122 +544,122 @@ function transfert_images {
         ;;
 
       * )
-        test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+        [[ -e "${image_path}" ]] && rm "${image_path}"
 
-        test "${QUIET}" != 'True' && echo "Failed (Input file format unsupported (${INPUT_FILE_FORMAT}))."
+        cecho 'red' "Failed (Input file format unsupported (${input_file_format}))."
         return 1
         ;;
 
     esac
 
-    # Test if an image has been extracted from INPUT_FILE and if we have an OUTPUT_FILE.
-    if [ -s "${IMAGE_PATH}" -a -e "${OUTPUT_FILE}" ]; then
-      test "${QUIET}" != 'True' && echo -n "Importing... "
+    # Test if an image has been extracted from input_file and if we have an output_file.
+    if [[ -s "${image_path}" && -e "${output_file}" ]]; then
+      cecho 'blue' -n "Importing... "
 
       # Detect output file format and audio format.
-      local OUTPUT_FILE_FORMAT="$(command mediainfo --Inform="General;%Format%" "${OUTPUT_FILE}")"
-      local OUTPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${OUTPUT_FILE}")"
+      local output_file_format="$(mediainfo --Inform="General;%Format%" "${output_file}")"
+      local output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
 
-      case "${OUTPUT_FILE_FORMAT}" in
+      case "${output_file_format}" in
 
         'FLAC' )
           # File is Flac
           # Remove existing images.
-          command metaflac --block-type='PICTURE' --dont-use-padding --remove "${OUTPUT_FILE}"
+          metaflac --block-type='PICTURE' --dont-use-padding --remove "${output_file}"
           # Insert cover image from file.
-          command metaflac --import-picture-from="${IMAGE_PATH}" "${OUTPUT_FILE}"
+          metaflac --import-picture-from="${image_path}" "${output_file}"
           ;;
 
         'MPEG Audio' )
           # File is MP3
-          if [ "${VERBOSE}" = 'True' ]; then
+          if [[ "${verbose}" = 'True' ]]; then
             # Remove existing images.
-            command ${EYE3D_REMOVE_ALL} "${OUTPUT_FILE}"
+            eyed3_remove_all "${output_file}"
             # Insert cover image from file
-            command ${EYED3} --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}"
+            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}"
           else
             # Remove existing images.
-            command ${EYE3D_REMOVE_ALL} "${OUTPUT_FILE}" > '/dev/null' 2>&1
+            eyed3_remove_all "${output_file}" > '/dev/null' 2>&1
             # Insert cover image from file
-            command ${EYED3} --add-image="${IMAGE_PATH}:FRONT_COVER" "${OUTPUT_FILE}" > '/dev/null' 2>&1
+            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" > '/dev/null' 2>&1
           fi
           ;;
 
         'OGG' )
           # File is an OGG container.
-          case "${OUTPUT_FILE_AUDIO_FORMAT}" in
+          case "${output_file_audio_format}" in
 
             'Vorbis' )
               # File is OGG Vorbis.
 
               # Export existing comments to file.
-              local COMMENTS_PATH="$(command mktemp -t "tmp.XXXXXXXXXX")"
+              comments_path="$(mktemp -t "tmp.XXXXXXXXXX")"
 
-              command vorbiscomment --list --raw "${OUTPUT_FILE}" > "${COMMENTS_PATH}"
+              vorbiscomment --list --raw "${output_file}" > "${comments_path}"
 
               # Remove existing images.
-              command sed -i'' -e '/^METADATA_BLOCK_PICTURE/Id' "${COMMENTS_PATH}"
+              sed -i'' -e '/^METADATA_BLOCK_PICTURE/Id' "${comments_path}"
 
               # Insert cover image from file.
 
               # metadata_block_picture format.
               # See: https://xiph.org/flac/format.html#metadata_block_picture
 
-              local IMAGE_WITH_HEADER="$(command mktemp -t "tmp.XXXXXXXXXX")"
-              local DESCRIPTION=""
+              image_with_headers_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+              local description=""
 
               # Reset cache file.
-              echo -n "" > "${IMAGE_WITH_HEADER}"
+              echo -n "" > "${image_with_headers_path}"
 
               # Picture type <32>.
-              command printf "0: %.8x" 3 | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" 3 | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Mime type length <32>.
-              command printf "0: %.8x" $(echo -n "${IMAGE_MIME_TYPE}" | command wc -c) \
-                        | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" $(echo -n "${image_mime_type}" | wc -c) \
+                        | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Mime type (n * 8)
-              echo -n "${IMAGE_MIME_TYPE}" >> "${IMAGE_WITH_HEADER}"
+              echo -n "${image_mime_type}" >> "${image_with_headers_path}"
               # Description length <32>.
-              command printf "0: %.8x" $(echo -n "${DESCRIPTION}" | command wc -c) \
-                        | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" $(echo -n "${description}" | wc -c) \
+                        | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Description (n * 8)
-              echo -n "${DESCRIPTION}" >> "${IMAGE_WITH_HEADER}"
+              echo -n "${description}" >> "${image_with_headers_path}"
               # Picture with <32>.
-              command printf "0: %.8x" 0 | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" 0 | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Picture height <32>.
-              command printf "0: %.8x" 0 | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" 0 | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Picture color depth <32>.
-              command printf "0: %.8x" 0 | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" 0 | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Picture color count <32>.
-              command printf "0: %.8x" 0 | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" 0 | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Image file size <32>.
-              command printf "0: %.8x" $(command wc -c "${IMAGE_PATH}" \
-                        | command cut -d ' ' -f 1) \
-                        | command xxd -r -g0 \
-                      >> "${IMAGE_WITH_HEADER}"
+              printf "0: %.8x" $(wc -c "${image_path}" \
+                        | cut -d ' ' -f 1) \
+                        | xxd -r -g0 \
+                      >> "${image_with_headers_path}"
               # Image file.
-              command cat "${IMAGE_PATH}" >> "${IMAGE_WITH_HEADER}"
+              cat "${image_path}" >> "${image_with_headers_path}"
 
-              echo "METADATA_BLOCK_PICTURE=$(command ${BASE64} < "${IMAGE_WITH_HEADER}")" >> "${COMMENTS_PATH}"
+              echo "METADATA_BLOCK_PICTURE=$(base64 < "${image_with_headers_path}")" >> "${comments_path}"
 
               # Update vorbis file comments.
-              command vorbiscomment --write --raw --commentfile "${COMMENTS_PATH}" "${OUTPUT_FILE}"
+              vorbiscomment --write --raw --commentfile "${comments_path}" "${output_file}"
 
               # Delete cache file.
-              test -e "${IMAGE_WITH_HEADER}" && command rm "${IMAGE_WITH_HEADER}"
+              [[ -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
               # Delete comments file.
-              test -e "${COMMENTS_PATH}" && command rm "${COMMENTS_PATH}"
+              [[ -e "${comments_path}" ]] && rm "${comments_path}"
               ;;
 
             * )
-              test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
-              test "${QUIET}" != 'True' && echo "Failed (Ogg audio encoding unsupported (${OUTPUT_FILE_AUDIO_FORMAT}))."
+              [[ -e "${image_path}" ]] && rm "${image_path}"
+              cecho 'red' "Failed (Ogg audio encoding unsupported (${output_file_audio_format}))."
               return 1
               ;;
 
@@ -457,9 +668,9 @@ function transfert_images {
           ;;
 
         * )
-          test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+          [[ -e "${image_path}" ]] && rm "${image_path}"
 
-          test "${QUIET}" != 'True' && echo "Failed (Output file format unsupported (${OUTPUT_FILE_FORMAT}))."
+          cecho 'red' "Failed (Output file format unsupported (${output_file_format}))."
           return 1
           ;;
 
@@ -467,15 +678,14 @@ function transfert_images {
  
     fi
 
-    test -e "${IMAGE_PATH}" && command rm "${IMAGE_PATH}"
+    [[ -e "${image_path}" ]] && rm "${image_path}"
 
 
-    test "${QUIET}" != 'True' && echo "Done."
+    cecho 'green' "Done."
   fi
 
   return 0
 } # transfert_images()
-
 export -f 'transfert_images'
 
 
@@ -485,71 +695,107 @@ export -f 'transfert_images'
 # @param string $input_file The audio input file.
 #
 # @return Exit with error if conversion failed.
-function convert_file {
-  command test ${#} -ne 1 && exit 1
+function convert_file() {
+  [[ ${#} -ne 1 ]] && exit 1
 
-  local INPUT_FILE="${1}"
+  local input_file="${1}"
 
   ## Build output file path based on input file path.
-  local INPUT_FILE_PATH="$(command dirname "${INPUT_FILE}")"
-  local OUTPUT_FILE_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}|${OUTPUT_PATH}|")"
-  local SHORT_PATH="$(command echo "${INPUT_FILE_PATH}" | sed -e "s|^${INPUT_PATH}||")"
+  local input_file_path="$(dirname "${input_file}")"
+  local output_file_path="$(echo "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
+  local short_path="$(echo "${input_file_path}" | sed -e "s|^${input_path}||")"
 
-  local INPUT_FILENAME="$(command basename "${INPUT_FILE}")"
-  local OUTPUT_FILENAME="$(command echo -n "${INPUT_FILENAME}" \
-        | command sed -e "s/\.[^\.]*$/\.${OUTPUT_EXTENSION}/")"
-  local INPUT_FILE_MIMETYPE="$(command file --brief --mime-type "${INPUT_FILE}")"
+  local input_filename="$(basename "${input_file}")"
+  local output_filename="$(echo -n "${input_filename}" \
+        | sed -e "s/\.[^\.]*$/\.${output_extension}/")"
+  local input_file_mimetype="$(file --brief --mime-type "${input_file}")"
 
   # Detect input extension
-  local INPUT_FILE_EXTENSION="$(command echo -n "${INPUT_FILENAME}" \
-        | command sed -e 's/^.*\.\([^\.]*\)$/\1/')"
+  local input_file_extension="$(echo -n "${input_filename}" \
+        | sed -e 's/^.*\.\([^\.]*\)$/\1/')"
 
-  local OUTPUT_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_FILENAME}"
+  local output_file="${output_file_path}/${output_filename}"
 
-  local SHORT_INPUT_FILE="${SHORT_PATH}/${INPUT_FILENAME}"
-  local SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
+  local short_input_file="${short_path}/${input_filename}"
+  local short_output_file="${output_filename}"
 
   # Generate a temporary filename for processing cache.
   # Use the same extension to make sure format detection work properly.
 
-  local OUTPUT_TEMP_FILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
-  command mv "${OUTPUT_TEMP_FILE}" "${OUTPUT_TEMP_FILE}.${OUTPUT_EXTENSION}"
-  OUTPUT_TEMP_FILE="${OUTPUT_TEMP_FILE}.${OUTPUT_EXTENSION}"
+  local output_temp_file="$(mktemp -t "tmp.XXXXXXXXXX")"
+  mv "${output_temp_file}" "${output_temp_file}.${output_extension}"
+  output_temp_file="${output_temp_file}.${output_extension}"
+
+
+  #------------------------
+  # Trap handling function
+  # use with: trap "exit_convert_file_on_signal '${output_file}' '${output_temp_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  #
+  # @param string $output_file The converted/copied output file.
+  # @param string $output_temp_file The conversion temporary file.
+  function exit_convert_file_on_signal() {
+    local interrupt=${?}
+    local output_file="${1}"
+    local output_temp_file="${2}"
+    local output_filename="$(basename -z "${output_file}")"
+
+    cecho 'boldred' "Conversion of '${output_filename}' interrupted." >&2
+    [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
+    [[ -n "${output_temp_file}" && -e "${output_temp_file}" ]] && rm "${output_temp_file}"
+
+    #local running_jobs=($(jobs -p))
+    #if [[ -n "${running_jobs}" ]]; then
+    #  cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
+    #  kill ${running_jobs[@]} 2>'/dev/null'
+    #fi
+
+    if [[ ${interrupt} -eq 2 ]]; then
+      # killing self if catched a SIGINT.
+      # see http://mywiki.wooledge.org/SignalTrap
+      trap - SIGINT
+      kill -INT $$
+    else
+      exit 0
+    fi
+  } # exit_convert_file_on_signal()
+  #------------------------
 
   # Test if input file is an audio file.
-  if [ "${INPUT_FILE_MIMETYPE}" != 'application/ogg' \
-      -a "$(command echo -n "${INPUT_FILE_MIMETYPE}" \
-            | cut -d '/' -f 1)" != 'audio' ]; then
+  if [[ "${input_file_mimetype}" != 'application/ogg' \
+      && "$(echo -n "${input_file_mimetype}" \
+            | cut -d '/' -f 1)" != 'audio' ]]; then
     # Input file is not an audio file.
-    test "${QUIET}" != 'True' && echo -n "'${SHORT_INPUT_FILE}' is not a audio file... "
+    echo -n "'${short_input_file}' is not a audio file... "
 
     # Update computed values.
-    OUTPUT_FILENAME="${INPUT_FILENAME}"
-    OUTPUT_FILE="${OUTPUT_FILE_PATH}/${OUTPUT_FILENAME}"
-    SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
+    output_filename="${input_filename}"
+    output_file="${output_file_path}/${output_filename}"
+    short_output_file="${output_filename}"
 
-    local COPY_NEEDED='FALSE'
+    local copy_needed='FALSE'
 
-    if [ "${COPY_ALL}" = 'True' ]; then
+    if [[ "${copy_all}" = 'True' ]]; then
 
-      if [ ! -e "${OUTPUT_FILE}" ]; then
-        COPY_NEEDED='True'
-        test "${QUIET}" != 'True' && echo "Copying."
+      if [[ ! -e "${output_file}" ]]; then
+        copy_needed='True'
+        cecho 'blue' 'Copying.'
       else
         # Check if output file is older than input file.
-        if [ "${INPUT_FILE}" -nt "${OUTPUT_FILE}" ]; then
-          test "${QUIET}" != 'True' && echo "Updating."
-          COPY_NEEDED='True'
+        if [[ "${input_file}" -nt "${output_file}" ]]; then
+          cecho 'blue' 'Updating.'
+          copy_needed='True'
         else
-          test "${QUIET}" != 'True' && echo "Skipping."
+          cecho 'yellow' 'Skipping.'
         fi
       fi
     else
-      test "${QUIET}" != 'True' && echo "Skipping."
+      cecho 'yellow' 'Skipping.'
     fi
 
-    if [ "${COPY_NEEDED}" = 'True' ]; then
-      command cp -a "${INPUT_FILE}" "${OUTPUT_FILE}"
+    if [[ "${copy_needed}" = 'True' ]]; then
+      trap "exit_convert_file_on_signal '${output_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+
+      cp -a "${input_file}" "${output_file}"
       return $?
     fi
 
@@ -557,110 +803,113 @@ function convert_file {
   fi
 
 
-  local CONVERSION_NEEDED='False'
+  local conversion_needed='False'
   # Check if output file already exists.
-  if [ "${INPUT_EXTENSION}" = '*' \
-      -o "${INPUT_EXTENSION}" = "${INPUT_FILE_EXTENSION}" ]; then
-    if [ ! -e "${OUTPUT_FILE}" ]; then
-      CONVERSION_NEEDED='True'
+  if [[ "${input_extension}" = '*' \
+      || "${input_extension}" = "${input_file_extension}" ]]; then
+    if [[ ! -e "${output_file}" ]]; then
+      conversion_needed='True'
     else
-      test "${QUIET}" != 'True' && echo -n "'${SHORT_OUTPUT_FILE}' exists... "
+      echo -n "'${short_output_file}' exists... "
 
       # Check if output file is older than input file.
-      if [ "${INPUT_FILE}" -nt "${OUTPUT_FILE}" ]; then
-        test "${QUIET}" != 'True' && echo "Updating."
-        CONVERSION_NEEDED='True'
+      if [[ "${input_file}" -nt "${output_file}" ]]; then
+        cecho 'blue' 'Updating.'
+        conversion_needed='True'
       else
-        test "${QUIET}" != 'True' && echo "Skipping."
+        cecho 'yellow' 'Skipping.'
       fi
     fi
   else
     # Found file has not the correct extension.
-    test "${QUIET}" != 'True' && echo "'${SHORT_INPUT_FILE}' is not in source format... Skipping."
+    echo -n "'${short_input_file}' is not in source format... "
+    cecho 'yellow' 'Skipping.'
   fi
 
-  if [ "${CONVERSION_NEEDED}" = 'True' ]; then
-    if [ -e "${INPUT_FILE}" ]; then
-      command mkdir -p "${OUTPUT_FILE_PATH}"
+  if [[ "${conversion_needed}" = 'True' ]]; then
+    if [[ -e "${input_file}" ]]; then
+      trap "exit_convert_file_on_signal '${output_file}' '${output_temp_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
-      if [ -d "${OUTPUT_FILE_PATH}" ]; then
+      mkdir -p "${output_file_path}"
+
+      if [[ -d "${output_file_path}" ]]; then
         # Remove output file if it already exists.
-        if [ -e "${OUTPUT_FILE}" ]; then
-          command rm "${OUTPUT_FILE}"
+        if [[ -e "${output_file}" ]]; then
+          rm "${output_file}"
         fi
 
-        if [ "${INPUT_FORMAT}" = "${OUTPUT_FORMAT}" ]; then
+        if [[ "${input_format}" = "${output_format}" ]]; then
           # Copy input to output (format is the same).
-          test "${QUIET}" != 'True' && echo -n "Copying '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
-          command cp "${INPUT_FILE}" "${OUTPUT_FILE}"
+          echo -n "Copying '${short_input_file}' to '${short_output_file}'... "
+          cp "${input_file}" "${output_file}"
         else
           # Convert input to output
-          test "${QUIET}" != 'True' && echo -n "Converting '${SHORT_INPUT_FILE}' to '${SHORT_OUTPUT_FILE}'... "
+          echo -n "Converting '${short_input_file}' to '${short_output_file}'... "
 
-          local LOG_LEVEL='quiet'
-          if [ "${VERBOSE}" = 'True' ]; then
-            LOG_LEVEL='debug'
+          local log_level='quiet'
+          if [[ "${verbose}" = 'True' ]]; then
+            log_level='debug'
           fi
 
-          local ENCODING_OPTIONS=''
+          local encoding_options=''
           # Specific options for encoding mode.
-          case "${ENCODING_MODE}" in
+          case "${encoding_mode}" in
             'CBR' )
               # Constant bitrate selected.
-              ENCODING_OPTIONS="-b:a ${ENCODING_BITRATE}"
+              encoding_options="-b:a ${encoding_bitrate}"
              ;;
 
             'VBR' | * )
               # Variable bitrate selected. Default.
-              ENCODING_OPTIONS="-q:a ${ENCODING_QUALITY}"
+              encoding_options="-q:a ${encoding_quality}"
               ;;
           esac
 
-          local MAP_METADATA=' 0:g'
+          local map_metadata=' 0:g'
           # Specific needs for some input formats/
-          case "${INPUT_FILE_MIMETYPE}" in
+          case "${input_file_mimetype}" in
             'application/ogg' )
               # Get input metadata from first audio stream and direct it to global.
               # See https://bugs.kde.org/show_bug.cgi?id=306895
-              MAP_METADATA=' 0:s:0'
+              map_metadata=' 0:s:0'
               ;;
 
             * )
               # Do nothing.
-              # MAP_METADATA=' 0:g'
+              # map_metadata=' 0:g'
               ;;
           esac
 
           # Specific needs for some output formats/
-          local OUTPUT_OPTIONS="-f ${OUTPUT_FORMAT}"
-          case "${OUTPUT_FORMAT}" in
+          local output_options="-f ${output_format}"
+          case "${output_format}" in
             'flac' )
               # No encoding options needed.
-              ENCODING_OPTIONS=""
-              # OUTPUT_OPTIONS="-f ${OUTPUT_FORMAT}"
+              encoding_options=""
+              # output_options="-f ${output_format}"
               ;;
 
             'ogg' | 'vorbis' )
               # Set vorbis as default codec for ogg.
-              OUTPUT_OPTIONS="-codec:a libvorbis -f ogg"
+              output_options="-codec:a libvorbis -f ogg"
               # Map input metadata to all audio streams in ogg container.
               # See https://bugs.kde.org/show_bug.cgi?id=306895
-              if [ "${INPUT_FILE_MIMETYPE}" = 'application/ogg' ]; then
-                MAP_METADATA=" 0:s:0"
+              if [[ "${input_file_mimetype}" = 'application/ogg' ]]; then
+                map_metadata=" 0:s:0"
               else
-                MAP_METADATA=":s:a 0:s:0"
+                map_metadata=":s:a 0:s:0"
               fi
               ;;
 
             'mp3' )
               # Force libmp3lame use.
-              OUTPUT_OPTIONS="-codec:a libmp3lame ${OUTPUT_OPTIONS}"
+              output_options="-codec:a libmp3lame ${output_options}"
               ;;
 
             * )
               # Do nothing.
-              # MAP_METADATA="${MAP_METADATA}"
-              # OUTPUT_OPTIONS="-f ${OUTPUT_FORMAT}"
+              # map_metadata="${map_metadata}"
+              # output_options="-f ${output_format}"
               ;;
           esac
 
@@ -669,100 +918,258 @@ function convert_file {
           # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
           #
           # Note: log output is alway on 2. avconv keep 1 empty.
-          if ! command ${AVCONV} -i "${INPUT_FILE}" \
+          if ! avconv -i "${input_file}" \
                      -vn -sn \
-                    -map_metadata${MAP_METADATA} \
-                    -loglevel "${LOG_LEVEL}" \
-                    ${AVCONV_OPTIONS} \
-                    ${OUTPUT_OPTIONS} \
-                    ${ENCODING_OPTIONS} \
-                    - > "${OUTPUT_TEMP_FILE}"; then
-            test "${QUIET}" != 'True' && echo "Failed."
+                    -map_metadata${map_metadata} \
+                    -loglevel "${log_level}" \
+                    ${avconv_options} \
+                    ${output_options} \
+                    ${encoding_options} \
+                    - > "${output_temp_file}"; then
+            cecho 'red' "Failed."
 
             # Force > output to be written on disk.
-            command sync
+            sync
 
-            test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
-            test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+            [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
+            [[ -e "${output_file}" ]] && rm "${output_file}"
 
             return 1
           else
             # Force > output to be written on disk.
-            command sync
-            test "${QUIET}" != 'True' && echo "Done."
+            sync
+            cecho 'green' "Done."
 
             # Test if fix for MP3 VBR is needed.
             # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
-            if [ "${OUTPUT_FORMAT}" = 'mp3' -a "${ENCODING_MODE}" != 'CBR' ]; then
-              local OUTPUT_FILE_AUDIO_FORMAT=""
-              local VBRFIX_COUNT=0
-              while [ "${OUTPUT_FILE_AUDIO_FORMAT}" != 'MPEG Audio' ]; do
+            if [[ "${output_format}" = 'mp3' && "${encoding_mode}" != 'CBR' ]]; then
+              local output_file_audio_format=""
+              local vbrfix_count=0
+              while [[ "${output_file_audio_format}" != 'MPEG Audio' ]]; do
 
                 # 5 tries maximum.
-                if [ ${VBRFIX_COUNT} -gt 5 ]; then
-                  test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
-                  test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+                if [[ ${vbrfix_count} -gt 5 ]]; then
+                  [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
+                  [[ -e "${output_file}" ]] && rm "${output_file}"
 
-                  test "${QUIET}" != 'True' && echo "Failed. Removing output file."
+                  cecho 'red' -n "Failed."
+                  echo " Removing output file."
                   return 1
                   break;
                 fi
 
-                if [ ${VBRFIX_COUNT} -gt 0 ]; then
-                  test "${QUIET}" != 'True' && echo "Failed."
+                if [[ ${vbrfix_count} -gt 0 ]]; then
+                  cecho 'red' "Failed."
                 fi
 
-                command let VBRFIX_COUNT+=1
-                test "${QUIET}" != 'True' && echo -n " -> Fixing '${SHORT_OUTPUT_FILE}' VBR header (try ${VBRFIX_COUNT})..."
+                let vbrfix_count+=1
+                echo -n " -> Fixing '${short_output_file}' VBR header (try ${vbrfix_count})..."
 
                 # Output file is MP3 and VBR. Apply header fix.
                 # enter /tmp since vbrfix create log files in current directory (!)
-                command pushd '/tmp' > '/dev/null'
-                if [ "${VERBOSE}" = 'True' ]; then
-                  command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
+                pushd '/tmp' > '/dev/null'
+                if [[ "${verbose}" = 'True' ]]; then
+                  vbrfix "${output_temp_file}" "${output_file}"
                 else
-                  command vbrfix "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}" >'/dev/null' 2>&1
+                  vbrfix "${output_temp_file}" "${output_file}" >'/dev/null' 2>&1
                 fi
-                command popd > '/dev/null'
+                popd > '/dev/null'
 
                 # Force output to be written on disk.
                 # May not be necessary here.
-                command sync
+                sync
 
                 # Check that vbrfix has done his job correctly.
-                OUTPUT_FILE_AUDIO_FORMAT="$(command mediainfo --Inform="Audio;%Format%" "${OUTPUT_FILE}")"
+                output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
               done
 
-              test "${QUIET}" != 'True' -a -e "${OUTPUT_FILE}" && echo "Done."
+              [[ -e "${output_file}" ]] && cecho 'green' "Done."
             else
               # Nothing to do but rename the file.
-              command mv "${OUTPUT_TEMP_FILE}" "${OUTPUT_FILE}"
+              mv "${output_temp_file}" "${output_file}"
             fi
 
             # Delete temporary file if it is still present.
-            test -e "${OUTPUT_TEMP_FILE}" && command rm "${OUTPUT_TEMP_FILE}"
+            [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
 
             # Fetch cover art from input file.
-            if [ -e "${INPUT_FILE}" -a -e "${OUTPUT_FILE}" ]; then
-              transfert_images "${INPUT_FILE}" "${OUTPUT_FILE}"
+            if [[ -e "${input_file}" && -e "${output_file}" ]]; then
+              transfert_images "${input_file}" "${output_file}"
             fi
           fi
         fi
       else
-        echo "Error: unable to create folder '${OUTPUT_FILE_PATH}'." >&2
+        cecho 'red' "Error: unable to create folder '${output_file_path}'." >&2
 
         return 1
       fi
     else
-      test "${QUIET}" != 'True' && echo "'${INPUT_FILE}' not found... Skipping."
+      echo -n "'${input_file}' not found... "
+      cecho 'yellow' 'Skipping.'
     fi
   fi
 
   return 0
-} # convert_file
+} # convert_file()
 
 # Export convert_file for usage with Parallel / Sem.
 export -f 'convert_file'
+
+
+
+# Apply replaygain to a converted album.
+#
+# @param string $output_format The output audio format.
+# @param string $output_extension The output audio file extension.
+# @param string $verbose True for verbose output.
+# @param string $input_album_path The input album path.
+function replaygain_album() {
+  [[ ${#} -ne 4 ]] && exit 1
+
+  local output_format="${1}"
+  local output_extension="${2}"
+  local verbose="${3}"
+  local input_album_path="${4}"
+
+  ## Build output album path based on input album path.
+  local output_album_path="$(echo "${input_album_path}" \
+        | sed -e "s|^${input_path}|${output_path}|")"
+
+  local album_name="$(basename -z "${output_album_path}")"
+
+  # test if output album path exists.
+  [[ -d "${output_album_path}" ]] || return 1
+
+  # test if output album path is empty.
+  shopt -s nullglob dotglob
+  local album_files=("${output_album_path}"/*".${output_extension}")
+  shopt -u nullglob dotglob
+
+  (( ${#album_files[*]} )) || return 1
+  echo -n "Processing replay gain for album '"
+  cecho 'magenta' -n "${album_name}"
+  echo -n "'... "
+
+  case "${output_format}" in
+    'mp3' )
+      # reference:
+      # mp3gain  -a -t -p -s r -k -f
+
+      if [[ "${verbose}" = 'True' ]]; then
+        mp3gain -a -t -p -k -f "${album_files[@]}"
+      else
+        mp3gain -a -t -p -k -f "${album_files[@]}" > '/dev/null' 2>&1
+      fi
+
+      if [[ ! ${?} ]]; then
+        cecho 'red' 'Failure.'
+        return 1
+      fi
+      ;;
+    'flac' )
+      metaflac --add-replay-gain "${album_files[@]}"
+
+      if [[ ! ${?} ]]; then
+        cecho 'red' 'Failure.'
+        return 1
+      fi
+      ;;
+    'ogg' | 'vorbis' )
+
+      if [[ "${verbose}" = 'True' ]]; then
+        vorbisgain --album --fast "${album_files[@]}"
+      else
+        vorbisgain --album --fast --quiet "${album_files[@]}"
+      fi
+
+      if [[ ! ${?} ]]; then
+        cecho 'red' 'Failure.'
+        return 1
+      fi
+      ;;
+    * )
+      # unsupported format.
+      return 1
+      ;;
+  esac
+
+  cecho 'green' 'Done.'
+
+  return 0
+} #replaygain_album()
+export -f 'replaygain_album'
+
+
+
+# Convert an music album from input library to output library.
+#
+# @param string $threads The threads option for parallel.
+# @param string $replaygain True to apply album replay gain to converted files.
+# @param string $input_album_path The album path in input library.
+#
+# @return Exit with error if conversion failed.
+function convert_album() {
+  [[ ${#} -ne 3 ]] && exit 1
+
+  # Enable the trapped errors to be passed to called functions.
+  #set -o errtrace
+
+  local threads="${1}"
+  local replaygain="${2}"
+  local input_album_path="${3}"
+
+  #------------------------
+  # Trap handling function
+  #
+  # @param string $input_album_path The currently processed path.
+  function exit_convert_album_on_signal() {
+    local interrupt=${?}
+
+    local input_album_path="${1}"
+    local album_name="$(basename -z "${input_album_path}")"
+
+    cecho 'boldred' "Convertion of album '${album_name}' interrupted." >&2
+
+    local running_jobs=($(jobs -p))
+    if [[ -n "${running_jobs}" ]]; then
+      # cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
+      kill ${running_jobs[@]} 2>'/dev/null'
+    fi
+
+    if [[ ${interrupt} -eq 2 ]]; then
+      # killing self if catched a SIGINT.
+      # see http://mywiki.wooledge.org/SignalTrap
+      trap - SIGINT
+      kill -INT $$
+    else
+      exit 3
+    fi
+  } # exitconvert_album__on_signal()
+  #------------------------
+
+  trap "exit_convert_album_on_signal '${input_album_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+
+  find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
+    | sort --zero-terminated \
+    | parallel --halt 2 --jobs "${threads}" --null 'convert_file'
+
+  # Warning: when interrupted, parallel does not print threads output
+  # (including the traps output).
+  # use --res /path/to/folder to store and debug tasks outputs.
+
+  # Wait for all files to be done.
+  parallel --wait
+
+  # Compute album replaygain.
+  if [[ "${replaygain}" = 'True' ]]; then
+    replaygain_album "${output_format}" "${output_extension}" \
+                    "${verbose}" "${input_album_path}"
+  fi
+
+  return 0
+} # convert_album()
+export -f 'convert_album'
+
 
 
 #######################################################################################
@@ -772,9 +1179,38 @@ export -f 'convert_file'
 #######################################################################################
 #######################################################################################
 #######################################################################################
+# Function called by trap. Perform exit cleanup
+# use to enable trap "exit_on_signal '${lock_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+#
+# @param string $lock_path The path to lock file.
+function exit_on_signal() {
+  local interrupt=${?}
+
+  local lock_path="${1}"
+  cecho 'boldred' "${script_name} is stopping at your request." >&2
+
+  local running_jobs=($(jobs -p))
+  if [[ -n "${running_jobs}" ]]; then
+    #cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
+    kill ${running_jobs[@]} 2>'/dev/null'
+  fi
+  # remove lock file.
+  [[ -n "${lock_path}" && -d "${lock_path}" ]] && rm -rf "${lock_path}"
+
+  if [[ ${interrupt} -eq 2 ]]; then
+    # killing self if catched a SIGINT.
+    # see http://mywiki.wooledge.org/SignalTrap
+    trap - SIGINT
+    kill -INT $$
+  else
+    exit 3
+  fi
+} # exit_on_signal()
+
+
 # lock dirs/files
-LOCK_DIR=".${SCRIPT_NAME}.lock"
-PID_FILE="${SCRIPT_NAME}.pid"
+lock_dir=".${script_name}.lock"
+pid_file="${script_name}.pid"
 
 # exit codes and text for them - additional features nobody needs :-)
 ENO_SUCCESS=0; ETXT[0]="ENO_SUCCESS"
@@ -782,8 +1218,8 @@ ENO_GENERAL=1; ETXT[1]="ENO_GENERAL"
 ENO_LOCKFAIL=2; ETXT[2]="ENO_LOCKFAIL"
 ENO_RECVSIG=3; ETXT[3]="ENO_RECVSIG"
 
-BASE_LOCK_PATH="/var/lock"
-LOCK_PATH="${BASE_LOCK_PATH}/${LOCK_DIR}"
+base_lock_path="/var/lock"
+lock_path="${base_lock_path}/${lock_dir}"
 
 # Lock the system.
 #
@@ -792,52 +1228,45 @@ LOCK_PATH="${BASE_LOCK_PATH}/${LOCK_DIR}"
 # 
 # @return unlock (rm) error code.
 function lock {
-    if [ -n "${1}" ]; then
+    if [[ -n "${1}" ]]; then
       realpath_check "${1}"
-      BASE_LOCK_PATH="${REALPATH}"
+      base_lock_path="${realpath}"
     fi
 
-    LOCK_PATH="${BASE_LOCK_PATH}/${LOCK_DIR}"
-    local PID_PATH="${LOCK_PATH}/${PID_FILE}"
+    lock_path="${base_lock_path}/${lock_dir}"
+    local pid_path="${lock_path}/${pid_file}"
 
-    if mkdir "${LOCK_PATH}" &>'/dev/null'; then
-        # lock succeeded, install signal handlers before storing the PID just in case
-        # storing the PID fails
-        trap 'ECODE=$?;
-            echo "[${SCRIPT_NAME}] Removing lock. Exit: ${ETXT[ECODE]}($ECODE)" >&2
-            test -d "${LOCK_PATH}" && rm -rf "${LOCK_PATH}"' 0
-
+    if mkdir "${lock_path}" &>'/dev/null'; then
         # lock succeeded, store the PID
-        echo "$$" >"${PID_PATH}"
+        echo "$$" >"${pid_path}"
 
         # the following handler will exit the script on receiving these signals
         # the trap on "0" (EXIT) from above will be triggered by this trap's
         # "exit" command!
-        trap 'echo "[${SCRIPT_NAME}] Killed by a signal." >&2
-              exit ${ENO_RECVSIG}' 1 2 3 15
+        trap "exit_on_signal '${lock_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
         return ${ENO_SUCCESS}
     else
         # lock failed, now check if the other PID is alive
-        OTHER_PID="$(command cat "${PID_PATH}" 2>'/dev/null')"
+        other_pid="$(cat "${pid_path}" 2>'/dev/null')"
 
         # if cat wasn't able to read the file anymore, another instance probably is
         # about to remove the lock -- exit, we're *still* locked
         # Thanks to Grzegorz Wierzowiecki for pointing this race condition out on
         # http://wiki.grzegorz.wierzowiecki.pl/code:mutex-in-bash
-        if [ ${?} != 0 ]; then
+        if [[ ${?} != 0 ]]; then
             # Pid file does not exists - probably directory is beeing deleted
             exit ${ENO_LOCKFAIL}
         fi
 
-        if ! kill -0 ${OTHER_PID} &>'/dev/null'; then
+        if ! kill -0 ${other_pid} &>'/dev/null'; then
             # lock is stale, remove it and restart
             unlock
-            lock "${BASE_LOCK_PATH}"
+            lock "${base_lock_path}"
             return $?
         else
             # lock is valid and OTHERPID is active - exit, we're locked!
-            echo "lock failed, PID ${OTHER_PID} is active" >&2
+            echo "lock failed, PID ${other_pid} is active" >&2
             exit ${ENO_LOCKFAIL}
         fi
     fi
@@ -848,7 +1277,7 @@ function lock {
 # 
 # @return unlock (rm) error code.
 function unlock {
-    test -d "${LOCK_PATH}" && rm -r "${LOCK_PATH}" &>'/dev/null'
+    [[ -d "${lock_path}" ]] && rm -r "${lock_path}" &>'/dev/null'
     return $?
 } # unlock()
 
@@ -863,85 +1292,83 @@ function getoptex()
 {
   let $# || return 1
   local optlist="${1#;}"
-  let OPTIND || OPTIND=1
-  [ $OPTIND -lt $# ] || return 1
-  shift $OPTIND
-  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
-  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
-  then
-    local o
-    o="-${1#-$OPTOFS}"
-    for opt in ${optlist#;}
-    do
-      OPTOPT="${opt%[;.:]}"
-      unset OPTARG
-      local opttype="${opt##*[^;:.]}"
-      [ -z "$opttype" ] && opttype=";"
-      if [ ${#OPTOPT} -gt 1 ]
-      then # long-named option
-        case $o in
-          "--$OPTOPT")
-            if [ "$opttype" != ":" ]; then return 0; fi
-            OPTARG="$2"
-            if [ -z "$OPTARG" ];
-            then # error: must have an agrument
-              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT";
-              OPTOPT="?"
-              return 1;
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "--$OPTOPT="*)
-            if [ "$opttype" = ";" ];
-            then  # error: must not have arguments
-              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTARG=${o#"--$OPTOPT="}
-            return 0
-          ;;
-        esac
-      else # short-named option
-        case "$o" in
-          "-$OPTOPT")
-            unset OPTOFS
-            [ "$opttype" != ":" ] && return 0
-            OPTARG="$2"
-            if [ -z "$OPTARG" ]
-            then
-              echo "$0: error: -$OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "-$OPTOPT"*)
-            if [ $opttype = ";" ]
-            then # an option with no argument is in a chain of options
-              OPTOFS="$OPTOFS?" # move to the next option in the chain
-              OPTIND=$[OPTIND-1] # the chain still has other options
+  let optind || optind=1
+  [[ $optind -lt $# ]] || return 1
+  shift $optind
+  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
+    optind=$[optind+1];
+    if [[ "$1" != "--" ]]; then
+      local o
+      o="-${1#-$optofs}"
+      for opt in ${optlist#;}
+      do
+        optopt="${opt%[;.:]}"
+        unset optarg
+        local opttype="${opt##*[^;:.]}"
+        [[ -z "$opttype" ]] && opttype=";"
+        if [[ ${#optopt} -gt 1 ]]; then # long-named option
+          case $o in
+            "--$optopt")
+              if [[ "$opttype" != ":" ]]; then
+                return 0;
+              fi
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then # error: must have an agrument
+                let OPTERR && echo "$0: error: $optopt must have an argument" >&2
+                optarg="$optopt";
+                optopt="?"
+                return 1;
+              fi
+              optind=$[optind+1] # skip option's argument
               return 0
-            else
-              unset OPTOFS
-              OPTARG="${o#-$OPTOPT}"
+            ;;
+            "--$optopt="*)
+              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
+                let OPTERR && echo "$0: error: $optopt must not have arguments" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optarg=${o#"--$optopt="}
               return 0
-            fi
-          ;;
-        esac
-      fi
-    done
-    echo "Error : invalid option : '${o}'." >&2
-    usage
-    exit 1
-  fi; fi
-  OPTOPT="?"
-  unset OPTARG
+            ;;
+          esac
+        else # short-named option
+          case "$o" in
+            "-$optopt")
+              unset optofs
+              [[ "$opttype" != ":" ]] && return 0
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then
+                echo "$0: error: -$optopt must have an argument" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optind=$[optind+1] # skip option's argument
+              return 0
+            ;;
+            "-$optopt"*)
+              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
+                optofs="$optofs?" # move to the next option in the chain
+                optind=$[optind-1] # the chain still has other options
+                return 0
+              else
+                unset optofs
+                optarg="${o#-$optopt}"
+                return 0
+              fi
+            ;;
+          esac
+        fi
+      done
+      echo "Error : invalid option : '${o}'." >&2
+      usage
+      exit 1
+    fi
+  fi
+  optopt="?"
+  unset optarg
   return 1
 }
 function optlistex
@@ -949,14 +1376,12 @@ function optlistex
   local l="$1"
   local m # mask
   local r # to store result
-  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
-  while [ -n "$l" ]
-  do
+  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
     m="${m#?}"  # cut one "?" sign from m
-    if [ -n "${l%%[^:.;]*}" ]
-    then # a special character (";", ".", or ":") was found
+    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
       r="$r${l%$m}" # append it to $r
       l="${l#?}" # cut the special character from l
       m="${m#?}"  # cut one more "?" sign
@@ -975,123 +1400,123 @@ function getopt()
 #######################################################################################
 #######################################################################################
 
-
-
 # Check for binaries presence
 check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
 check_binary "avconv;ffmpeg" "libav-tools"
-export AVCONV="${BINARY}"
 check_binary "parallel" "parallel"
-PARALLEL="${BINARY}"
 check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
-export EYED3="${BINARY}"
 check_binary "mediainfo" "mediainfo"
 check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
 check_binary "vbrfix" "vbrfix"
+check_binary "mp3gain" "mp3gain"
+check_binary "vorbisgain" "vorbisgain"
 
 # Application defaults
 
-# Compute the semaphore name based on SCRIPT_NAME. 
-SEMAPHORE_NAME="${SCRIPT_NAME}"
-
 # Export configuration for convert_file function.
-export INPUT_PATH="$(command pwd)"
-export OUTPUT_PATH="$(command pwd)"
+export input_path="$(pwd)"
+export output_path="$(pwd)"
 
-export INPUT_FORMAT="*"
-export OUTPUT_FORMAT="mp3"
+export input_format="*"
+export output_format="mp3"
 
-export ENCODING_MODE="VBR"
-export ENCODING_BITRATE="192k"
-export ENCODING_QUALITY="5"
+export encoding_mode="VBR"
+export encoding_bitrate="192k"
+export encoding_quality="5"
 
-export THREADS="100%"
+replaygain="false"
 
-export AVCONV_OPTIONS=""
+threads="100%"
 
-export SYNC_DELETE='False'
-export COPY_ALL='False'
+export avconv_options=""
 
-export QUIET="False"
-export VERBOSE="False"
+export sync_delete='False'
+export copy_all='False'
 
-export INPUT_EXTENSION="${INPUT_FORMAT}"
-export OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
+export quiet="False"
+export verbose="False"
+
+export input_extension="${input_format}"
+export output_extension="${output_format}"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: output-format: of: e: bitrate. b. quality. q. threads: t: avconv-options: a: sync-delete delete d copy-all copy c quiet silent s verbose v" "${@}"; do
+while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: output-format: of: e: bitrate. b. quality. q. threads: t: avconv-options: a: replaygain gain g sync-delete delete d copy-all copy c quiet silent s verbose v" "${@}"; do
   # Options debuging.
-  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
-  case "${OPTOPT}" in
+  case "${optopt}" in
     'input-path' | 'in' | 'i' )
-      realpath_check "${OPTARG}"
-      INPUT_PATH="${REALPATH}"
+      realpath_check "${optarg}"
+      input_path="${realpath}"
       ;;
 
     'output-path' | 'out' | 'o' )
-      realpath_check "${OPTARG}"
-      OUTPUT_PATH="${REALPATH}"
+      realpath_check "${optarg}"
+      output_path="${realpath}"
       ;;
 
     'input-format' | 'if' )
-      if [ -n "${OPTARG}" ]; then
-        INPUT_FORMAT="${OPTARG}"
+      if [[ -n "${optarg}" ]]; then
+        input_format="${optarg}"
       fi
       ;;
 
     'output-format' | 'of' | 'e' )
-      if [ -n "${OPTARG}" ]; then
-        OUTPUT_FORMAT="${OPTARG}"
+      if [[ -n "${optarg}" ]]; then
+        output_format="${optarg}"
       fi
       ;;
 
     'bitrate' | 'b' )
-      ENCODING_MODE="CBR"
+      encoding_mode="CBR"
 
-      if [ -n "${OPTARG}" ]; then
-        ENCODING_BITRATE="${OPTARG}"
+      if [[ -n "${optarg}" ]]; then
+        encoding_bitrate="${optarg}"
       fi
       ;;
 
     'quality' | 'q' )
-      ENCODING_MODE="VBR"
+      encoding_mode="VBR"
 
-      if [ -n "${OPTARG}" ]; then
-        ENCODING_QUALITY="${OPTARG}"
+      if [[ -n "${optarg}" ]]; then
+        encoding_quality="${optarg}"
       fi
       ;;
 
+    'replaygain' | 'gain' | 'g' )
+      replaygain='True'
+      ;;
+
     'threads' | 't' )
-      if [ -n "${OPTARG}" ]; then
-        THREADS="${OPTARG}"
+      if [[ -n "${optarg}" ]]; then
+        threads="${optarg}"
       fi
       ;;
 
     'avconv-options' | 'a' )
-      if [ -n "${OPTARG}" ]; then
-        AVCONV_OPTIONS="${OPTARG}"
+      if [[ -n "${optarg}" ]]; then
+        avconv_options="${optarg}"
       fi
       ;;
 
     'sync-delete' | 'delete' | 'd' )
-      SYNC_DELETE='True'
+      sync_delete='True'
       ;;
 
     'copy-all' | 'copy' | 'c' )
-      COPY_ALL='True'
+      copy_all='True'
       ;;
 
     'quiet' | 'silent' | 's' )
-      QUIET='True'
+      quiet='True'
       ;;
 
     'verbose' | 'v' )
-      VERBOSE='True'
+      verbose='True'
       ;;
 
     'help' | 'h' | * )
@@ -1100,50 +1525,47 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
   esac
 done
 
-shift $[OPTIND-1]
+shift $((optind-1))
 
-if [ "${VERBOSE}" = 'True' ]; then
-  QUIET='False'
+if [[ "${verbose}" = 'True' ]]; then
+  quiet='False'
 fi
 
 # Render formats with lowercase.
-INPUT_FORMAT="$(command echo "${INPUT_FORMAT}" | command tr '[:upper:]' '[:lower:]')"
-OUTPUT_FORMAT="$(command echo "${OUTPUT_FORMAT}" | command tr '[:upper:]' '[:lower:]')"
+input_format="$(echo "${input_format}" | tr '[:upper:]' '[:lower:]')"
+output_format="$(echo "${output_format}" | tr '[:upper:]' '[:lower:]')"
 
 
 # TODO : implement a less basic extension detection based on format.
 
-export INPUT_EXTENSION="${INPUT_FORMAT}"
-case "${INPUT_FORMAT}" in
+export input_extension="${input_format}"
+case "${input_format}" in
   'vorbis' | 'ogg' )
-    INPUT_EXTENSION='ogg'
+    input_extension='ogg'
     ;;
 esac
 
-export OUTPUT_EXTENSION="${OUTPUT_FORMAT}"
-case "${OUTPUT_FORMAT}" in
+export output_extension="${output_format}"
+case "${output_format}" in
   'flac' | 'aiff' )
     # Defaults are good.
     ;;
   'mp3' )
     # Invert quality setting (9 is lowest, 0 highest).
     # This way mp3 and ogg/vorbis quality is set the same way.
-    ENCODING_QUALITY=$((9 - ${ENCODING_QUALITY}))
+    encoding_quality=$((9 - ${encoding_quality}))
     ;;
-  'ogg' )
-    OUTPUT_EXTENSION='ogg'
-    OUTPUT_FORMAT='vorbis'
-    ;;
-  'vorbis' )
-    OUTPUT_EXTENSION='ogg'
+  'ogg' | 'vorbis' )
+    output_extension='ogg'
+    output_format='vorbis'
     ;;
   * )
-    echo "Error: unsupported output format '${OUTPUT_FORMAT}'." >&2
+    echo "Error: unsupported output format '${output_format}'." >&2
     exit 1
 esac
 
 ## Lock output path for this script.
-lock "${OUTPUT_PATH}"
+lock "${output_path}"
 
 ###############################
 #
@@ -1151,55 +1573,52 @@ lock "${OUTPUT_PATH}"
 #
 ################################
 
-# Detect parallel command line based on OS.
-case "$(command uname)" in
-  'Darwin' )
-    PARALLEL="${PARALLEL} --no-notice"
-    ;;
-  'Linux' | * )
-    # Nothing to do.
-    ;;
-esac
+# Enable the trapped errors to be passed to called functions.
+#set -o errtrace
 
-
-command find "${INPUT_PATH}" -type 'f' -print0 \
-  | command ${PARALLEL} --jobs ${THREADS} --null 'convert_file'
-
+# Process albums (aka. folders) in input library.
+if [[ "${quiet}" = 'True' ]]; then
+  find "${input_path}" -type 'd' \
+    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" {} \; > '/dev/null'
+else
+  find "${input_path}" -type 'd' \
+    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" {} \;
+fi
 
 ###############################
 #
 # Check for removed input files.
 #
 ################################
-if [ "${SYNC_DELETE}" = 'True' ]; then
-  command find "${OUTPUT_PATH}" -type 'f' \
-    | grep -v "${LOCK_DIR}" \
-    | while read OUTPUT_FILE; do
+if [[ "${sync_delete}" = 'True' ]]; then
+  find "${output_path}" -type 'f' \
+    | grep -v "${lock_dir}" \
+    | while read 'output_file'; do
 
     ## Build input file path based on output file path.
-    OUTPUT_FILE_PATH="$(command dirname "${OUTPUT_FILE}")"
-    INPUT_FILE_PATH="$(command echo "${OUTPUT_FILE_PATH}" | sed -e "s|^${OUTPUT_PATH}|${INPUT_PATH}|")"
-    SHORT_PATH="$(command echo "${OUTPUT_FILE_PATH}" | sed -e "s|^${OUTPUT_PATH}||")"
+    output_file_path="$(dirname "${output_file}")"
+    input_file_path="$(echo "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
+    short_path="$(echo "${output_file_path}" | sed -e "s|^${output_path}||")"
 
-    OUTPUT_FILENAME="$(command basename "${OUTPUT_FILE}")"
-    INPUT_FILENAME_BASE="$(command echo -n "${OUTPUT_FILENAME}" \
-        | command sed -e "s/\.[^\.]*$//")"
+    output_filename="$(basename "${output_file}")"
+    input_filename_base="$(echo -n "${output_filename}" \
+        | sed -e "s/\.[^\.]*$//")"
 
-    SHORT_INPUT_FILE="${INPUT_FILENAME_BASE}.*"
-    SHORT_OUTPUT_FILE="${OUTPUT_FILENAME}"
+    short_input_file="${input_filename_base}.*"
+    short_output_file="${output_filename}"
 
     # Test for file with same name (or without extension).
-    if [ ! -e "${INPUT_FILE_PATH}/${OUTPUT_FILENAME}" ]; then
-      if [ -z "$(command find "${INPUT_FILE_PATH}" -maxdepth 1 -type 'f' -iname "${INPUT_FILENAME_BASE}.*")" ]; then
+    if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
+      if [[ -z "$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")" ]]; then
         # Input file not found. Removing output file.
-        test "${QUIET}" != 'True' && echo -n "File '${SHORT_INPUT_FILE}' disappeared.
-   -> Removing '${SHORT_OUTPUT_FILE}'... "
-        command test -e "${OUTPUT_FILE}" && command rm "${OUTPUT_FILE}"
+        [[ "${quiet}" != 'True' ]] && echo -n "File '${short_input_file}' disappeared.
+   -> Removing '${short_output_file}'... "
+        [[ -e "${output_file}" ]] && rm "${output_file}"
 
-        if [ -e "${OUTPUT_FILE}" ]; then
-          test "${QUIET}" != 'True' && echo "Failed."
+        if [[ -e "${output_file}" ]]; then
+          [[ "${quiet}" != 'True' ]] && echo "Failed."
         else
-          test "${QUIET}" != 'True' && echo "Done."
+          [[ "${quiet}" != 'True' ]] && echo "Done."
         fi
 
       fi
