@@ -5,52 +5,56 @@
 # Licence: GNU GPL
 # Dependency: zenity
 # Author: Pierre-Yves Landuré <pierre-yves dot landure at biapy.fr>
+version='1.0.1'
 
-declare -a THUMBNAIL_PATHS
-THUMBNAIL_PATHS[0]="${HOME}/.thumbnails"
-THUMBNAIL_PATHS[1]="${HOME}/.cache/thumbnails"
-
-declare -g DELETE_COUNT=0
+declare -a thumbnail_paths
+thumbnail_paths[0]="${HOME}/.thumbnails"
+thumbnail_paths[1]="${HOME}/.cache/thumbnails"
 
 case "${LANG}" in
   'fr' | 'fr_'* )
     err_title="Erreur"
     err_files="Aucun fichier sélectionné"
     info_title="Vignettes effacées"
-    info_thumbnails_deleted="|COUNT| vignettes ont été supprimée(s)."
+    info_thumbnails_deleted="|COUNT| vignettes ont été supprimée(s).
+
+Appuyez sur F5 pour rafraîchir l'affichage."
     ;;
   * )
     err_title="Error"
     err_files="No file selected"
     info_title="Thumbnails deleted"
-    info_thumbnails_deleted="|COUNT| thumbnails have been deleted."
+    info_thumbnails_deleted="|COUNT| thumbnails have been deleted.
+
+Hit F5 to refresh display."
     ;;
 esac
 
 if [ -z "${1}" ]; then
-  command zenity --error --title "${err_title}" --text "${err_files}"
+  zenity --error --title "${err_title}" --text "${err_files}"
   exit 1
 fi
 
-for FILE_URI in ${NAUTILUS_SCRIPT_SELECTED_URIS[@]}; do
+delete_count=0
+for file_uri in ${NAUTILUS_SCRIPT_SELECTED_URIS[@]}; do
 
-  THUMBNAIL_FILE="$(command echo -n "${FILE_URI}" \
-    | command md5sum \
-    | command cut --delimiter=' ' --fields=1).png"
+  thumbnail_file="$(echo -n "${file_uri}" \
+    | md5sum \
+    | cut --delimiter=' ' --fields=1).png"
 
-  for THUMBNAIL_PATH in ${THUMBNAIL_PATHS[@]}; do
-    if [ -d "${THUMBNAIL_PATH}" ]; then
+  for thumbnail_path in ${thumbnail_paths[@]}; do
+    if [ -d "${thumbnail_path}" ]; then
 
-      command find "${THUMBNAIL_PATH}" -type f -name "${THUMBNAIL_FILE}" \
-        | while command read FOUND_FILE; do
-        command rm "${FOUND_FILE}";
-        DELETE_COUNT=$((${DELETE_COUNT} + 1))
-      done
+      while read -r -d '' found_file; do
+        rm "${found_file}";
+        delete_count=$((${delete_count} + 1))
+      done < <(find "${thumbnail_path}" -type f -name "${thumbnail_file}" -print0)
     fi
   done
 done
 
-# zenity --info --title "${info_title}" --text "${info_thumbnails_deleted//|COUNT|/${DELETE_COUNT}}"
+# This info message is useless and an anoyance.
+# zenity --info --title "${info_title}" --text "${info_thumbnails_deleted//|COUNT|/${delete_count}}"
 
 exit 0
 
