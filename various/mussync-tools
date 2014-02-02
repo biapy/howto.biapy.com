@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.3.1"
+version="1.3.2"
 
 script_name="$(basename -- "${0}")"
 
@@ -402,7 +402,9 @@ function transfert_images() {
   fi
 
   if [[ "${input_file_has_cover}" = 'Yes' ]]; then
-    echo -n " -> Transfering cover art to $(basename "${output_file}")... "
+    echo -n " -> Transfering cover art to "
+    cecho 'magenta' -n "$(basename -z "${output_file}")"
+    echo -n "... "
 
     # Setup trap since there is processing needed.
     trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
@@ -705,7 +707,7 @@ function convert_file() {
   local output_file_path="$(echo "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
   local short_path="$(echo "${input_file_path}" | sed -e "s|^${input_path}||")"
 
-  local input_filename="$(basename "${input_file}")"
+  local input_filename="$(basename -z "${input_file}")"
   local output_filename="$(echo -n "${input_filename}" \
         | sed -e "s/\.[^\.]*$/\.${output_extension}/")"
   local input_file_mimetype="$(file --brief --mime-type "${input_file}")"
@@ -765,7 +767,8 @@ function convert_file() {
       && "$(echo -n "${input_file_mimetype}" \
             | cut -d '/' -f 1)" != 'audio' ]]; then
     # Input file is not an audio file.
-    echo -n "'${short_input_file}' is not a audio file... "
+    cecho 'magenta' -n "${short_input_file}"
+    echo -n " is not a audio file... "
 
     # Update computed values.
     output_filename="${input_filename}"
@@ -810,7 +813,8 @@ function convert_file() {
     if [[ ! -e "${output_file}" ]]; then
       conversion_needed='True'
     else
-      echo -n "'${short_output_file}' exists... "
+      cecho 'magenta' -n "${short_output_file}"
+      echo -n " exists... "
 
       # Check if output file is older than input file.
       if [[ "${input_file}" -nt "${output_file}" ]]; then
@@ -822,7 +826,8 @@ function convert_file() {
     fi
   else
     # Found file has not the correct extension.
-    echo -n "'${short_input_file}' is not in source format... "
+    cecho 'magenta' -n "${short_input_file}"
+    echo " is not in source format... "
     cecho 'yellow' 'Skipping.'
   fi
 
@@ -844,7 +849,11 @@ function convert_file() {
           cp "${input_file}" "${output_file}"
         else
           # Convert input to output
-          echo -n "Converting '${short_input_file}' to '${short_output_file}'... "
+          echo -n "Converting "
+          cecho 'magenta' -n "${short_input_file}"
+          echo -n ' to '
+          cecho 'magenta' -n "${short_output_file}"
+          echo -n '... '
 
           local log_level='quiet'
           if [[ "${verbose}" = 'True' ]]; then
@@ -963,7 +972,9 @@ function convert_file() {
                 fi
 
                 let vbrfix_count+=1
-                echo -n " -> Fixing '${short_output_file}' VBR header (try ${vbrfix_count})..."
+                echo -n ' -> Fixing '
+                cecho 'magenta' -n "${short_output_file}"
+                echo -n ' VBR header (try ${vbrfix_count})...'
 
                 # Output file is MP3 and VBR. Apply header fix.
                 # enter /tmp since vbrfix create log files in current directory (!)
@@ -973,6 +984,13 @@ function convert_file() {
                 else
                   vbrfix "${output_temp_file}" "${output_file}" >'/dev/null' 2>&1
                 fi
+
+                if [[ ! ${?} ]]; then
+                  # failure. Deleting output file by security.
+                  rm "${output_file}"
+                  output_file_audio_format='False'
+                fi
+
                 popd > '/dev/null'
 
                 # Force output to be written on disk.
@@ -980,7 +998,7 @@ function convert_file() {
                 sync
 
                 # Check that vbrfix has done his job correctly.
-                output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
+                [[ -e "${output_file}" ]] && output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
               done
 
               [[ -e "${output_file}" ]] && cecho 'green' "Done."
@@ -1600,7 +1618,7 @@ if [[ "${sync_delete}" = 'True' ]]; then
     input_file_path="$(echo "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
     short_path="$(echo "${output_file_path}" | sed -e "s|^${output_path}||")"
 
-    output_filename="$(basename "${output_file}")"
+    output_filename="$(basename -z "${output_file}")"
     input_filename_base="$(echo -n "${output_filename}" \
         | sed -e "s/\.[^\.]*$//")"
 
