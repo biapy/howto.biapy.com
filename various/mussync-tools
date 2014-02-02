@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.3.0"
+version="1.3.1"
 
 script_name="$(basename -- "${0}")"
 
@@ -24,13 +24,13 @@ and keep the folder structure.
 
 Usage :
 
-  ${script_name} [[ --help ]] [[ --quiet ]] [[ --verbose ]
-      [[ --input-path='/path/to/original/library' ]
-      [[ --output-path='/path/to/converted/library' ]
-      [[ --input-format='*' ]] [[ --output-format='mp3' ]
-      [[ --bitrate='320k' | --quality=5 ]
-      [[ --sync-delete ]] [[ --copy-all ]
-      [[ --avconv-options='--more --avconv --options' ]
+  ${script_name} [ --help ] [ --quiet ] [ --verbose ]
+      [ --input-path='/path/to/original/library' ]
+      [ --output-path='/path/to/converted/library' ]
+      [ --input-format='*' ] [ --output-format='mp3' ]
+      [ --bitrate='320k' | --quality=5 ]
+      [ --sync-delete ] [ --copy-all ]
+      [ --avconv-options='--more --avconv --options' ]
 
   Available options are :
     * --help | -h                   : Display this message.
