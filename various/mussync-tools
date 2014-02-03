@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.1"
+version="1.4.2"
 
 script_name="$(basename -- "${0}")"
 
@@ -1178,46 +1178,48 @@ function sync_delete_album()
   local output_album_path="$(echo -n "${input_album_path}" \
         | sed -e "s|^${input_path}|${output_path}|")"
 
-  find "${output_album_path}" -maxdepth 1 -type 'f' -print0 \
-    | grep --null-data -v "${lock_dir}" \
-    | while read -r -d '' 'output_file'; do
+  if [[ -d "${output_album_path}" ]]; then
+    find "${output_album_path}" -maxdepth 1 -type 'f' -print0 \
+      | grep --null-data -v "${lock_dir}" \
+      | while read -r -d '' 'output_file'; do
 
-    ## Build input file path based on output file path.
-    local output_file_path="$(dirname -z -- "${output_file}")"
-    local input_file_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
-    local short_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}||")"
+      ## Build input file path based on output file path.
+      local output_file_path="$(dirname -z -- "${output_file}")"
+      local input_file_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
+      local short_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}||")"
 
-    local output_filename="$(basename -z -- "${output_file}")"
-    local input_filename_base="$(echo -n "${output_filename}" | sed -e "s/\.[^\.]*$//")"
+      local output_filename="$(basename -z -- "${output_file}")"
+      local input_filename_base="$(echo -n "${output_filename}" | sed -e "s/\.[^\.]*$//")"
 
-    local short_input_file_base="${input_filename_base}.*"
-    local short_output_file="${output_filename}"
+      local short_input_file_base="${input_filename_base}.*"
+      local short_output_file="${output_filename}"
 
-    # Test for file with same name (or without extension).
-    if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
-      local input_file="$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")"
-      local short_input_file="$(basename -z -- "${input_file}")"
-      if [[ -z "${input_file}"  ]]; then
-        # Input file not found. Removing output file.
-        echo -n '   - Input file '
-        cecho 'magenta' -n "${short_input_file_base}"
-        echo ' disappeared.'
+      # Test for file with same name (or without extension).
+      if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
+        local input_file="$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")"
+        local short_input_file="$(basename -z -- "${input_file}")"
+        if [[ -z "${input_file}"  ]]; then
+          # Input file not found. Removing output file.
+          echo -n '   - Input file '
+          cecho 'magenta' -n "${short_input_file_base}"
+          echo ' disappeared.'
 
-        echo -n '     + Removing output file '
-        cecho 'magenta' -n "${short_output_file}"
-        echo -n '... '
+          echo -n '     + Removing output file '
+          cecho 'magenta' -n "${short_output_file}"
+          echo -n '... '
 
-        [[ -e "${output_file}" ]] && rm "${output_file}"
+          [[ -e "${output_file}" ]] && rm "${output_file}"
 
-        if [[ -e "${output_file}" ]]; then
-          cecho 'red' "Failed."
-        else
-          cecho 'green' "Done."
+          if [[ -e "${output_file}" ]]; then
+            cecho 'red' "Failed."
+          else
+            cecho 'green' "Done."
+          fi
         fi
-      fi
 
-    fi
-  done
+      fi
+    done
+  fi
 
   return 0
 } # sync_delete_album()
