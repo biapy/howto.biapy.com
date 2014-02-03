@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.0"
+version="1.4.1"
 
 script_name="$(basename -- "${0}")"
 
@@ -25,7 +25,7 @@ and keep the folder structure.
 Usage :
 
   ${script_name} [ --help ] [ --quiet ] [ --verbose ]
-      [ --input-path='/path/to/original/library' ]
+      --input-path='/path/to/original/library'
       [ --output-path='/path/to/converted/library' ]
       [ --input-format='*' ] [ --output-format='mp3' ]
       [ --bitrate='320k' | --quality=5 ]
@@ -35,9 +35,9 @@ Usage :
   Available options are :
     * --help | -h                   : Display this message.
     * --input-path  | --in  | -i    : Set the path to the source library
-                                      (default to current)
+                                      (mandatory)
     * --output-path | --out | -o    : Set the path to the target library
-                                      (default to current)
+                                      (default to source library)
     * --input-format  | --if        : Set the input format. Default to *.
     * --output-format | --of | -e   : Set the output format. Default to MP3.
     * --bitrate | -b                : Set the CBR bitrate. Default to 192k.
@@ -141,7 +141,7 @@ function check_binary() {
 
   [[ ${#} -ne 2 ]] && exit 1
 
-  local primary="$(echo "${1}" | cut -d ';' -f 1)"
+  local primary="$(echo -n "${1}" | cut -d ';' -f 1)"
   local binaries="";
 
   IFS=';' read -a binaries <<< "${1}"
@@ -368,7 +368,7 @@ function transfert_images() {
     local mp3_images_path="${5}"
 
     local vctemp="${output_file}.vctemp"
-    local output_filename="$(basename -z "${output_file}")"
+    local output_filename="$(basename -z -- "${output_file}")"
 
     cecho 'boldred' "Image transfert to '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
@@ -403,7 +403,7 @@ function transfert_images() {
 
   if [[ "${input_file_has_cover}" = 'Yes' ]]; then
     echo -n "     + Transfering cover art to "
-    cecho 'magenta' -n "$(basename -z "${output_file}")"
+    cecho 'magenta' -n "$(basename -z -- "${output_file}")"
     echo -n "... "
 
     # Setup trap since there is processing needed.
@@ -412,7 +412,7 @@ function transfert_images() {
 
     # Detect Cover MIME type.
     local image_mime_type="$(mediainfo --Inform="General;%Cover_Mime%" "${input_file}")"
-    local image_extension="$(echo "${image_mime_type}" | cut -d '/' -f 2)"
+    local image_extension="$(echo -n "${image_mime_type}" | cut -d '/' -f 2)"
 
     if [[ -z "${image_extension}" ]]; then
       if [[ "${metadata_block_picture}" != 'True' ]]; then
@@ -496,7 +496,7 @@ function transfert_images() {
                 if="${image_with_headers_path}" 2>'/dev/null')"
 
             # Now we try to detect extension and create the temporary image file.
-            image_extension="$(echo "${image_mime_type}" | cut -d '/' -f 2)"
+            image_extension="$(echo -n "${image_mime_type}" | cut -d '/' -f 2)"
             if [[ -z "${image_extension}" ]]; then
               # Unable to determine cover mime type.
               [[ -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
@@ -703,11 +703,11 @@ function convert_file() {
   local input_file="${1}"
 
   ## Build output file path based on input file path.
-  local input_file_path="$(dirname "${input_file}")"
-  local output_file_path="$(echo "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
-  local short_path="$(echo "${input_file_path}" | sed -e "s|^${input_path}||")"
+  local input_file_path="$(dirname -z -- "${input_file}")"
+  local output_file_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
+  local short_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}/||")"
 
-  local input_filename="$(basename -z "${input_file}")"
+  local input_filename="$(basename -z -- "${input_file}")"
   local output_filename="$(echo -n "${input_filename}" \
         | sed -e "s/\.[^\.]*$/\.${output_extension}/")"
   local input_file_mimetype="$(file --brief --mime-type "${input_file}")"
@@ -718,7 +718,8 @@ function convert_file() {
 
   local output_file="${output_file_path}/${output_filename}"
 
-  local short_input_file="${short_path}/${input_filename}"
+  #local short_input_file="${short_path}/${input_filename}"
+  local short_input_file="${input_filename}"
   local short_output_file="${output_filename}"
 
   # Generate a temporary filename for processing cache.
@@ -739,7 +740,7 @@ function convert_file() {
     local interrupt=${?}
     local output_file="${1}"
     local output_temp_file="${2}"
-    local output_filename="$(basename -z "${output_file}")"
+    local output_filename="$(basename -z -- "${output_file}")"
 
     cecho 'boldred' "Conversion of '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
@@ -797,7 +798,7 @@ function convert_file() {
     fi
 
     if [[ "${copy_needed}" = 'True' ]]; then
-      trap "exit_convert_file_on_signal '${output_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
       cp -a "${input_file}" "${output_file}"
       return $?
@@ -835,7 +836,7 @@ function convert_file() {
 
   if [[ "${conversion_needed}" = 'True' ]]; then
     if [[ -e "${input_file}" ]]; then
-      trap "exit_convert_file_on_signal '${output_file}' '${output_temp_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
       mkdir -p "${output_file_path}"
 
@@ -1060,10 +1061,10 @@ function replaygain_album() {
   local input_album_path="${4}"
 
   ## Build output album path based on input album path.
-  local output_album_path="$(echo "${input_album_path}" \
+  local output_album_path="$(echo -n "${input_album_path}" \
         | sed -e "s|^${input_path}|${output_path}|")"
 
-  local album_name="$(basename -z "${output_album_path}")"
+  local album_name="$(basename -z -- "${output_album_path}")"
 
   # test if output album path exists.
   [[ -d "${output_album_path}" ]] || return 1
@@ -1102,7 +1103,7 @@ function replaygain_album() {
                                     | cut --delimiter=' ' --fields=1)
           local faulty_file="${album_files[${faulty_file_index}]}"
           if [[ -n "${faulty_file}" ]]; then
-            local faulty_filename="$(basename -z "${faulty_file}")"
+            local faulty_filename="$(basename -z -- "${faulty_file}")"
 
             cecho 'red' -n 'File '
             cecho 'magenta' -n "${faulty_filename}"
@@ -1158,23 +1159,95 @@ export -f 'replaygain_album'
 
 
 
+# Delete files in output album when source is not found in input album.
+#
+# @param string $input_album_path The input album path.
+# @param string $input_path The input library path.
+# @param string $output_path The output library path.
+# @param string $lock_dir The mussync lock path.
+function sync_delete_album()
+{
+  [[ ${#} -ne 4 ]] && exit 1
+
+  local input_album_path="${1}"
+  local input_path="${2}"
+  local output_path="${3}"
+  local lock_dir="${4}"
+
+  ## Build output album path based on input album path.
+  local output_album_path="$(echo -n "${input_album_path}" \
+        | sed -e "s|^${input_path}|${output_path}|")"
+
+  find "${output_album_path}" -maxdepth 1 -type 'f' -print0 \
+    | grep --null-data -v "${lock_dir}" \
+    | while read -r -d '' 'output_file'; do
+
+    ## Build input file path based on output file path.
+    local output_file_path="$(dirname -z -- "${output_file}")"
+    local input_file_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
+    local short_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}||")"
+
+    local output_filename="$(basename -z -- "${output_file}")"
+    local input_filename_base="$(echo -n "${output_filename}" | sed -e "s/\.[^\.]*$//")"
+
+    local short_input_file_base="${input_filename_base}.*"
+    local short_output_file="${output_filename}"
+
+    # Test for file with same name (or without extension).
+    if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
+      local input_file="$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")"
+      local short_input_file="$(basename -z -- "${input_file}")"
+      if [[ -z "${input_file}"  ]]; then
+        # Input file not found. Removing output file.
+        echo -n '   - Input file '
+        cecho 'magenta' -n "${short_input_file_base}"
+        echo ' disappeared.'
+
+        echo -n '     + Removing output file '
+        cecho 'magenta' -n "${short_output_file}"
+        echo -n '... '
+
+        [[ -e "${output_file}" ]] && rm "${output_file}"
+
+        if [[ -e "${output_file}" ]]; then
+          cecho 'red' "Failed."
+        else
+          cecho 'green' "Done."
+        fi
+      fi
+
+    fi
+  done
+
+  return 0
+} # sync_delete_album()
+export -f 'sync_delete_album'
+
+
+
 # Convert an music album from input library to output library.
 #
 # @param string $threads The threads option for parallel.
 # @param string $replaygain True to apply album replay gain to converted files.
+# @param string $sync_delete True to delete files witch source is deleted from input album.
+# @param string $lock_dir The mussync lock path.
 # @param string $input_album_path The album path in input library.
 #
 # @return Exit with error if conversion failed.
 function convert_album() {
-  [[ ${#} -ne 3 ]] && exit 1
+  [[ ${#} -ne 5 ]] && exit 1
 
   # Enable the trapped errors to be passed to called functions.
   #set -o errtrace
 
   local threads="${1}"
   local replaygain="${2}"
-  local input_album_path="${3}"
-  local album_name="$(basename -z "${input_album_path}")"
+  local sync_delete="${3}"
+  local lock_dir="${4}"
+  local input_album_path="${5}"
+
+  local album_name="$(basename -z -- "${input_album_path}")"
+  local short_album_path="$(echo -n "${input_album_path}" | sed -e "s|^${input_path}/||")"
 
   #------------------------
   # Trap handling function
@@ -1184,7 +1257,7 @@ function convert_album() {
     local interrupt=${?}
 
     local input_album_path="${1}"
-    local album_name="$(basename -z "${input_album_path}")"
+    local album_name="$(basename -z -- "${input_album_path}")"
 
     cecho 'boldred' "Convertion of album '${album_name}' interrupted." >&2
 
@@ -1223,8 +1296,14 @@ function convert_album() {
   # Test if folder has files.
   if [[ ${#files[@]} -gt 0 ]]; then
     cecho 'bold' -n ' * Processing folder '
-    cecho 'magentabold' -n "${album_name}"
+    cecho 'magentabold' -n "${short_album_path}"
     cecho 'bold' '...'
+
+    # Delete files not matched in input library if option selected.
+    # We do clean up before generating new files.
+    if [[ "${sync_delete}" = 'True' ]]; then
+      sync_delete_album "${input_album_path}" "${input_path}" "${output_path}" "${lock_dir}"
+    fi
 
     # See http://mywiki.wooledge.org/ProcessManagement#I_want_to_process_a_bunch_of_files_in_parallel.2C_and_when_one_finishes.2C_I_want_to_start_the_next._And_I_want_to_make_sure_there_are_exactly_5_jobs_running_at_a_time.
     parallel --halt 2 --jobs "${threads}" --null 'convert_file' ::: "${files[@]}"
@@ -1246,9 +1325,10 @@ function convert_album() {
         # replaygain_album encountered a segfault.
         # Need another path to regenerated deleted faulty files.
 
-        convert_album "${threads}" "${replaygain}" "${input_album_path}"
+        convert_album "${threads}" "${replaygain}" 'False' "${lock_dir}" "${input_album_path}"
       fi
     fi
+
   fi
 
   return 0
@@ -1503,8 +1583,8 @@ check_binary "vorbisgain" "vorbisgain"
 # Application defaults
 
 # Export configuration for convert_file function.
-export input_path="$(pwd)"
-export output_path="$(pwd)"
+export input_path=""
+export output_path=""
 
 export input_format="*"
 export output_format="mp3"
@@ -1537,6 +1617,10 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
     'input-path' | 'in' | 'i' )
       realpath_check "${optarg}"
       input_path="${realpath}"
+
+      if [[ -z "${output_path}" ]]; then
+        output_path="${input_path}"
+      fi
       ;;
 
     'output-path' | 'out' | 'o' )
@@ -1612,13 +1696,18 @@ done
 
 shift $((optind-1))
 
+if [[ -z "${input_path}" ]]; then
+  cecho 'redbold' 'Error: no input path provided.' >&2
+  usage 1
+fi
+
 if [[ "${verbose}" = 'True' ]]; then
   quiet='False'
 fi
 
 # Render formats with lowercase.
-input_format="$(echo "${input_format}" | tr '[:upper:]' '[:lower:]')"
-output_format="$(echo "${output_format}" | tr '[:upper:]' '[:lower:]')"
+input_format="$(echo -n "${input_format}" | tr '[:upper:]' '[:lower:]')"
+output_format="$(echo -n "${output_format}" | tr '[:upper:]' '[:lower:]')"
 
 
 # TODO : implement a less basic extension detection based on format.
@@ -1664,51 +1753,10 @@ lock "${output_path}"
 # Process albums (aka. folders) in input library.
 if [[ "${quiet}" = 'True' ]]; then
   find "${input_path}" -type 'd' \
-    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" {} \; > '/dev/null'
+    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \; > '/dev/null'
 else
   find "${input_path}" -type 'd' \
-    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" {} \;
-fi
-
-###############################
-#
-# Check for removed input files.
-#
-################################
-if [[ "${sync_delete}" = 'True' ]]; then
-  find "${output_path}" -type 'f' \
-    | grep -v "${lock_dir}" \
-    | while read 'output_file'; do
-
-    ## Build input file path based on output file path.
-    output_file_path="$(dirname "${output_file}")"
-    input_file_path="$(echo "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
-    short_path="$(echo "${output_file_path}" | sed -e "s|^${output_path}||")"
-
-    output_filename="$(basename -z "${output_file}")"
-    input_filename_base="$(echo -n "${output_filename}" \
-        | sed -e "s/\.[^\.]*$//")"
-
-    short_input_file="${input_filename_base}.*"
-    short_output_file="${output_filename}"
-
-    # Test for file with same name (or without extension).
-    if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
-      if [[ -z "$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")" ]]; then
-        # Input file not found. Removing output file.
-        [[ "${quiet}" != 'True' ]] && echo -n "File '${short_input_file}' disappeared.
-   -> Removing '${short_output_file}'... "
-        [[ -e "${output_file}" ]] && rm "${output_file}"
-
-        if [[ -e "${output_file}" ]]; then
-          [[ "${quiet}" != 'True' ]] && echo "Failed."
-        else
-          [[ "${quiet}" != 'True' ]] && echo "Done."
-        fi
-
-      fi
-    fi
-  done
+    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \;
 fi
 
 unlock
