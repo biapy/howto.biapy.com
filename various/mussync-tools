@@ -12,9 +12,9 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.2"
+version="1.4.3"
 
-script_name="$(basename -- "${0}")"
+script_name="$(basename -z -- "${0}")"
 
 # Print this script help.
 function usage {
@@ -886,14 +886,17 @@ function convert_file() {
           esac
 
           local map_metadata=' 0:g'
+          local output_options=''
           # Specific needs for some input formats/
           case "${input_file_mimetype}" in
             'application/ogg' )
               # Get input metadata from first audio stream and direct it to global.
               # See https://bugs.kde.org/show_bug.cgi?id=306895
               map_metadata=' 0:s:0'
-              ;;
 
+              # Clean picture metadata.
+              output_options="${output_options} -metadata metadata_block_picture=''"
+              ;;
             * )
               # Do nothing.
               # map_metadata=' 0:g'
@@ -901,17 +904,16 @@ function convert_file() {
           esac
 
           # Specific needs for some output formats/
-          local output_options="-f ${output_format}"
           case "${output_format}" in
             'flac' )
               # No encoding options needed.
               encoding_options=""
-              # output_options="-f ${output_format}"
+              output_options="${output_options} -f ${output_format}"
               ;;
 
             'ogg' | 'vorbis' )
               # Set vorbis as default codec for ogg.
-              output_options="-codec:a libvorbis -f ogg"
+              output_options="${output_options} -codec:a libvorbis -f ogg"
               # Map input metadata to all audio streams in ogg container.
               # See https://bugs.kde.org/show_bug.cgi?id=306895
               if [[ "${input_file_mimetype}" = 'application/ogg' ]]; then
@@ -923,13 +925,13 @@ function convert_file() {
 
             'mp3' )
               # Force libmp3lame use.
-              output_options="-codec:a libmp3lame ${output_options}"
+              output_options="${output_options} -f ${output_format} -codec:a libmp3lame"
               ;;
 
             * )
-              # Do nothing.
+              # Add output format.
               # map_metadata="${map_metadata}"
-              # output_options="-f ${output_format}"
+              output_options="${output_options} -f ${output_format}"
               ;;
           esac
 
