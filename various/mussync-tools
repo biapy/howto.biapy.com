@@ -12,9 +12,37 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.3"
+version="1.4.4"
 
-script_name="$(basename -z -- "${0}")"
+
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+
+
+
+script_name="$(basename "${0}")"
+
+
 
 # Print this script help.
 function usage {
@@ -286,35 +314,68 @@ function cecho() {
   # remove color information from arguments.
   shift 1
 
-  # Color and weight definitions.
-  declare -A font
-  font['black']="$(tput 'setaf' 0)"
-  font['red']="$(tput 'setaf' 1)"
-  font['green']="$(tput 'setaf' 2)"
-  font['yellow']="$(tput 'setaf' 3)"
-  font['blue']="$(tput 'setaf' 4)"
-  font['magenta']="$(tput 'setaf' 5)"
-  font['cyan']="$(tput 'setaf' 6)"
-  font['white']="$(tput 'setaf' 7)"
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
 
-  font['bgBlack']="$(tput 'setaf' 0)"
-  font['bgRed']="$(tput 'setaf' 1)"
-  font['bgGreen']="$(tput 'setaf' 2)"
-  font['bgYellow']="$(tput 'setaf' 3)"
-  font['bgBlue']="$(tput 'setaf' 4)"
-  font['bgMagenta']="$(tput 'setaf' 5)"
-  font['bgCyan']="$(tput 'setaf' 6)"
-  font['bgWhite']="$(tput 'setaf' 7)"
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
 
-  font['bold']="$(tput 'bold')"
-  font['stout']="$(tput 'smso')" # Standout.
-  font['under']="$(tput 'smul')" # Underline.
-  font['blink']="$(tput 'blink')" # Blinking
-  font['italic']="$(tput 'sitm')"
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
 
-  # Parse the color string.
-  for key in "${!font[@]}"; do
-    [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
   done
 
   # Output the text.
@@ -368,7 +429,7 @@ function transfert_images() {
     local mp3_images_path="${5}"
 
     local vctemp="${output_file}.vctemp"
-    local output_filename="$(basename -z -- "${output_file}")"
+    local output_filename="$(basename "${output_file}")"
 
     cecho 'boldred' "Image transfert to '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
@@ -403,7 +464,7 @@ function transfert_images() {
 
   if [[ "${input_file_has_cover}" = 'Yes' ]]; then
     echo -n "     + Transfering cover art to "
-    cecho 'magenta' -n "$(basename -z -- "${output_file}")"
+    cecho 'magenta' -n "$(basename "${output_file}")"
     echo -n "... "
 
     # Setup trap since there is processing needed.
@@ -707,7 +768,7 @@ function convert_file() {
   local output_file_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
   local short_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}/||")"
 
-  local input_filename="$(basename -z -- "${input_file}")"
+  local input_filename="$(basename "${input_file}")"
   local output_filename="$(echo -n "${input_filename}" \
         | sed -e "s/\.[^\.]*$/\.${output_extension}/")"
   local input_file_mimetype="$(file --brief --mime-type "${input_file}")"
@@ -722,29 +783,18 @@ function convert_file() {
   local short_input_file="${input_filename}"
   local short_output_file="${output_filename}"
 
-  # Generate a temporary filename for processing cache.
-  # Use the same extension to make sure format detection work properly.
-
-  local output_temp_file="$(mktemp -t "tmp.XXXXXXXXXX")"
-  mv "${output_temp_file}" "${output_temp_file}.${output_extension}"
-  output_temp_file="${output_temp_file}.${output_extension}"
-
-
   #------------------------
   # Trap handling function
-  # use with: trap "exit_convert_file_on_signal '${output_file}' '${output_temp_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  # use with: trap "exit_convert_file_on_signal '${output_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
   #
   # @param string $output_file The converted/copied output file.
-  # @param string $output_temp_file The conversion temporary file.
   function exit_convert_file_on_signal() {
     local interrupt=${?}
     local output_file="${1}"
-    local output_temp_file="${2}"
-    local output_filename="$(basename -z -- "${output_file}")"
+    local output_filename="$(basename "${output_file}")"
 
     cecho 'boldred' "Conversion of '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
-    [[ -n "${output_temp_file}" && -e "${output_temp_file}" ]] && rm "${output_temp_file}"
 
     #local running_jobs=($(jobs -p))
     #if [[ -n "${running_jobs}" ]]; then
@@ -836,7 +886,7 @@ function convert_file() {
 
   if [[ "${conversion_needed}" = 'True' ]]; then
     if [[ -e "${input_file}" ]]; then
-      trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
       mkdir -p "${output_file_path}"
 
@@ -872,6 +922,7 @@ function convert_file() {
           fi
 
           local encoding_options=''
+          local pipe_mode='False'
           # Specific options for encoding mode.
           case "${encoding_mode}" in
             'CBR' )
@@ -926,6 +977,11 @@ function convert_file() {
             'mp3' )
               # Force libmp3lame use.
               output_options="${output_options} -f ${output_format} -codec:a libmp3lame"
+
+              if [[ ${encoding_mode} = 'CBR' ]]; then
+                pipe_mode='True'
+              fi
+
               ;;
 
             * )
@@ -935,25 +991,40 @@ function convert_file() {
               ;;
           esac
 
-          # Fix for mp3 cbr format, harmless for other formats.
-          # Write output on pipe and then directed to file.
-          # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
-          #
-          # Note: log output is alway on 2. avconv keep 1 empty.
-          if ! avconv -i "${input_file}" \
+          if [[ "${pipe_mode}" = 'True' ]]; then
+            # Fix for mp3 cbr format, breaks mp3 vbr files since
+            # Xing header writing needs seekable file..
+            # Write output on pipe and then directed to file.
+            # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
+            #
+            # Note: log output is alway on 2. avconv keep 1 empty.
+
+            avconv -i "${input_file}" \
                      -vn -sn \
                     -map_metadata${map_metadata} \
                     -loglevel "${log_level}" \
                     ${avconv_options} \
                     ${output_options} \
                     ${encoding_options} \
-                    - > "${output_temp_file}"; then
+                    - > "${output_file}";
+          else
+            avconv -i "${input_file}" \
+                     -vn -sn \
+                    -map_metadata${map_metadata} \
+                    -loglevel "${log_level}" \
+                    ${avconv_options} \
+                    ${output_options} \
+                    ${encoding_options} \
+                    "${output_file}";
+          fi
+
+
+          if [[ ${?} -ne 0 ]]; then
             cecho 'red' "Failed."
 
             # Force > output to be written on disk.
             sync
 
-            [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
             [[ -e "${output_file}" ]] && rm "${output_file}"
 
             return 1
@@ -961,67 +1032,6 @@ function convert_file() {
             # Force > output to be written on disk.
             sync
             cecho 'green' "Done."
-
-            # Test if fix for MP3 VBR is needed.
-            # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
-            if [[ "${output_format}" = 'mp3' && "${encoding_mode}" != 'CBR' ]]; then
-              local output_file_audio_format=""
-              local vbrfix_count=0
-              while [[ "${output_file_audio_format}" != 'MPEG Audio' ]]; do
-
-                # 5 tries maximum.
-                if [[ ${vbrfix_count} -gt 5 ]]; then
-                  [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
-                  [[ -e "${output_file}" ]] && rm "${output_file}"
-
-                  cecho 'red' -n "Failed."
-                  echo " Removing output file."
-                  return 1
-                  break;
-                fi
-
-                if [[ ${vbrfix_count} -gt 0 ]]; then
-                  cecho 'red' "Failed."
-                fi
-
-                let vbrfix_count+=1
-                echo -n '     + Fixing '
-                cecho 'magenta' -n "${short_output_file}"
-                echo -n " VBR header (try ${vbrfix_count})..."
-
-                # Output file is MP3 and VBR. Apply header fix.
-                # enter /tmp since vbrfix create log files in current directory (!)
-                pushd '/tmp' > '/dev/null'
-                if [[ "${verbose}" = 'True' ]]; then
-                  vbrfix "${output_temp_file}" "${output_file}"
-                else
-                  vbrfix "${output_temp_file}" "${output_file}" >'/dev/null' 2>&1
-                fi
-
-                if [[ ! ${?} ]]; then
-                  # failure. Deleting output file by security.
-                  rm "${output_file}"
-                  output_file_audio_format='False'
-                fi
-
-                popd > '/dev/null'
-
-                # Force output to be written on disk.
-                # May not be necessary here.
-                sync
-
-                # Check that vbrfix has done his job correctly.
-                [[ -e "${output_file}" ]] && output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
-              done
-
-              [[ -e "${output_file}" ]] && cecho 'green' "Done."
-            else
-              # Nothing to do but rename the file.
-              mv "${output_temp_file}" "${output_file}"
-            fi
-
-            # Delete temporary file if it is still present.
-            [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
 
             # Fetch cover art from input file.
             if [[ -e "${input_file}" && -e "${output_file}" ]]; then
@@ -1066,7 +1076,7 @@ function replaygain_album() {
   local output_album_path="$(echo -n "${input_album_path}" \
         | sed -e "s|^${input_path}|${output_path}|")"
 
-  local album_name="$(basename -z -- "${output_album_path}")"
+  local album_name="$(basename "${output_album_path}")"
 
   # test if output album path exists.
   [[ -d "${output_album_path}" ]] || return 1
@@ -1105,7 +1115,7 @@ function replaygain_album() {
                                     | cut --delimiter=' ' --fields=1)
           local faulty_file="${album_files[${faulty_file_index}]}"
           if [[ -n "${faulty_file}" ]]; then
-            local faulty_filename="$(basename -z -- "${faulty_file}")"
+            local faulty_filename="$(basename "${faulty_file}")"
 
             cecho 'red' -n 'File '
             cecho 'magenta' -n "${faulty_filename}"
@@ -1190,7 +1200,7 @@ function sync_delete_album()
       local input_file_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
       local short_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}||")"
 
-      local output_filename="$(basename -z -- "${output_file}")"
+      local output_filename="$(basename "${output_file}")"
       local input_filename_base="$(echo -n "${output_filename}" | sed -e "s/\.[^\.]*$//")"
 
       local short_input_file_base="${input_filename_base}.*"
@@ -1199,7 +1209,7 @@ function sync_delete_album()
       # Test for file with same name (or without extension).
       if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
         local input_file="$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")"
-        local short_input_file="$(basename -z -- "${input_file}")"
+        local short_input_file="$(basename "${input_file}")"
         if [[ -z "${input_file}"  ]]; then
           # Input file not found. Removing output file.
           echo -n '   - Input file '
@@ -1250,7 +1260,7 @@ function convert_album() {
   local lock_dir="${4}"
   local input_album_path="${5}"
 
-  local album_name="$(basename -z -- "${input_album_path}")"
+  local album_name="$(basename "${input_album_path}")"
   local short_album_path="$(echo -n "${input_album_path}" | sed -e "s|^${input_path}/||")"
 
   #------------------------
@@ -1261,7 +1271,7 @@ function convert_album() {
     local interrupt=${?}
 
     local input_album_path="${1}"
-    local album_name="$(basename -z -- "${input_album_path}")"
+    local album_name="$(basename "${input_album_path}")"
 
     cecho 'boldred' "Convertion of album '${album_name}' interrupted." >&2
 
@@ -1465,7 +1475,7 @@ function getoptex()
   [[ $optind -lt $# ]] || return 1
   shift $optind
   if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
-    optind=$[optind+1];
+    optind=$((optind+1));
     if [[ "$1" != "--" ]]; then
       local o
       o="-${1#-$optofs}"
@@ -1488,7 +1498,7 @@ function getoptex()
                 optopt="?"
                 return 1;
               fi
-              optind=$[optind+1] # skip option's argument
+              optind=$((optind+1)) # skip option's argument
               return 0
             ;;
             "--$optopt="*)
@@ -1514,13 +1524,13 @@ function getoptex()
                 optopt="?"
                 return 1
               fi
-              optind=$[optind+1] # skip option's argument
+              optind=$((optind+1)) # skip option's argument
               return 0
             ;;
             "-$optopt"*)
               if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
                 optofs="$optofs?" # move to the next option in the chain
-                optind=$[optind-1] # the chain still has other options
+                optind=$((optind-1)) # the chain still has other options
                 return 0
               else
                 unset optofs
@@ -1580,7 +1590,6 @@ check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
 check_binary "mediainfo" "mediainfo"
 check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
-check_binary "vbrfix" "vbrfix"
 check_binary "mp3gain" "mp3gain"
 check_binary "vorbisgain" "vorbisgain"
 
@@ -1710,8 +1719,8 @@ if [[ "${verbose}" = 'True' ]]; then
 fi
 
 # Render formats with lowercase.
-input_format="$(echo -n "${input_format}" | tr '[:upper:]' '[:lower:]')"
-output_format="$(echo -n "${output_format}" | tr '[:upper:]' '[:lower:]')"
+input_format="$(tr '[:upper:]' '[:lower:]' <<< "${input_format}")"
+output_format="$(tr '[:upper:]' '[:lower:]' <<< "${output_format}")"
 
 
 # TODO : implement a less basic extension detection based on format.
@@ -1719,6 +1728,7 @@ output_format="$(echo -n "${output_format}" | tr '[:upper:]' '[:lower:]')"
 export input_extension="${input_format}"
 case "${input_format}" in
   'vorbis' | 'ogg' )
+    input_format='vorbis'
     input_extension='ogg'
     ;;
 esac
