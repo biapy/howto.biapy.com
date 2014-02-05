@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.4"
+version="1.4.5"
 
 
 
@@ -192,19 +192,39 @@ function check_binary() {
 # Multi platform avconv support.
 #
 function avconv() {
-  if type "avconv" > '/dev/null'; then
+  if type 'avconv' > '/dev/null'; then
     command avconv "${@}"
     return ${?}
   fi
 
-  if type "ffmpeg" > '/dev/null'; then
+  if type 'ffmpeg' > '/dev/null'; then
     command ffmpeg "${@}"
     return ${?}
   fi
 
   exit 1
-}
+} # avconv()
 export -f 'avconv'
+
+
+
+#
+# Multi platform mp3gain support.
+#
+function mp3gain() {
+  if type 'mp3gain' > '/dev/null'; then
+    command mp3gain "${@}"
+    return ${?}
+  fi
+
+  if type 'aacgain' > '/dev/null'; then
+    command aacgain "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # mp3gain()
+export -f 'mp3gain'
 
 
 
@@ -1590,7 +1610,7 @@ check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
 check_binary "mediainfo" "mediainfo"
 check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
-check_binary "mp3gain" "mp3gain"
+check_binary "mp3gain;aacgain" "mp3gain"
 check_binary "vorbisgain" "vorbisgain"
 
 # Application defaults
