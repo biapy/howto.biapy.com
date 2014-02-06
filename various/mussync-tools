@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.8"
+version="1.4.9"
 
 
 
@@ -200,7 +200,7 @@ function check_binary() {
 
   # Test the binary presence.
   for binary in ${binaries[@]}; do
-    if type -f "${binary}" &> '/dev/null'; then
+    if type -f "${binary}" &>&-; then
       binary="$(command -v "${binary}")"
       return 0
     fi
@@ -216,12 +216,12 @@ function check_binary() {
 # Multi platform avconv support.
 #
 function avconv() {
-  if type -f 'avconv' &> '/dev/null'; then
+  if type -f 'avconv' &>&-; then
     command avconv "${@}"
     return ${?}
   fi
 
-  if type -f 'ffmpeg' &> '/dev/null'; then
+  if type -f 'ffmpeg' &>&-; then
     command ffmpeg "${@}"
     return ${?}
   fi
@@ -236,12 +236,12 @@ export -f 'avconv'
 # Multi platform mp3gain support.
 #
 function mp3gain() {
-  if type -f 'mp3gain' &> '/dev/null'; then
+  if type -f 'mp3gain' &>&-; then
     command mp3gain "${@}"
     return ${?}
   fi
 
-  if type -f 'aacgain' &> '/dev/null'; then
+  if type -f 'aacgain' &>&-; then
     command aacgain "${@}"
     return ${?}
   fi
@@ -298,17 +298,17 @@ export -f 'base64'
 # Multi platform eyed3 support.
 #
 function eyed3() {
-  if type -f 'eyeD3' &> '/dev/null'; then
+  if type -f 'eyeD3' &>&-; then
     eyeD3 "${@}"
     return ${?}
   fi
 
-  if type -f 'eyeD3-2.7' &> '/dev/null'; then
+  if type -f 'eyeD3-2.7' &>&-; then
     eyeD3-2.7 "${@}"
     return ${?}
   fi
 
-  if type -f 'eyeD3-2.6' &> '/dev/null'; then
+  if type -f 'eyeD3-2.6' &>&-; then
     eyeD3-2.6 "${@}"
     return ${?}
   fi
@@ -485,7 +485,7 @@ function transfert_images() {
     #local running_jobs=($(jobs -p))
     #if [[ -n "${running_jobs}" ]]; then
     #  cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
-    #  kill ${running_jobs[@]} 2>'/dev/null'
+    #  kill ${running_jobs[@]} 2>&-
     #fi
 
     if [[ ${interrupt} -eq 2 ]]; then
@@ -528,7 +528,7 @@ function transfert_images() {
     else
       # Create image temporary file. 
       image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
-      mv "${image_path}" "${image_path}.${image_extension}"
+      mv "${image_path}" "${image_path}.${image_extension}" 2>&-
       image_path="${image_path}.${image_extension}"
     fi
 
@@ -566,11 +566,11 @@ function transfert_images() {
         if [[ "${verbose}" = 'True' ]]; then
           eyed3 --write-images="${mp3_images_path}" "${input_file}"
         else
-          eyed3 --write-images="${mp3_images_path}" "${input_file}" &>'/dev/null'
+          eyed3 --write-images="${mp3_images_path}" "${input_file}" &>&-
         fi
 
         if [[ -e "${mp3_images_path}/FRONT_COVER.${image_extension}" ]]; then
-          mv "${mp3_images_path}/FRONT_COVER.${image_extension}" "${image_path}"
+          mv "${mp3_images_path}/FRONT_COVER.${image_extension}" "${image_path}" 2>&-
         fi
 
         rm -r "${mp3_images_path}"
@@ -593,12 +593,12 @@ function transfert_images() {
 
             # Fetch data lengths.
             local mime_length="$(dd skip=4 count=4 bs=1 \
-                if="${image_with_headers_path}" 2>'/dev/null' \
+                if="${image_with_headers_path}" 2>&- \
                 | xxd -p -g0 \
                 | xargs -IHEX printf "%d" '0xHEX')"
 
             image_mime_type="$(dd skip=8 count="${mime_length}" bs=1 \
-                if="${image_with_headers_path}" 2>'/dev/null')"
+                if="${image_with_headers_path}" 2>&-)"
 
             # Now we try to detect extension and create the temporary image file.
             image_extension="$(echo -n "${image_mime_type}" | cut -d '/' -f 2)"
@@ -611,17 +611,17 @@ function transfert_images() {
             fi
 
             image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
-            mv "${image_path}" "${image_path}.${image_extension}"
+            mv "${image_path}" "${image_path}.${image_extension}" 2>&-
             image_path="${image_path}.${image_extension}"
 
             local description_skip="$((8 + ${mime_length}))"
             local description_length="$(dd skip=${description_skip} count=4 bs=1 \
-                if="${image_with_headers_path}" 2>'/dev/null' \
+                if="${image_with_headers_path}" 2>&- \
                 | xxd -p -g0 \
                 | xargs -IHEX printf "%d" '0xHEX')"
             local image_length_skip="$((${description_skip} + ${description_length} + 20))"
             local image_length="$(dd skip=${image_length_skip} count=4 bs=1 \
-                if="${image_with_headers_path}" 2>'/dev/null' \
+                if="${image_with_headers_path}" 2>&- \
                 | xxd -p -g0 \
                 | xargs -IHEX printf "%d" '0xHEX')"
 
@@ -633,7 +633,7 @@ function transfert_images() {
                   if="${image_with_headers_path}" of="${image_path}"
             else
               dd skip=${image_skip} count=${image_length} bs=1 \
-                  if="${image_with_headers_path}" of="${image_path}" 2>'/dev/null'
+                  if="${image_with_headers_path}" of="${image_path}" 2>&-
              fi
 
             # Delete vorbiscomment raw file.
@@ -686,9 +686,9 @@ function transfert_images() {
             eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}"
           else
             # Remove existing images.
-            eyed3_remove_all "${output_file}" &>'/dev/null'
+            eyed3_remove_all "${output_file}" &>&-
             # Insert cover image from file
-            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" &>'/dev/null'
+            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" &>&-
           fi
           ;;
 
@@ -830,7 +830,7 @@ function convert_file() {
   # Generate a temporary filename for processing cache.
   # Use the same extension to make sure format detection work properly.
   local output_temp_file="$(mktemp -t "tmp.XXXXXXXXXX")"
-  mv "${output_temp_file}" "${output_temp_file}.${output_extension}"
+  mv "${output_temp_file}" "${output_temp_file}.${output_extension}" 2>&-
   output_temp_file="${output_temp_file}.${output_extension}"
 
   # Declare the variable for vbrfix temporary directory.
@@ -856,7 +856,7 @@ function convert_file() {
     #local running_jobs=($(jobs -p))
     #if [[ -n "${running_jobs}" ]]; then
     #  cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
-    #  kill ${running_jobs[@]} 2>'/dev/null'
+    #  kill ${running_jobs[@]} 2>&-
     #fi
 
     if [[ ${interrupt} -eq 2 ]]; then
@@ -1125,11 +1125,11 @@ function convert_file() {
 
                 # Output file is MP3 and VBR. Apply header fix.
                 # enter a temporary directory since vbrfix create log files in current directory (!)
-                pushd "${vbrfix_temp_path}" > '/dev/null'
+                pushd "${vbrfix_temp_path}" >&-
                 if [[ "${verbose}" = 'True' ]]; then
                   vbrfix "${output_temp_file}" "${vbrfix_output_file}"
                 else
-                  vbrfix "${output_temp_file}" "${vbrfix_output_file}" &>'/dev/null'
+                  vbrfix "${output_temp_file}" "${vbrfix_output_file}" &>&-
                 fi
 
                 if [[ ! ${?} ]]; then
@@ -1138,7 +1138,7 @@ function convert_file() {
                   output_file_audio_format='False'
                 fi
 
-                popd > '/dev/null'
+                popd >&-
 
                 # Force output to be written on disk.
                 # May not be necessary here.
@@ -1158,7 +1158,7 @@ function convert_file() {
               if [[ "${verbose}" = 'True' ]]; then
                 mp3val -f "${vbrfix_output_file}"
               else
-                mp3val -f "${vbrfix_output_file}" &>'/dev/null'
+                mp3val -f "${vbrfix_output_file}" &>&-
               fi
 
               # Check mp3val result.
@@ -1167,7 +1167,7 @@ function convert_file() {
                 rm "${vbrfix_output_file}"
                 [[ -e "${output_file}" ]] && cecho 'red' "Failed."
               else
-                mv "${vbrfix_output_file}" "${output_file}"
+                mv "${vbrfix_output_file}" "${output_file}" 2>&-
                 [[ -e "${output_file}" ]] && cecho 'green' "Done."
               fi
 
@@ -1175,7 +1175,7 @@ function convert_file() {
               [[ -d "${vbrfix_temp_path}" ]] && rm -r "${vbrfix_temp_path}"
             else
               # Nothing to do but rename the file.
-              mv "${output_temp_file}" "${output_file}"
+              mv "${output_temp_file}" "${output_file}" 2>&-
             fi
 
             # Delete temporary file if it is still present.
@@ -1249,7 +1249,7 @@ function replaygain_album() {
       if [[ "${verbose}" = 'True' ]]; then
         mp3gain -a -t -p -k -f -q "${album_files[@]}" | tee "${processed_list_log_path}"
       else
-        mp3gain -a -t -p -k -f -q "${album_files[@]}" > "${processed_list_log_path}" 2>'/dev/null'
+        mp3gain -a -t -p -k -f -q "${album_files[@]}" > "${processed_list_log_path}" 2>&-
       fi
 
       local error_code=${?}
@@ -1426,7 +1426,7 @@ function convert_album() {
     local running_jobs=($(jobs -p))
     if [[ -n "${running_jobs}" ]]; then
       # cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
-      kill ${running_jobs[@]} 2>'/dev/null'
+      kill ${running_jobs[@]} 2>&-
     fi
 
     if [[ ${interrupt} -eq 2 ]]; then
@@ -1524,7 +1524,7 @@ function exit_on_signal() {
   local running_jobs=($(jobs -p))
   if [[ -n "${running_jobs}" ]]; then
     #cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
-    kill ${running_jobs[@]} 2>'/dev/null'
+    kill ${running_jobs[@]} 2>&-
   fi
   # remove lock file.
   [[ -n "${lock_path}" && -d "${lock_path}" ]] && rm -rf "${lock_path}"
@@ -1568,7 +1568,7 @@ function lock {
     lock_path="${base_lock_path}/${lock_dir}"
     local pid_path="${lock_path}/${pid_file}"
 
-    if mkdir "${lock_path}" &>'/dev/null'; then
+    if mkdir "${lock_path}" &>&-; then
         # lock succeeded, store the PID
         echo "$$" >"${pid_path}"
 
@@ -1580,7 +1580,7 @@ function lock {
         return ${ENO_SUCCESS}
     else
         # lock failed, now check if the other PID is alive
-        other_pid="$(cat "${pid_path}" 2>'/dev/null')"
+        other_pid="$(cat "${pid_path}" 2>&-)"
 
         # if cat wasn't able to read the file anymore, another instance probably is
         # about to remove the lock -- exit, we're *still* locked
@@ -1591,7 +1591,7 @@ function lock {
             exit ${ENO_LOCKFAIL}
         fi
 
-        if ! kill -0 ${other_pid} &>'/dev/null'; then
+        if ! kill -0 ${other_pid} &>&-; then
             # lock is stale, remove it and restart
             unlock
             lock "${base_lock_path}"
@@ -1609,7 +1609,7 @@ function lock {
 # 
 # @return unlock (rm) error code.
 function unlock {
-    [[ -d "${lock_path}" ]] && rm -r "${lock_path}" &>'/dev/null'
+    [[ -d "${lock_path}" ]] && rm -r "${lock_path}" &>&-
     return $?
 } # unlock()
 
@@ -1922,7 +1922,7 @@ lock "${output_path}"
 # Process albums (aka. folders) in input library.
 if [[ "${quiet}" = 'True' ]]; then
   find "${input_path}" -type 'd' \
-    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \; > '/dev/null'
+    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \; >&-
 else
   find "${input_path}" -type 'd' \
     -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \;
