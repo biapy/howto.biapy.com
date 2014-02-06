@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.7"
+version="1.4.8"
 
 
 
@@ -566,7 +566,7 @@ function transfert_images() {
         if [[ "${verbose}" = 'True' ]]; then
           eyed3 --write-images="${mp3_images_path}" "${input_file}"
         else
-          eyed3 --write-images="${mp3_images_path}" "${input_file}" > '/dev/null' 2>&1
+          eyed3 --write-images="${mp3_images_path}" "${input_file}" &>'/dev/null'
         fi
 
         if [[ -e "${mp3_images_path}/FRONT_COVER.${image_extension}" ]]; then
@@ -686,9 +686,9 @@ function transfert_images() {
             eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}"
           else
             # Remove existing images.
-            eyed3_remove_all "${output_file}" > '/dev/null' 2>&1
+            eyed3_remove_all "${output_file}" &>'/dev/null'
             # Insert cover image from file
-            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" > '/dev/null' 2>&1
+            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" &>'/dev/null'
           fi
           ;;
 
@@ -827,18 +827,31 @@ function convert_file() {
   local short_input_file="${input_filename}"
   local short_output_file="${output_filename}"
 
+  # Generate a temporary filename for processing cache.
+  # Use the same extension to make sure format detection work properly.
+  local output_temp_file="$(mktemp -t "tmp.XXXXXXXXXX")"
+  mv "${output_temp_file}" "${output_temp_file}.${output_extension}"
+  output_temp_file="${output_temp_file}.${output_extension}"
+
+  # Declare the variable for vbrfix temporary directory.
+  local vbrfix_temp_path=''
+
   #------------------------
   # Trap handling function
-  # use with: trap "exit_convert_file_on_signal '${output_file}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  # use with: trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}" "${vbrfix_temp_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
   #
   # @param string $output_file The converted/copied output file.
   function exit_convert_file_on_signal() {
     local interrupt=${?}
     local output_file="${1}"
+    local output_temp_path="${2}"
+    local vbrfix_temp_path="${3}"
     local output_filename="$(basename "${output_file}")"
 
     cecho 'boldred' "Conversion of '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
+    [[ -n "${output_temp_file}" && -e "${output_temp_file}" ]] && rm "${output_temp_file}"
+    [[ -n "${vbrfix_temp_path}" && -d "${vbrfix_temp_path}" ]] && rm -r "${vbrfix_temp_path}"
 
     #local running_jobs=($(jobs -p))
     #if [[ -n "${running_jobs}" ]]; then
@@ -892,7 +905,7 @@ function convert_file() {
     fi
 
     if [[ "${copy_needed}" = 'True' ]]; then
-      trap 'exit_convert_file_on_signal "${output_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}" "${vbrfix_temp_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
       cp -a "${input_file}" "${output_file}"
       return $?
@@ -930,7 +943,7 @@ function convert_file() {
 
   if [[ "${conversion_needed}" = 'True' ]]; then
     if [[ -e "${input_file}" ]]; then
-      trap 'exit_convert_file_on_signal "${output_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
       mkdir -p "${output_file_path}"
 
@@ -1050,16 +1063,16 @@ function convert_file() {
                     ${avconv_options} \
                     ${output_options} \
                     ${encoding_options} \
-                    - > "${output_file}";
+                    - > "${output_temp_file}";
           else
-            avconv -i "${input_file}" \
+            avconv -y -i "${input_file}" \
                      -vn -sn \
                     -map_metadata${map_metadata} \
                     -loglevel "${log_level}" \
                     ${avconv_options} \
                     ${output_options} \
                     ${encoding_options} \
-                    "${output_file}";
+                    "${output_temp_file}";
           fi
 
 
@@ -1070,12 +1083,103 @@ function convert_file() {
             sync
 
             [[ -e "${output_file}" ]] && rm "${output_file}"
+            [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
 
             return 1
           else
             # Force > output to be written on disk.
             sync
             cecho 'green' "Done."
+
+
+            # Test if fix for MP3 VBR is needed.
+            # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
+            if [[ "${output_format}" = 'mp3' && "${encoding_mode}" != 'CBR' ]]; then
+              local output_file_audio_format=""
+              local vbrfix_count=0
+
+              vbrfix_temp_path="$(mktemp -d -t "tmp.XXXXXXXXXX")"
+
+              local vbrfix_output_file="${vbrfix_temp_path}/${output_filename}"
+              while [[ "${output_file_audio_format}" != 'MPEG Audio' ]]; do
+
+                # 5 tries maximum.
+                if [[ ${vbrfix_count} -gt 5 ]]; then
+                  [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
+                  [[ -e "${vbrfix_output_file}" ]] && rm "${vbrfix_output_file}"
+
+                  cecho 'red' -n "Failed."
+                  echo " Removing output file."
+                  return 1
+                  break;
+                fi
+
+                if [[ ${vbrfix_count} -gt 0 ]]; then
+                  cecho 'red' "Failed."
+                fi
+
+                let vbrfix_count+=1
+                echo -n '     + Fixing '
+                cecho 'magenta' -n "${short_output_file}"
+                echo -n " VBR header (try ${vbrfix_count})..."
+
+                # Output file is MP3 and VBR. Apply header fix.
+                # enter a temporary directory since vbrfix create log files in current directory (!)
+                pushd "${vbrfix_temp_path}" > '/dev/null'
+                if [[ "${verbose}" = 'True' ]]; then
+                  vbrfix "${output_temp_file}" "${vbrfix_output_file}"
+                else
+                  vbrfix "${output_temp_file}" "${vbrfix_output_file}" &>'/dev/null'
+                fi
+
+                if [[ ! ${?} ]]; then
+                  # failure. Deleting output file by security.
+                  rm "${vbrfix_output_file}"
+                  output_file_audio_format='False'
+                fi
+
+                popd > '/dev/null'
+
+                # Force output to be written on disk.
+                # May not be necessary here.
+                sync
+
+                # Check that vbrfix has done his job correctly.
+                [[ -e "${vbrfix_output_file}" ]] \
+                    && output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${vbrfix_output_file}")"
+              done
+              [[ -e "${vbrfix_output_file}" ]] && cecho 'green' "Done."
+
+              # Use mp3val to cleanup vbrfix incorrect Xing header.
+              echo -n '     + Cleaning up '
+              cecho 'magenta' -n "${short_output_file}"
+              echo -n " VBR header..."
+
+              if [[ "${verbose}" = 'True' ]]; then
+                mp3val -f "${vbrfix_output_file}"
+              else
+                mp3val -f "${vbrfix_output_file}" &>'/dev/null'
+              fi
+
+              # Check mp3val result.
+              if [[ ! ${?} ]]; then
+                # failure. Deleting output file by security.
+                rm "${vbrfix_output_file}"
+                [[ -e "${output_file}" ]] && cecho 'red' "Failed."
+              else
+                mv "${vbrfix_output_file}" "${output_file}"
+                [[ -e "${output_file}" ]] && cecho 'green' "Done."
+              fi
+
+              # cleanup vbrfix temporary path.
+              [[ -d "${vbrfix_temp_path}" ]] && rm -r "${vbrfix_temp_path}"
+            else
+              # Nothing to do but rename the file.
+              mv "${output_temp_file}" "${output_file}"
+            fi
+
+            # Delete temporary file if it is still present.
+            [[ -e "${output_temp_file}" ]] && rm "${output_temp_file}"
 
             # Fetch cover art from input file.
             if [[ -e "${input_file}" && -e "${output_file}" ]]; then
@@ -1641,6 +1745,8 @@ check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
 check_binary "mp3gain;aacgain" "mp3gain"
 check_binary "vorbisgain" "vorbisgain"
+check_binary "vbrfix" "vbrfix"
+check_binary "mp3val" "mp3val"
 
 # Application defaults
 
