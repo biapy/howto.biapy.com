@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.6"
+version="1.4.7"
 
 
 
@@ -200,7 +200,7 @@ function check_binary() {
 
   # Test the binary presence.
   for binary in ${binaries[@]}; do
-    if type "${binary}" > '/dev/null'; then
+    if type -f "${binary}" &> '/dev/null'; then
       binary="$(command -v "${binary}")"
       return 0
     fi
@@ -216,12 +216,12 @@ function check_binary() {
 # Multi platform avconv support.
 #
 function avconv() {
-  if type 'avconv' > '/dev/null'; then
+  if type -f 'avconv' &> '/dev/null'; then
     command avconv "${@}"
     return ${?}
   fi
 
-  if type 'ffmpeg' > '/dev/null'; then
+  if type -f 'ffmpeg' &> '/dev/null'; then
     command ffmpeg "${@}"
     return ${?}
   fi
@@ -236,12 +236,12 @@ export -f 'avconv'
 # Multi platform mp3gain support.
 #
 function mp3gain() {
-  if type 'mp3gain' > '/dev/null'; then
+  if type -f 'mp3gain' &> '/dev/null'; then
     command mp3gain "${@}"
     return ${?}
   fi
 
-  if type 'aacgain' > '/dev/null'; then
+  if type -f 'aacgain' &> '/dev/null'; then
     command aacgain "${@}"
     return ${?}
   fi
@@ -298,17 +298,17 @@ export -f 'base64'
 # Multi platform eyed3 support.
 #
 function eyed3() {
-  if type 'eyeD3' > '/dev/null'; then
+  if type -f 'eyeD3' &> '/dev/null'; then
     eyeD3 "${@}"
     return ${?}
   fi
 
-  if type 'eyeD3-2.7' > '/dev/null'; then
+  if type -f 'eyeD3-2.7' &> '/dev/null'; then
     eyeD3-2.7 "${@}"
     return ${?}
   fi
 
-  if type 'eyeD3-2.6' > '/dev/null'; then
+  if type -f 'eyeD3-2.6' &> '/dev/null'; then
     eyeD3-2.6 "${@}"
     return ${?}
   fi
@@ -1340,12 +1340,17 @@ function convert_album() {
 
   # Find folder files and put them in a array.
   # See: http://mywiki.wooledge.org/BashFAQ/020
+  local file_list_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+  find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
+              | sort --zero-terminated > "${file_list_path}"
+
   unset files
   declare -a files
   while read -d '' -r; do
     files+=("${REPLY}")
-  done < <(find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
-              | sort --zero-terminated)
+  done < "${file_list_path}"
+
+  test -e "${file_list_path}" && rm "${file_list_path}"
 
   # see : http://mywiki.wooledge.org/UsingFind
   # Note to self: when -print0 option is not available.
