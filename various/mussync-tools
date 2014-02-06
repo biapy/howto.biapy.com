@@ -1125,7 +1125,7 @@ function convert_file() {
 
                 # Output file is MP3 and VBR. Apply header fix.
                 # enter a temporary directory since vbrfix create log files in current directory (!)
-                pushd "${vbrfix_temp_path}" 1>&-
+                pushd "${vbrfix_temp_path}" >'/dev/null'
                 if [[ "${verbose}" = 'True' ]]; then
                   vbrfix "${output_temp_file}" "${vbrfix_output_file}"
                 else
@@ -1138,7 +1138,7 @@ function convert_file() {
                   output_file_audio_format='False'
                 fi
 
-                popd 1>&-
+                popd >'/dev/null'
 
                 # Force output to be written on disk.
                 # May not be necessary here.
@@ -1922,7 +1922,7 @@ lock "${output_path}"
 # Process albums (aka. folders) in input library.
 if [[ "${quiet}" = 'True' ]]; then
   find "${input_path}" -type 'd' \
-    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \; 1>&-
+    -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \; >'/dev/null'
 else
   find "${input_path}" -type 'd' \
     -exec bash -c 'convert_album "${@}"' _ "${threads}" "${replaygain}" "${sync_delete}" "${lock_dir}" {} \;
