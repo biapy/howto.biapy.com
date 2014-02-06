@@ -200,7 +200,7 @@ function check_binary() {
 
   # Test the binary presence.
   for binary in ${binaries[@]}; do
-    if type -f "${binary}" &>&-; then
+    if type -f "${binary}" &>'/dev/null'; then
       binary="$(command -v "${binary}")"
       return 0
     fi
@@ -216,12 +216,12 @@ function check_binary() {
 # Multi platform avconv support.
 #
 function avconv() {
-  if type -f 'avconv' &>&-; then
+  if type -f 'avconv' &>'/dev/null'; then
     command avconv "${@}"
     return ${?}
   fi
 
-  if type -f 'ffmpeg' &>&-; then
+  if type -f 'ffmpeg' &>'/dev/null'; then
     command ffmpeg "${@}"
     return ${?}
   fi
@@ -236,12 +236,12 @@ export -f 'avconv'
 # Multi platform mp3gain support.
 #
 function mp3gain() {
-  if type -f 'mp3gain' &>&-; then
+  if type -f 'mp3gain' &>'/dev/null'; then
     command mp3gain "${@}"
     return ${?}
   fi
 
-  if type -f 'aacgain' &>&-; then
+  if type -f 'aacgain' &>'/dev/null'; then
     command aacgain "${@}"
     return ${?}
   fi
@@ -298,17 +298,17 @@ export -f 'base64'
 # Multi platform eyed3 support.
 #
 function eyed3() {
-  if type -f 'eyeD3' &>&-; then
+  if type -f 'eyeD3' &>'/dev/null'; then
     eyeD3 "${@}"
     return ${?}
   fi
 
-  if type -f 'eyeD3-2.7' &>&-; then
+  if type -f 'eyeD3-2.7' &>'/dev/null'; then
     eyeD3-2.7 "${@}"
     return ${?}
   fi
 
-  if type -f 'eyeD3-2.6' &>&-; then
+  if type -f 'eyeD3-2.6' &>'/dev/null'; then
     eyeD3-2.6 "${@}"
     return ${?}
   fi
@@ -566,7 +566,7 @@ function transfert_images() {
         if [[ "${verbose}" = 'True' ]]; then
           eyed3 --write-images="${mp3_images_path}" "${input_file}"
         else
-          eyed3 --write-images="${mp3_images_path}" "${input_file}" &>&-
+          eyed3 --write-images="${mp3_images_path}" "${input_file}" &>'/dev/null'
         fi
 
         if [[ -e "${mp3_images_path}/FRONT_COVER.${image_extension}" ]]; then
@@ -686,9 +686,9 @@ function transfert_images() {
             eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}"
           else
             # Remove existing images.
-            eyed3_remove_all "${output_file}" &>&-
+            eyed3_remove_all "${output_file}" &>'/dev/null'
             # Insert cover image from file
-            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" &>&-
+            eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" &>'/dev/null'
           fi
           ;;
 
@@ -1129,7 +1129,7 @@ function convert_file() {
                 if [[ "${verbose}" = 'True' ]]; then
                   vbrfix "${output_temp_file}" "${vbrfix_output_file}"
                 else
-                  vbrfix "${output_temp_file}" "${vbrfix_output_file}" &>&-
+                  vbrfix "${output_temp_file}" "${vbrfix_output_file}" &>'/dev/null'
                 fi
 
                 if [[ ! ${?} ]]; then
@@ -1158,7 +1158,7 @@ function convert_file() {
               if [[ "${verbose}" = 'True' ]]; then
                 mp3val -f "${vbrfix_output_file}"
               else
-                mp3val -f "${vbrfix_output_file}" &>&-
+                mp3val -f "${vbrfix_output_file}" &>'/dev/null'
               fi
 
               # Check mp3val result.
@@ -1568,7 +1568,7 @@ function lock {
     lock_path="${base_lock_path}/${lock_dir}"
     local pid_path="${lock_path}/${pid_file}"
 
-    if mkdir "${lock_path}" &>&-; then
+    if mkdir "${lock_path}" &>'/dev/null'; then
         # lock succeeded, store the PID
         echo "$$" >"${pid_path}"
 
@@ -1591,7 +1591,7 @@ function lock {
             exit ${ENO_LOCKFAIL}
         fi
 
-        if ! kill -0 ${other_pid} &>&-; then
+        if ! kill -0 ${other_pid} &>'/dev/null'; then
             # lock is stale, remove it and restart
             unlock
             lock "${base_lock_path}"
@@ -1609,7 +1609,7 @@ function lock {
 # 
 # @return unlock (rm) error code.
 function unlock {
-    [[ -d "${lock_path}" ]] && rm -r "${lock_path}" &>&-
+    [[ -d "${lock_path}" ]] && rm -r "${lock_path}" &>'/dev/null'
     return $?
 } # unlock()
 
