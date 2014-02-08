@@ -1,66 +1,66 @@
 #!/bin/bash
 # Check active SSL certificates expiration dates.
-# See: http://howto.biapy.com/debian-gnu-linux/serveurs/http/mettre-en-place-une-notification-par-email-de-larrivee-a-expiration-des-certificats-ssl-tls
+# See (fr): https://howto.biapy.com/debian-gnu-linux/serveurs/http/mettre-en-place-une-notification-par-email-de-larrivee-a-expiration-des-certificats-ssl-tls
+# See (en): https://howto.biapy.com/en/debian-gnu-linux/servers/http/setup-an-email-alert-on-ssl-tls-certificate-expiration
+version="1.1.0"
 
 # Email to witch alerts are sent.
 # by default, the root account
-ALERT_EMAIL="root"
+alert_email="root"
 
 # Check for ssl-cert-check presence
-SSL_CERT_CHECK="$(command which ssl-cert-check)"
-
-if [ -z "${SSL_CERT_CHECK}" ]; then
+if type -f 'ssl-cert-check' &>'/dev/null' then
   echo "Error: ssl-cert-check is not available on the system."
   exit 1
 fi
 
-APACHE2_CERTS=""
+apache2_certs=""
 if [ -e '/etc/apache2/sites-enabled' ]; then
-  APACHE2_CERTS="$(command grep -r --no-filename 'SSLCertificateFile' '/etc/apache2/sites-enabled/' \
-     | command egrep -v '#' \
-     | command sed -e 's/^.*SSLCertificateFile//' -e 's/^[\t ]*["]*//' -e 's/["]*[\t ]*$//')"
+  apache2_certs="$(grep -r --no-filename 'SSLCertificateFile' '/etc/apache2/sites-enabled/' \
+     | egrep -v '#' \
+     | sed -e 's/^.*SSLCertificateFile//' -e 's/^[\t ]*["]*//' -e 's/["]*[\t ]*$//')"
 fi
 
-LIGHTTPD_CERTS=""
+lighttpd_certs=""
 if [ -e '/etc/lighttpd/conf-enabled' ]; then
-  LIGHTTPD_CERTS="$(command grep -r --no-filename 'ssl.pemfile' '/etc/lighttpd/conf-enabled/' \
-     | command egrep -v '#' \
-     | command sed -e 's/^.*ssl.pemfile.*=//' -e 's/^[\t ]*["]*//' -e 's/["]*[\t ]*$//')"
+  lighttpd_certs="$(grep -r --no-filename 'ssl.pemfile' '/etc/lighttpd/conf-enabled/' \
+     | egrep -v '#' \
+     | sed -e 's/^.*ssl.pemfile.*=//' -e 's/^[\t ]*["]*//' -e 's/["]*[\t ]*$//')"
 fi
 
-CYRUS_CERTS=""
+cyrus_certs=""
 if [ -e '/etc/imapd.conf' -a -e '/etc/cyrus.conf' ]; then
-  CYRUS_CERTS="$(command grep --no-filename '^tls_cert_file:' '/etc/imapd.conf' \
-     | command sed -e 's/^.*tls_cert_file://' -e 's/^[\t ]*//' -e 's/[\t ]*$//')"
+  cyrus_certs="$(grep --no-filename '^tls_cert_file:' '/etc/imapd.conf' \
+     | sed -e 's/^.*tls_cert_file://' -e 's/^[\t ]*//' -e 's/[\t ]*$//')"
 fi
 
-EXIM4_CERTS=""
+exim4_certs=""
 if [ -d '/etc/exim4' ]; then
-  EXIM4_CERTS="/etc/exim4/exim.crt
-$(command grep -r --no-filename '^MAIN_TLS_CERT' '/etc/exim4/' \
-     | command egrep -v 'CONFDIR' \
-     | command sed -e 's/^.*MAIN_TLS_CERT.*=//' -e 's/^[\t ]*//' -e 's/[\t ]*$//')"
+  exim4_certs="/etc/exim4/exim.crt
+$(grep -r --no-filename '^MAIN_TLS_CERT' '/etc/exim4/' \
+     | egrep -v 'CONFDIR' \
+     | sed -e 's/^.*MAIN_TLS_CERT.*=//' -e 's/^[\t ]*//' -e 's/[\t ]*$//')"
 fi
 
-VSFTPD_CERTS=""
+vsftpd_certs=""
 rsa_cert_file=
 if [ -e '/etc/vsftpd.conf' ]; then
-  VSFTPD_CERTS="$(command grep --no-filename '^rsa_cert_file' '/etc/vsftpd.conf' \
-     | command sed -e 's/^.*rsa_cert_file.*=//' -e 's/^[\t ]*//' -e 's/[\t ]*$//')"
+  vsftpd_certs="$(grep --no-filename '^rsa_cert_file' '/etc/vsftpd.conf' \
+     | sed -e 's/^.*rsa_cert_file.*=//' -e 's/^[\t ]*//' -e 's/[\t ]*$//')"
 fi
 
-ACTIVE_CERTS="$(echo "${APACHE2_CERTS}
-${LIGHTTPD_CERTS}
-${CYRUS_CERTS}
-${EXIM4_CERTS}
-${VSFTPD_CERTS}" \
+active_certs="$(echo "${apache2_certs}
+${lighttpd_certs}
+${cyrus_certs}
+${exim4_certs}
+${vsftpd_certs}" \
     | sed -e '/^$/d' \
-    | command sort \
-    | command uniq)"
+    | sort \
+    | uniq)"
 
-for CERT in ${ACTIVE_CERTS}; do
-  if [ -e "${CERT}" ]; then
-    ${SSL_CERT_CHECK} -qac "${CERT}" -e "${ALERT_EMAIL}"
+for cert in ${active_certs}; do
+  if [ -e "${cert}" ]; then
+    ssl-cert-check -qac "${cert}" -e "${alert_email}"
   fi
 done
 
