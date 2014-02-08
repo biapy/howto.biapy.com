@@ -8,9 +8,15 @@
 #
 # Author: Matty < matty91 at gmail dot com >
 #
-# Current Version: 3.26
+# Current Version: 3.27
 #
 # Revision History:
+#
+# Version 3.27
+#  - Allow white spaces to exist in the certificate file list
+#  - Add an additional check to pick up bad / non-existent certificates
+#  - Add a check to look for the existence of a mail program. Error out if it's not present.
+#  - Enable the TLS -servername extension by default - Juergen Knaack & Johan Denoyer
 #
 # Version 3.26
 #  - Allow the certificate type (PEM, DER, NET) to be passed on the command line
@@ -154,7 +160,7 @@
 #  Version 1.0
 #      Initial Release
 #
-# Last Updated: 04-12-2012
+# Last Updated: 02-27-2013
 #
 # Purpose: 
 #  ssl-cert-check checks to see if a digital certificate in X.509 format
@@ -222,6 +228,9 @@ CERTTYPE="pem"
 # Protocol version to use (cmdline: -v)
 VERSION=""
 
+# Send along the servername when TLS is used
+TLSSERVERNAME="FALSE"
+
 # Location of system binaries
 AWK=$(which awk)
 DATE=$(which date)
@@ -230,6 +239,26 @@ OPENSSL=$(which openssl)
 PRINTF=$(which printf)
 SED=$(which sed)
 MKTEMP=$(which mktemp)
+
+# Try to find a mail client
+if [ -f /usr/bin/mailx ]
+then
+    MAIL="/usr/bin/mailx"
+elif [ -f /bin/mail ]
+then
+    MAIL="/bin/mail"
+elif [ -f /usr/bin/mail ]
+then
+    MAIL="/usr/bin/mail"
+elif [ -f /sbin/mail ]
+then
+    MAIL="/sbin/mail"
+elif [ -f /usr/sbin/mail ]
+then
+    MAIL="/usr/sbin/mail"
+else
+    MAIL="cantfindit"
+fi
 
 # Return code used by nagios. Initialize to 0.
 RETCODE=0
@@ -449,6 +478,11 @@ check_server_status() {
         VER="-${VERSION}"
     fi
 
+    if [ "${TLSSERVERNAME}" = "TRUE" ]
+    then
+         TLSFLAG="${TLSFLAG} -servername $1"
+    fi
+
     echo "" | ${OPENSSL} s_client ${VER} -connect ${1}:${2} ${TLSFLAG} 2> ${ERROR_TMP} 1> ${CERT_TMP}
 
     if ${GREP} -i  "Connection refused" ${ERROR_TMP} > /dev/null
@@ -480,7 +514,7 @@ check_server_status() {
     then
         prints ${1} ${2} "Connection timed out" "Unknown"  
         RETCODE=3
-
+    
     else
         check_file_status ${CERT_TMP} $1 $2
     fi
@@ -500,14 +534,14 @@ check_file_status() {
     PORT=${3}
 
     ### Check to make sure the certificate file exists
-    if [ ! -r ${CERTFILE} ] || [ -z ${CERTFILE} ]
+    if [ ! -r ${CERTFILE} ] || [ ! -s ${CERTFILE} ]
     then
         echo "ERROR: The file named ${CERTFILE} is unreadable or doesn't exist"
         echo "ERROR: Please check to make sure the certificate for ${HOST}:${PORT} is valid"
         RETCODE=1
         return
     fi
-      
+
     ### Grab the expiration date from the X.509 certificate
     if [ "${PKCSDBPASSWD}" != "" ]
     then
@@ -615,19 +649,6 @@ do
     esac
 done
 
-if [ -f /usr/bin/mailx ]
-then
-    MAIL="/usr/bin/mailx"
-else
-    if [ "${ALARM}" == "FALSE" ]
-    then
-        MAIL=$(which mail 2>/dev/null)
-    else
-        MAIL=$(which mail)
-    fi
-fi
-
-
 ### Check to make sure a openssl utility is available
 if [ ! -f ${OPENSSL} ]
 then
@@ -668,7 +689,7 @@ then
     exit 1
 fi
 
-### CHeck to make sure a mail client is available it automated notifcations are requested
+### Check to make sure a mail client is available it automated notifications are requested
 if [ "${ALARM}" = "TRUE" ] && [ ! -f ${MAIL} ]
 then
     echo "ERROR: You enabled automated alerts, but the mail binary could not be found."
@@ -708,19 +729,15 @@ then
 elif [ -f "${SERVERFILE}" ]
 then
     print_heading
-    while read HOST PORT
+    egrep -v '(^#|^$)' ${SERVERFILE} |  while read HOST PORT
     do
-        if [ "`echo ${HOST} | cut -c1`" = "#" ]
-        then
-            :
-        elif [ "$PORT" = "FILE" ]
+        if [ "$PORT" = "FILE" ]
         then
             check_file_status ${HOST} "FILE" "${HOST}"
         else
             check_server_status "${HOST}" "${PORT}"
         fi
-
-    done < ${SERVERFILE}
+    done
 
 ### Check to see if the certificate in CERTFILE is about to expire
 elif [ "${CERTFILE}" != "" ]
