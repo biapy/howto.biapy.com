@@ -4,31 +4,45 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-VERSION="1.2.10"
+version="1.3.0"
 
-SCRIPT_NAME="$(command basename ${0})"
 
-# Detect download command.
-DOWNLOAD_COMMAND="false"
-if [ -n "$(command -v 'wget')" ]; then
-  DOWNLOAD_COMMAND="wget"
-elif [ -n "$(command -v 'curl')" ]; then
-  DOWNLOAD_COMMAND="curl"
-fi
 
-if [ "${DOWNLOAD_COMMAND}" = "false" ]; then
-  echo "Error : 'wget' and 'curl' are missing. Please install package 'wget' or 'curl'." 2>&1
-  exit 1
-fi
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+
+
+script_name="$(basename "${0}")"
 
 # Print this script help.
 function usage {
-  command echo "Sourceforge Downloader v${VERSION}
+  echo "Sourceforge Downloader v${version}
 This tool automates the download of software latest version from sourceforge or google code.
 
 Usage :
 
-  ${SCRIPT_NAME} [ --sourceforge | --googlecode | --ckeditor | --generic='http://domain.com/download'  ] \\
+  ${script_name} [ --sourceforge | --googlecode | --ckeditor | --generic='http://domain.com/download'  ] \\
         [ --download | --zip | --tgz | --tbz2 | --version ] \\
         [ --strip-components=NUMBER | -s NUMBER ] \\
         [ --output-directory=/path | -d /path ] \\
@@ -39,9 +53,9 @@ Usage :
     * project-name : The sourceforge project name as
           in http://sourceforge.net/projects/project-name/ .
     * file-name-template : The template of the filename to download with the
-          version replaced by VERSION.
+          version replaced by version.
           Example : To download 'xmlrpc-c-1.16.41.tgz',
-             use this template: 'xml-rpc-c-VERSION.tgz'.
+             use this template: 'xml-rpc-c-version.tgz'.
 
   Available options are :
     * --help | -h   : Display this message.
@@ -60,35 +74,59 @@ Usage :
                       NUMBER leading components from file names on extraction
     * --output-directory | -d : Path where to extract or download the files.
     * --download-template     : Allow to specify a different filename template for download.
-                      The filename template use the same VERSION as the main one.
+                      The filename template use the same version as the main one.
 "
 
-  test -n "${1}" && exit ${1}
+  [[ -n "${1}" ]] && exit ${1}
 } # usage
 
+
+
+# Get the dirname of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function dirname() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command dirname -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command dirname -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # dirname()
+export -f 'dirname'
 
 
 # Get the absolute path for a file or directory.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path.
-REALPATH=''
-function realpath {
-  # declare -g REALPATH=''
-  REALPATH=''
+# @return ${realpath} A absolute path.
+realpath=''
+function realpath() {
+  # declare -g realpath=''
+  realpath=''
 
-  command test ${#} -ne 1 && exit 1
+  [[ ${#} -ne 1 ]] && exit 1
 
-  case "$(command uname)" in
+  case "$(uname)" in
     'Linux' )
-      REALPATH="$(command readlink -f "${1}")"
+      realpath="$(readlink -f "${1}")"
       ;;
     'Darwin' )
-      REALPATH="$(command stat -f '%N' "${1}")"
+      realpath="$(stat -f '%N' "${1}")"
       ;;
     * )
-      REALPATH="$(command realpath "${1}")"
+      realpath="$(realpath "${1}")"
       ;;
   esac
 } # realpath
@@ -100,25 +138,125 @@ function realpath {
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=''
-function realpath_check {
-  # declare -g REALPATH=''
-  REALPATH=''
+# @return ${realpath} A absolute path or an empty string if file don't exists.
+realpath=''
+function realpath_check() {
+  # declare -g realpath=''
+  realpath=''
 
-  command test ${#} -ne 1 && exit 1
+  [[ ${#} -ne 1 ]] && exit 1
 
   realpath "${1}"
 
-  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
-    REALPATH=""
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=""
   fi
 
-  if [ -z "${REALPATH}" ]; then
-    echo "Error : File '${1}' does not exists." >&2
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
     exit 1
   fi
 } # realpath_check
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
 
 
 
@@ -128,46 +266,29 @@ function realpath_check {
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-BINARY=''
-function check_binary {
-  # declare -g BINARY=''
-  BINARY=''
+binary=''
+function check_binary() {
+  # declare -g binary=''
+  binary=''
 
-  command test ${#} -ne 2 && exit 1
+  [[ ${#} -ne 2 ]] && exit 1
 
-  local PRIMARY="$(echo "${1}" | command cut -d ';' -f 1)"
-  local BINARIES="";
+  local primary="$(echo -n "${1}" | cut -d ';' -f 1)"
+  local binaries="";
 
-  IFS=';' command read -a BINARIES <<< "${1}"
+  IFS=';' read -a binaries <<< "${1}"
 
   # Test the binary presence.
-  for BINARY in ${BINARIES[@]}; do
-    if [ -n "$(command -v "${BINARY}")" ]; then
+  for binary in ${binaries[@]}; do
+    if type -f "${binary}" &>'/dev/null'; then
+      binary="$(command -v "${binary}")"
       return 0
     fi
   done
 
-  echo "Error : '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
   exit 1
 } # check_binary
-
-
-
-# Check if a package file is present
-#
-# @param string $file The file to check.
-# @param string $package The package the binary come from.
-#
-# @return Exit with error if the file is missing.
-function check_package_file {
-  command test ${#} -ne 2 && exit 1
-
-  # Test the file presence.
-  if [ ! -e "${1}" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
-} # check_package_file
 
 
 
@@ -177,37 +298,42 @@ function check_package_file {
 # @param string $filename The filename on the filesystem.
 # @param string $path The path where to save the file (need a filename value).
 #
-# @return ${DOWNLOAD_FILE} The path to the downloaded file.
-DOWNLOAD_FILE=''
+# @return ${download_file} The path to the downloaded file.
+download_file=''
 function download_file {
-  command test ${#} -lt 1 && exit 1
+  [[ ${#} -lt 1 ]] && exit 1
 
-  DOWNLOAD_PATH="/tmp"
-  if [ -n "${3}" ]; then
-    DOWNLOAD_PATH="${3}"
+  check_binary 'wget;curl' 'wget'
+  local download_command="$(basename "${binary}")"
+  local user_agent="Mozilla/5.0 (X11; U; Linux $(uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
+
+  local download_path='/tmp'
+  if [[ -n "${3}" ]]; then
+    download_path="${3}"
   fi
 
   # Download a file.
-  if [ -n "${2}" ]; then
-    DOWNLOAD_FILE="${DOWNLOAD_PATH}/${2}"
+  download_file=''
+  if [[ -n "${2}" ]]; then
+    download_file="${download_path}/${2}"
   else
-    DOWNLOAD_FILE="$(command mktemp -t "tmp.XXXXXXXXXX")"
+    download_file="$(mktemp -t 'tmp.XXXXXXXXXX')"
   fi
 
-  case "${DOWNLOAD_COMMAND}" in
+  case "${download_command}" in
     curl )
-      command curl --silent --location --insecure "${1}" \
-          --output "${DOWNLOAD_FILE}"
+      curl --silent --location --insecure "${1}" \
+          --user-agent="${user_agent}" --output "${download_file}"
       ;;
     wget | * )
-      command wget --quiet --no-check-certificate "${1}" \
-          --output-document="${DOWNLOAD_FILE}"
+      wget --quiet --no-check-certificate "${1}" \
+          --user-agent="${user_agent}" --output-document="${download_file}"
       ;;
   esac
 
-  if [ ! -s "${DOWNLOAD_FILE}" ]; then
-    command rm "${DOWNLOAD_FILE}"
-    echo "Error : Unable to download file from '${1}'." >&2
+  if [[ ! -s "${download_file}" ]]; then
+    rm "${download_file}"
+    cecho 'redbold' "Error : Unable to download file from '${1}'." >&2
     exit 1
   fi
 } # download_file
@@ -220,39 +346,39 @@ function download_file {
 # @param string $path An optionnal extraction path.
 # @param string $strip An optionnal strip components value.
 #
-# @return ${DOWNLOAD_TGZ} The path to the extracted content.
-DOWNLOAD_TGZ=''
+# @return ${download_tgz} The path to the extracted content.
+download_tgz=''
 function download_tgz {
-  command test ${#} -lt 1 && exit 1
+  [[ ${#} -lt 1 ]] && exit 1
 
-  if [ -n "${2}" ]; then
-    DOWNLOAD_TGZ="${2}"
-    command mkdir -p "${DOWNLOAD_TGZ}"
+  if [[ -n "${2}" ]]; then
+    download_tgz="${2}"
+    mkdir -p "${download_tgz}"
   else
-    DOWNLOAD_TGZ="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+    download_tgz="$(mktemp -d -t 'tmp.XXXXXXXXXX')"
   fi
 
-  STRIP="0"
-  if [ -n "${3}" ]; then
-    STRIP="${3}"
+  strip="0"
+  if [[ -n "${3}" ]]; then
+    strip="${3}"
   fi
 
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  command tar --strip-components="${STRIP}" \
-      --directory "${DOWNLOAD_TGZ}" \
-      -xzf "${DOWNLOAD_FILE}"
-  command rm "${DOWNLOAD_FILE}"
+  tar --strip-components="${strip}" \
+      --directory "${download_tgz}" \
+      -xzf "${download_file}"
+  rm "${download_file}"
 
-  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 0 ]; then
-    echo "Error : unable to untar file downloaded from '${1}'." >&2
+  if [[ $(ls -1 "${download_tgz}" | wc -l) -eq 0 ]]; then
+    cecho 'redbold' "Error : unable to untar file downloaded from '${1}'." >&2
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_TGZ}" | command wc -l) -eq 1 \
-        -a "${STRIP}" = "0" ]; then
-    DOWNLOAD_TGZ="${DOWNLOAD_TGZ}/$(command ls -1 "${DOWNLOAD_TGZ}")"
+  if [[ $(ls -1 "${download_tgz}" | wc -l) -eq 1 \
+        && "${strip}" = "0" ]]; then
+    download_tgz="${download_tgz}/$(ls -1 "${download_tgz}")"
   fi
 } # download_tgz
 
@@ -264,40 +390,40 @@ function download_tgz {
 # @param string $path An optionnal extraction path.
 # @param string $strip An optionnal strip components value.
 #
-# @return ${DOWNLOAD_TBZ2} The path to the extracted content.
-DOWNLOAD_TBZ2=''
+# @return ${download_tbz2} The path to the extracted content.
+download_tbz2=''
 function download_tbz2 {
   check_binary "bzip2" "bzip2"
-  command test ${#} -lt 1 && exit 1
+  [[ ${#} -lt 1 ]] && exit 1
 
-  if [ -n "${2}" ]; then
-    DOWNLOAD_TBZ2="${2}"
-    command mkdir -p "${DOWNLOAD_TBZ2}"
+  if [[ -n "${2}" ]]; then
+    download_tbz2="${2}"
+    mkdir -p "${download_tbz2}"
   else
-    DOWNLOAD_TBZ2="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+    download_tbz2="$(mktemp -d -t "tmp.XXXXXXXXXX")"
   fi
 
-  STRIP="0"
-  if [ -n "${3}" ]; then
-    STRIP="${3}"
+  strip="0"
+  if [[ -n "${3}" ]]; then
+    strip="${3}"
   fi
 
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  command tar --strip-components="${STRIP}" \
-      --directory "${DOWNLOAD_TBZ2}" \
-      -xjf "${DOWNLOAD_FILE}"
-  command rm "${DOWNLOAD_FILE}"
+  tar --strip-components="${strip}" \
+      --directory "${download_tbz2}" \
+      -xjf "${download_file}"
+  rm "${download_file}"
 
-  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 0 ]; then
-    echo "Error : unable to untar file downloaded from '${1}'." >&2
+  if [[ $(ls -1 "${download_tbz2}" | wc -l) -eq 0 ]]; then
+    cecho 'redbold' "Error : unable to untar file downloaded from '${1}'." >&2
     exit 1
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_TBZ2}" | command wc -l) -eq 1 \
-        -a "${STRIP}" = "0" ]; then
-    DOWNLOAD_TBZ2="${DOWNLOAD_TBZ2}/$(command ls -1 "${DOWNLOAD_TBZ2}")"
+  if [[ $(ls -1 "${download_tbz2}" | wc -l) -eq 1 \
+        && "${strip}" = "0" ]]; then
+    download_tbz2="${download_tbz2}/$(ls -1 "${download_tbz2}")"
   fi
 } # download_tbz2
 
@@ -309,53 +435,51 @@ function download_tbz2 {
 # @param string $path An optionnal extraction path.
 # @param string $strip An optionnal strip components value.
 #
-# @return ${DOWNLOAD_ZIP} The path to the extracted content.
-DOWNLOAD_ZIP=''
+# @return ${download_zip} The path to the extracted content.
+download_zip=''
 function download_zip {
   check_binary "unzip" "unzip"
-  command test ${#} -lt 1 && exit 1
+  [[ ${#} -lt 1 ]] && exit 1
 
-  if [ -n "${2}" ]; then
-    DOWNLOAD_ZIP="${2}"
-    command mkdir -p "${DOWNLOAD_ZIP}"
+  if [[ -n "${2}" ]]; then
+    download_zip="${2}"
+    mkdir -p "${download_zip}"
   else
-    DOWNLOAD_ZIP="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+    download_zip="$(mktemp -d -t "tmp.XXXXXXXXXX")"
   fi
 
-  STRIP="0"
-  if [ -n "${3}" ]; then
-    STRIP="${3}"
+  strip="0"
+  if [[ -n "${3}" ]]; then
+    strip="${3}"
   fi
 
-  EXTRACT_PATH="${DOWNLOAD_ZIP}"
-  if [ "${STRIP}" != "0" ]; then
-    EXTRACT_PATH="$(command mktemp -d -t "tmp.XXXXXXXXXX")"
+  extract_path="${download_zip}"
+  if [[ "${strip}" != "0" ]]; then
+    extract_path="$(mktemp -d -t "tmp.XXXXXXXXXX")"
   fi
 
   download_file "${1}"
 
   # Untar the downloaded file and place it at its final location.
-  command unzip -d "${EXTRACT_PATH}" -qq "${DOWNLOAD_FILE}"
-  command rm "${DOWNLOAD_FILE}"
+  unzip -d "${extract_path}" -qq "${download_file}"
+  rm "${download_file}"
 
-  if [ $(command ls -1 "${EXTRACT_PATH}" | command wc -l) -eq 0 ]; then
-    echo "Error : unable to unzip file downloaded from '${1}'." >&2
+  if [[ $(ls -1 "${extract_path}" | wc -l) -eq 0 ]]; then
+    cecho 'redbold' "Error : unable to unzip file downloaded from '${1}'." >&2
     exit 1
   fi
 
-  if [ "${STRIP}" != "0" ]; then
-    command find "${EXTRACT_PATH}" -mindepth "$((${STRIP} +1))" -maxdepth "$((${STRIP} +1))" -print0 \
-      | command xargs -0 -iFILE cp -a FILE "${DOWNLOAD_ZIP}"
+  if [[ "${strip}" != "0" ]]; then
+    find "${extract_path}" -mindepth "$((${strip} +1))" -maxdepth "$((${strip} +1))" -print0 \
+      | xargs -0 -iFILE cp -a FILE "${download_zip}"
 
-    command rm -r "${EXTRACT_PATH}"
+    rm -r "${extract_path}"
   fi
 
-  if [ $(command ls -1 "${DOWNLOAD_ZIP}" | command wc -l) -eq 1 ]; then
-    DOWNLOAD_ZIP="${DOWNLOAD_ZIP}/$(command ls -1 "${DOWNLOAD_ZIP}")"
+  if [[ $(ls -1 "${download_zip}" | wc -l) -eq 1 ]]; then
+    download_zip="${download_zip}/$(ls -1 "${download_zip}")"
   fi
 } # download_zip
-
-
 
 
 #######################################################################################
@@ -369,85 +493,83 @@ function getoptex()
 {
   let $# || return 1
   local optlist="${1#;}"
-  let OPTIND || OPTIND=1
-  [ $OPTIND -lt $# ] || return 1
-  shift $OPTIND
-  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
-  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
-  then
-    local o
-    o="-${1#-$OPTOFS}"
-    for opt in ${optlist#;}
-    do
-      OPTOPT="${opt%[;.:]}"
-      unset OPTARG
-      local opttype="${opt##*[^;:.]}"
-      [ -z "$opttype" ] && opttype=";"
-      if [ ${#OPTOPT} -gt 1 ]
-      then # long-named option
-        case $o in
-          "--$OPTOPT")
-            if [ "$opttype" != ":" ]; then return 0; fi
-            OPTARG="$2"
-            if [ -z "$OPTARG" ];
-            then # error: must have an agrument
-              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT";
-              OPTOPT="?"
-              return 1;
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "--$OPTOPT="*)
-            if [ "$opttype" = ";" ];
-            then  # error: must not have arguments
-              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTARG=${o#"--$OPTOPT="}
-            return 0
-          ;;
-        esac
-      else # short-named option
-        case "$o" in
-          "-$OPTOPT")
-            unset OPTOFS
-            [ "$opttype" != ":" ] && return 0
-            OPTARG="$2"
-            if [ -z "$OPTARG" ]
-            then
-              echo "$0: error: -$OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "-$OPTOPT"*)
-            if [ $opttype = ";" ]
-            then # an option with no argument is in a chain of options
-              OPTOFS="$OPTOFS?" # move to the next option in the chain
-              OPTIND=$[OPTIND-1] # the chain still has other options
+  let optind || optind=1
+  [[ $optind -lt $# ]] || return 1
+  shift $optind
+  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
+    optind=$((optind+1));
+    if [[ "$1" != "--" ]]; then
+      local o
+      o="-${1#-$optofs}"
+      for opt in ${optlist#;}
+      do
+        optopt="${opt%[;.:]}"
+        unset optarg
+        local opttype="${opt##*[^;:.]}"
+        [[ -z "$opttype" ]] && opttype=";"
+        if [[ ${#optopt} -gt 1 ]]; then # long-named option
+          case $o in
+            "--$optopt")
+              if [[ "$opttype" != ":" ]]; then
+                return 0;
+              fi
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then # error: must have an agrument
+                let OPTERR && cecho 'redbold' "$0: error: $optopt must have an argument" >&2
+                optarg="$optopt";
+                optopt="?"
+                return 1;
+              fi
+              optind=$((optind+1)) # skip option's argument
               return 0
-            else
-              unset OPTOFS
-              OPTARG="${o#-$OPTOPT}"
+            ;;
+            "--$optopt="*)
+              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
+                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optarg=${o#"--$optopt="}
               return 0
-            fi
-          ;;
-        esac
-      fi
-    done
-    echo "Error : invalid option : '${o}'." >&2
-    usage
-    exit 1
-  fi; fi
-  OPTOPT="?"
-  unset OPTARG
+            ;;
+          esac
+        else # short-named option
+          case "$o" in
+            "-$optopt")
+              unset optofs
+              [[ "$opttype" != ":" ]] && return 0
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then
+                cecho 'redbold' "$0: error: -$optopt must have an argument" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optind=$((optind+1)) # skip option's argument
+              return 0
+            ;;
+            "-$optopt"*)
+              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
+                optofs="$optofs?" # move to the next option in the chain
+                optind=$((optind-1)) # the chain still has other options
+                return 0
+              else
+                unset optofs
+                optarg="${o#-$optopt}"
+                return 0
+              fi
+            ;;
+          esac
+        fi
+      done
+      cecho 'redbold' "Error : invalid option : '${o}'." >&2
+      usage
+      exit 1
+    fi
+  fi
+  optopt="?"
+  unset optarg
   return 1
 }
 function optlistex
@@ -455,14 +577,12 @@ function optlistex
   local l="$1"
   local m # mask
   local r # to store result
-  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
-  while [ -n "$l" ]
-  do
+  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
     m="${m#?}"  # cut one "?" sign from m
-    if [ -n "${l%%[^:.;]*}" ]
-    then # a special character (";", ".", or ":") was found
+    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
       r="$r${l%$m}" # append it to $r
       l="${l#?}" # cut the special character from l
       m="${m#?}"  # cut one more "?" sign
@@ -485,265 +605,256 @@ function getopt()
 check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "sed" "sed"
-#check_binary "wget" "wget"
+check_binary "wget;curl" "wget"
+download_command="$(basename "${binary}")"
 
-USER_AGENT="Mozilla/5.0 (X11; U; Linux $(command uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
+user_agent="Mozilla/5.0 (X11; U; Linux $(uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
 
-BASE_DB_NAME=""
-ACTION=""
-FORGE="sourceforge"
-GENERIC_URL=""
-DB_PREFIX=""
-USER_PREFIX=""
-BASE_USER_NAME=""
-USER_HOSTS="localhost"
-MYSQL_USER="root"
-MYSQL_PASSWORD="false"
-PRIVILEGES=""
+action=""
+forge="sourceforge"
+generic_url=""
 
-MANDATORY_DB="true"
-MANDATORY_PASSWORD="false"
+download_template=""
 
-DOWNLOAD_TEMPLATE=""
+output_directory=""
+strip_components="0"
 
-OUTPUT_DIRECTORY=""
-STRIP_COMPONENTS="0"
-
-ACTION="download"
+action="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
 while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt googlecode ckeditor generic: download-template: strip-components: s: output-directory: d:" "${@}"; do
   # Options debuging.
-  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
-  case "${OPTOPT}" in
+  case "${optopt}" in
     'sourceforge' )
-      FORGE="sourceforge"
+      forge="sourceforge"
       ;;
     'sf-alt' )
-      FORGE="sf-alt"
+      forge="sf-alt"
       ;;
     'googlecode' )
-      FORGE="googlecode"
+      forge="googlecode"
       ;;
     'ckeditor' )
-      FORGE="ckeditor"
+      forge="ckeditor"
       ;;
     'generic' )
-      FORGE="generic"
-      GENERIC_URL="${OPTARG}"
+      forge="generic"
+      generic_url="${optarg}"
       ;;
     'version' | 'v' )
-      ACTION="print-version"
+      action="print-version"
       ;;
     'tgz' )
-      ACTION="untar-ungzip"
+      action="untar-ungzip"
       ;;
     'tbz2' )
-      ACTION="untar-unbzip2"
+      action="untar-unbzip2"
       ;;
     'zip' )
-      ACTION="unzip"
+      action="unzip"
       ;;
     'download-template' )
-      DOWNLOAD_TEMPLATE="${OPTARG}"
+      download_template="${optarg}"
       ;;
     'strip-components' | 's' )
-      STRIP_COMPONENTS="${OPTARG}"
+      strip_components="${optarg}"
       ;;
     'output-directory' | 'd' )
-      OUTPUT_DIRECTORY="${OPTARG}"
+      output_directory="${optarg}"
       ;;
     'help' | 'h' )
       usage
       exit 0
       ;;
     * )
-      echo "Error: unsupported option '${OPTOPT}'." >&2
+      cecho 'redbold' "Error: unsupported option '${optopt}'." >&2
       exit 1
       ;;
   esac
 done
 
-shift $[OPTIND-1]
+shift $((optind-1))
 
-if [ ${#} -ne 2 ]; then
-  echo "Error: project name and/or filename template missing." >&2
+if [[ ${#} -ne 2 ]]; then
+  cecho 'redbold' "Error: project name and/or filename template missing." >&2
   exit 1
 fi
 
-PROJECT_NAME="${1}"
-FILENAME_TEMPLATE="${2}"
+project_name="${1}"
+filename_template="${2}"
 
 ##
 ## This is where the source download URL and version detection is done.
 ## It is frequently broken by sourceforge and googlecode updates.
 ##
-case "${FORGE}" in
+case "${forge}" in
   'googlecode' )
-    case "${DOWNLOAD_COMMAND}" in
-      curl )
-        VERSION="$(command curl "http://code.google.com/p/${PROJECT_NAME}/downloads/list" \
+    case "${download_command}" in
+      'curl' )
+        version="$(curl "http://code.google.com/p/${project_name}/downloads/list" \
             --silent --location --output "-" \
-            | command grep --max-count=1 "//${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=\"//${PROJECT_NAME}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
-            | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+            | grep --max-count=1 "//${project_name}.googlecode.com/files/${filename_template//VERSION/.*}" \
+            | sed -e "s|.*href=\"//${project_name}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
+            | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
             )"
         ;;
-      wget | * )
-        VERSION="$(command wget "http://code.google.com/p/${PROJECT_NAME}/downloads/list" \
+      'wget' | * )
+        version="$(wget "http://code.google.com/p/${project_name}/downloads/list" \
             --quiet --output-document=- \
-            | command grep --max-count=1 "//${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=\"//${PROJECT_NAME}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
-            | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+            | grep --max-count=1 "//${project_name}.googlecode.com/files/${filename_template//VERSION/.*}" \
+            | sed -e "s|.*href=\"//${project_name}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
+            | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
             )"
         ;;
     esac
 
-    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
-      SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    if [[ -n "${download_template}" ]]; then
+      source_url="http://${project_name}.googlecode.com/files/${download_template//VERSION/${version}}"
     else
-      SOURCE_URL="http://${PROJECT_NAME}.googlecode.com/files/${FILENAME_TEMPLATE//VERSION/${VERSION}}"
+      source_url="http://${project_name}.googlecode.com/files/${filename_template//VERSION/${version}}"
     fi
 
     ;;
 
   'ckeditor' )
-    case "${DOWNLOAD_COMMAND}" in
-      curl )
-        SOURCE_URL="$(command curl "http://ckeditor.com/download" \
+    case "${download_command}" in
+      'curl' )
+        source_url="$(curl "http://ckeditor.com/download" \
             --silent --location --output "-" \
-            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            | grep --max-count=1 "http://.*/${filename_template//VERSION/.*}" \
+            | sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
         ;;
-      wget | * )
-        SOURCE_URL="$(command wget "http://ckeditor.com/download" \
+      'wget' | * )
+        source_url="$(wget "http://ckeditor.com/download" \
             --quiet --output-document=- \
-            | command grep --max-count=1 "http://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
+            | grep --max-count=1 "http://.*/${filename_template//VERSION/.*}" \
+            | sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
         ;;
     esac
 
-    VERSION="$(command echo "${SOURCE_URL}" \
-        | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+    version="$(echo "${source_url}" \
+        | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
         )"
     ;;
 
   'generic' )
     # Compute root url.
-    ROOT_URL="$(command echo "${GENERIC_URL}" | command cut --delimiter='/' --fields=1-3)"
-    BASE_URL="$(command echo "${GENERIC_URL}" | command sed -e 's|/[^/]*$||')"
+    root_url="$(echo "${generic_url}" | cut --delimiter='/' --fields=1-3)"
+    base_url="$(echo "${generic_url}" | sed -e 's|/[^/]*$||')"
 
-    case "${DOWNLOAD_COMMAND}" in
-      curl )
-        SOURCE_URL="$(command curl "${GENERIC_URL}" \
-            --silent --location --output "-" \
-            | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
-            		  -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${BASE_URL}/\1\"|g" \
-            | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
+    case "${download_command}" in
+      'curl' )
+        source_url="$(curl "${generic_url}" \
+            --user-agent="${user_agent}" --silent --location --output "-" \
+            | sed -e "s|\(href=[\"']\)/|\1${root_url}/|g" \
+                  -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${base_url}/\1\"|g" \
+            | grep --max-count=1 "://.*/${filename_template//VERSION/.*}" \
+            | sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
             )"
         ;;
-      wget | * )
-        SOURCE_URL="$(command wget "${GENERIC_URL}" \
-            --quiet --no-check-certificate --output-document=- \
-            | command sed -e "s|\(href=[\"']\)/|\1${ROOT_URL}/|g" \
-                          -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${BASE_URL}/\1\"|g" \
-            | command grep --max-count=1 "://.*/${FILENAME_TEMPLATE//VERSION/.*}" \
-            | command sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
+      'wget' | * )
+        source_url="$(wget "${generic_url}" \
+            --user-agent="${user_agent}" --quiet \
+            --no-check-certificate --output-document=- \
+            | sed -e "s|\(href=[\"']\)/|\1${root_url}/|g" \
+                          -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${base_url}/\1\"|g" \
+            | grep --max-count=1 "://.*/${filename_template//VERSION/.*}" \
+            | sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
             )"
          ;;
     esac
 
-    VERSION="$(command echo "${SOURCE_URL}" \
-        | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+    version="$(echo "${source_url}" \
+        | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
         )"
 
-    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
-      SOURCE_URL="${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    if [[ -n "${download_template}" ]]; then
+      source_url="${download_template//VERSION/${version}}"
     fi
 
     ;;
 
   'sf-alt' )
-    SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
-    case "${DOWNLOAD_COMMAND}" in
-      curl )
-        VERSION="$(command curl --silent --location --output "-" \
-              "http://sourceforge.net/projects/${PROJECT_NAME}/" \
-          | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
-          | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+    source_url="http://sourceforge.net/projects/${project_name}/files/latest/download"
+    case "${download_command}" in
+      'curl' )
+        version="$(curl --silent --location --output '-' \
+              "http://sourceforge.net/projects/${project_name}/" \
+          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
-      wget | * )
-        VERSION="$(command wget --quiet --output-document=- \
-              "http://sourceforge.net/projects/${PROJECT_NAME}/" \
-          | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
-          | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+      'wget' | * )
+        version="$(wget --quiet --output-document=- \
+              "http://sourceforge.net/projects/${project_name}/" \
+          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
     esac
 
-    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
-      SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    if [[ -n "${download_template}" ]]; then
+      source_url="http://sourceforge.net/projects/${project_name}/files/${download_template//VERSION/${version}}"
     fi
 
     ;;
 
   'sourceforge' | * )
-    SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/latest/download"
-    case "${DOWNLOAD_COMMAND}" in
-      curl )
-        VERSION="$(command curl --silent --location --output "-" \
-            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
-          | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
-          | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+    source_url="http://sourceforge.net/projects/${project_name}/files/latest/download"
+    case "${download_command}" in
+      'curl' )
+        version="$(curl --silent --location --output '-' \
+            --user-agent="${user_agent}" "${source_url}" \
+          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
-      wget | * )
-        VERSION="$(command wget --quiet --output-document=- \
-            --user-agent="${USER_AGENT}" "${SOURCE_URL}" \
-          | command grep --max-count=1 "${FILENAME_TEMPLATE//VERSION/.*}" \
-          | command sed -e "s/.*${FILENAME_TEMPLATE//VERSION*/}\(.*\)${FILENAME_TEMPLATE//*VERSION/}.*/\1/g" \
+      'wget' | * )
+        version="$(wget --quiet --output-document=- \
+            --user-agent="${user_agent}" "${source_url}" \
+          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
     esac
 
-    if [ -n "${DOWNLOAD_TEMPLATE}" ]; then
-      SOURCE_URL="http://sourceforge.net/projects/${PROJECT_NAME}/files/${DOWNLOAD_TEMPLATE//VERSION/${VERSION}}"
+    if [[ -n "${download_template}" ]]; then
+      source_url="http://sourceforge.net/projects/${project_name}/files/${download_template//VERSION/${version}}"
     fi
 
     ;;
 esac
 
-if [ -z "${SOURCE_URL}" ]; then
-  echo "Error: unable to detect download URL." >&2
+if [[ -z "${source_url}" ]]; then
+  cecho 'redbold' "Error: unable to detect download URL." >&2
   exit 1
-elif [ -z "${VERSION}" ]; then
-  echo "Error: unable to detect software version." >&2
+elif [[ -z "${version}" ]]; then
+  cecho 'redbold' "Error: unable to detect software version." >&2
   exit 1
 fi
 
-case "${ACTION}" in
-  "print-version" )
-    echo "${VERSION}"
+case "${action}" in
+  'print-version' )
+    echo "${version}"
     ;;
-  "untar-ungzip" )
-    download_tgz "${SOURCE_URL}" "${OUTPUT_DIRECTORY}" "${STRIP_COMPONENTS}"
-    echo "${DOWNLOAD_TGZ}"
+  'untar-ungzip' )
+    download_tgz "${source_url}" "${output_directory}" "${strip_components}"
+    echo "${download_tgz}"
     ;;
-  "untar-unbzip2" )
-    download_tbz2 "${SOURCE_URL}" "${OUTPUT_DIRECTORY}" "${STRIP_COMPONENTS}"
-    echo "${DOWNLOAD_TBZ2}"
+  'untar-unbzip2' )
+    download_tbz2 "${source_url}" "${output_directory}" "${strip_components}"
+    echo "${download_tbz2}"
     ;;
-  "unzip" )
-    download_zip "${SOURCE_URL}" "${OUTPUT_DIRECTORY}" "${STRIP_COMPONENTS}"
-    echo "${DOWNLOAD_ZIP}"
+  'unzip' )
+    download_zip "${source_url}" "${output_directory}" "${strip_components}"
+    echo "${download_zip}"
     ;;
-  "download" | *)
-    download_file "${SOURCE_URL}" "${FILENAME_TEMPLATE//VERSION/${VERSION}}" "${OUTPUT_DIRECTORY}"
-    echo "${DOWNLOAD_FILE}"
+  'download' | *)
+    download_file "${source_url}" "${filename_template//VERSION/${version}}" "${output_directory}"
+    echo "${download_file}"
     ;;
 esac
 
