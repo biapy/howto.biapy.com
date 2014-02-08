@@ -9,7 +9,7 @@ version="1.1.0"
 alert_email="root"
 
 # Check for ssl-cert-check presence
-if type -f 'ssl-cert-check' &>'/dev/null' then
+if type -f 'ssl-cert-check' &>'/dev/null'; then
   echo "Error: ssl-cert-check is not available on the system."
   exit 1
 fi
