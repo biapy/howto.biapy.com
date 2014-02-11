@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-version="1.3.2"
+version="1.3.3"
 
 
 
@@ -105,12 +105,10 @@ export -f 'dirname'
 # @param string $path A relative path.
 #
 # @return ${realpath} A absolute path.
-realpath=''
 function realpath() {
-  # declare -g realpath=''
-  realpath=''
-
   [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath=''
 
   case "$(uname)" in
     'Linux' )
@@ -123,6 +121,9 @@ function realpath() {
       realpath="$(realpath "${1}")"
       ;;
   esac
+
+  echo -n "${realpath}"
+  return 0
 } # realpath
 
 
@@ -133,14 +134,10 @@ function realpath() {
 # @param string $path A relative path.
 #
 # @return ${realpath} A absolute path or an empty string if file don't exists.
-realpath=''
 function realpath_check() {
-  # declare -g realpath=''
-  realpath=''
-
   [[ ${#} -ne 1 ]] && exit 1
 
-  realpath "${1}"
+  local realpath="$(realpath "${1}")"
 
   if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
     realpath=""
@@ -150,6 +147,8 @@ function realpath_check() {
     cecho 'redbold' "Error: File '${1}' does not exists." >&2
     exit 1
   fi
+  echo -n "${realpath}"
+  return 0
 } # realpath_check
 
 
@@ -260,22 +259,21 @@ function cecho() {
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-binary=''
 function check_binary() {
   # declare -g binary=''
-  binary=''
 
   [[ ${#} -ne 2 ]] && exit 1
 
   local primary="$(echo -n "${1}" | cut -d ';' -f 1)"
   local binaries="";
+  local binary=''
 
   IFS=';' read -a binaries <<< "${1}"
 
   # Test the binary presence.
   for binary in ${binaries[@]}; do
     if type -f "${binary}" &>'/dev/null'; then
-      binary="$(command -v "${binary}")"
+      command -v "${binary}"
       return 0
     fi
   done
@@ -297,7 +295,7 @@ function check_binary() {
 function download_file {
   [[ ${#} -lt 1 ]] && exit 1
 
-  check_binary 'wget;curl' 'wget'
+  local binary="$(check_binary 'wget;curl' 'wget')"
   local download_command="$(basename "${binary}")"
 
   local download_path='/tmp'
@@ -345,7 +343,7 @@ function download_file {
     exit 1
   fi
 
-  echo "${download_file}"
+  echo -n "${download_file}"
   return 0
 } # download_file
 
@@ -394,7 +392,7 @@ function download_tgz {
     download_tgz="${download_tgz}/$(ls -1 "${download_tgz}")"
   fi
 
-  echo "${download_tgz}"
+  echo -n "${download_tgz}"
   return 0
 } # download_tgz
 
@@ -409,7 +407,7 @@ function download_tgz {
 #
 # @return ${download_tbz2} The path to the extracted content.
 function download_tbz2 {
-  check_binary "bzip2" "bzip2"
+  check_binary "bzip2" "bzip2" > '/dev/null'
   [[ ${#} -lt 1 ]] && exit 1
 
   local download_tbz2="${2}"
@@ -444,7 +442,7 @@ function download_tbz2 {
     download_tbz2="${download_tbz2}/$(ls -1 "${download_tbz2}")"
   fi
 
-  echo "${download_tbz2}"
+  echo -n "${download_tbz2}"
   return 0
 } # download_tbz2
 
@@ -459,7 +457,7 @@ function download_tbz2 {
 
 # @return ${download_zip} The path to the extracted content.
 function download_zip {
-  check_binary "unzip" "unzip"
+  check_binary "unzip" "unzip" > '/dev/null'
   [[ ${#} -lt 1 ]] && exit 1
 
   local download_zip="${2}"
@@ -501,7 +499,7 @@ function download_zip {
     download_zip="${download_zip}/$(ls -1 "${download_zip}")"
   fi
 
-  echo "${download_zip}"
+  echo -n "${download_zip}"
   return 0
 } # download_zip
 
@@ -626,10 +624,10 @@ function getopt()
 #######################################################################################
 
 # Check for binaries presence
-check_binary "basename" "coreutils"
-check_binary "dirname" "coreutils"
-check_binary "sed" "sed"
-check_binary "wget;curl" "wget"
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+binary="$(check_binary "wget;curl" "wget" '/dev/null')"
 download_command="$(basename "${binary}")"
 
 user_agent="Mozilla/5.0 (X11; U; Linux $(uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
