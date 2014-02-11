@@ -429,10 +429,10 @@ function download_tbz2 {
   local download_file="$(download_file "${1}")"
 
   # Untar the downloaded file and place it at its final location.
-  [[ -e "${download_file}" ]] && tar --strip-components="${strip_components}" \
+  tar --strip-components="${strip_components}" \
       --directory "${download_tbz2}" \
       -xjf "${download_file}"
-  [[ -e "${download_file}" ]] && rm "${download_file}"
+  rm "${download_file}"
 
   if [[ $(ls -1 "${download_tbz2}" | wc -l) -eq 0 ]]; then
     cecho 'redbold' "Error : unable to untar file downloaded from '${1}'." >&2
@@ -482,8 +482,8 @@ function download_zip {
   local download_file="$(download_file "${1}")"
 
   # Untar the downloaded file and place it at its final location.
-  [[ -e "${download_file}" ]] && unzip -d "${extract_path}" -qq "${download_file}"
-  [[ -e "${download_file}" ]] && rm "${download_file}"
+  unzip -d "${extract_path}" -qq "${download_file}"
+  rm "${download_file}"
 
   if [[ $(ls -1 "${extract_path}" | wc -l) -eq 0 ]]; then
     cecho 'redbold' "Error : unable to unzip file downloaded from '${1}'." >&2
