@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-version="1.3.1"
+version="1.3.2"
 
 
 
@@ -291,15 +291,14 @@ function check_binary() {
 # @param string $url The URL of the file to download.
 # @param string $filename The filename on the filesystem.
 # @param string $path The path where to save the file (need a filename value).
+# @param string $user_agent An optionnal user agent.
 #
 # @return ${download_file} The path to the downloaded file.
-download_file=''
 function download_file {
   [[ ${#} -lt 1 ]] && exit 1
 
   check_binary 'wget;curl' 'wget'
   local download_command="$(basename "${binary}")"
-  local user_agent="Mozilla/5.0 (X11; U; Linux $(uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
 
   local download_path='/tmp'
   if [[ -n "${3}" ]]; then
@@ -307,29 +306,47 @@ function download_file {
   fi
 
   # Download a file.
-  download_file=''
+  local download_file=''
   if [[ -n "${2}" ]]; then
     download_file="${download_path}/${2}"
   else
     download_file="$(mktemp -t 'tmp.XXXXXXXXXX')"
   fi
 
-  case "${download_command}" in
-    curl )
-      curl --silent --location --insecure "${1}" \
-          --user-agent="${user_agent}" --output "${download_file}"
-      ;;
-    wget | * )
-      wget --quiet --no-check-certificate "${1}" \
-          --user-agent="${user_agent}" --output-document="${download_file}"
-      ;;
-  esac
+  local user_agent="${4}"
+
+  if [[ -n "${user_agent}" ]]; then
+    case "${download_command}" in
+      'curl' )
+        curl --silent --location --insecure "${1}" \
+            --user-agent="${user_agent}" --output "${download_file}"
+        ;;
+      'wget' | * )
+        wget --quiet --no-check-certificate "${1}" \
+            --user-agent="${user_agent}" --output-document="${download_file}"
+        ;;
+    esac
+  else
+    case "${download_command}" in
+      'curl' )
+        curl --silent --location --insecure "${1}" \
+            --output "${download_file}"
+        ;;
+      'wget' | * )
+        wget --quiet --no-check-certificate "${1}" \
+            --output-document="${download_file}"
+        ;;
+    esac
+  fi
 
   if [[ ! -s "${download_file}" ]]; then
-    rm "${download_file}"
+    test -e "${download_file}" && rm "${download_file}"
     cecho 'redbold' "Error : Unable to download file from '${1}'." >&2
     exit 1
   fi
+
+  echo "${download_file}"
+  return 0
 } # download_file
 
 
@@ -339,28 +356,30 @@ function download_file {
 # @param string $url The URL of the file to download.
 # @param string $path An optionnal extraction path.
 # @param string $strip An optionnal strip components value.
+# @param string $user_agent An optionnal user agent.
 #
 # @return ${download_tgz} The path to the extracted content.
-download_tgz=''
 function download_tgz {
   [[ ${#} -lt 1 ]] && exit 1
 
-  if [[ -n "${2}" ]]; then
-    download_tgz="${2}"
+  local download_tgz="${2}"
+  if [[ -n "${download_tgz}" ]]; then
     mkdir -p "${download_tgz}"
   else
     download_tgz="$(mktemp -d -t 'tmp.XXXXXXXXXX')"
   fi
 
-  strip="0"
+  local strip_components="0"
   if [[ -n "${3}" ]]; then
-    strip="${3}"
+    strip_components="${3}"
   fi
 
-  download_file "${1}"
+  local user_agent="${4}"
+
+  local download_file="$(download_file "${1}")"
 
   # Untar the downloaded file and place it at its final location.
-  tar --strip-components="${strip}" \
+  tar --strip-components="${strip_components}" \
       --directory "${download_tgz}" \
       -xzf "${download_file}"
   rm "${download_file}"
@@ -371,9 +390,12 @@ function download_tgz {
   fi
 
   if [[ $(ls -1 "${download_tgz}" | wc -l) -eq 1 \
-        && "${strip}" = "0" ]]; then
+        && "${strip_components}" = "0" ]]; then
     download_tgz="${download_tgz}/$(ls -1 "${download_tgz}")"
   fi
+
+  echo "${download_tgz}"
+  return 0
 } # download_tgz
 
 
@@ -383,32 +405,34 @@ function download_tgz {
 # @param string $url The URL of the file to download.
 # @param string $path An optionnal extraction path.
 # @param string $strip An optionnal strip components value.
+# @param string $user_agent An optionnal user agent.
 #
 # @return ${download_tbz2} The path to the extracted content.
-download_tbz2=''
 function download_tbz2 {
   check_binary "bzip2" "bzip2"
   [[ ${#} -lt 1 ]] && exit 1
 
-  if [[ -n "${2}" ]]; then
-    download_tbz2="${2}"
+  local download_tbz2="${2}"
+  if [[ -n "${download_tbz2}" ]]; then
     mkdir -p "${download_tbz2}"
   else
     download_tbz2="$(mktemp -d -t "tmp.XXXXXXXXXX")"
   fi
 
-  strip="0"
+  local strip_components="0"
   if [[ -n "${3}" ]]; then
-    strip="${3}"
+    strip_components="${3}"
   fi
 
-  download_file "${1}"
+  local user_agent="${4}"
+
+  local download_file="$(download_file "${1}")"
 
   # Untar the downloaded file and place it at its final location.
-  tar --strip-components="${strip}" \
+  [[ -e "${download_file}" ]] && tar --strip-components="${strip_components}" \
       --directory "${download_tbz2}" \
       -xjf "${download_file}"
-  rm "${download_file}"
+  [[ -e "${download_file}" ]] && rm "${download_file}"
 
   if [[ $(ls -1 "${download_tbz2}" | wc -l) -eq 0 ]]; then
     cecho 'redbold' "Error : unable to untar file downloaded from '${1}'." >&2
@@ -416,9 +440,12 @@ function download_tbz2 {
   fi
 
   if [[ $(ls -1 "${download_tbz2}" | wc -l) -eq 1 \
-        && "${strip}" = "0" ]]; then
+        && "${strip_components}" = "0" ]]; then
     download_tbz2="${download_tbz2}/$(ls -1 "${download_tbz2}")"
   fi
+
+  echo "${download_tbz2}"
+  return 0
 } # download_tbz2
 
 
@@ -428,23 +455,23 @@ function download_tbz2 {
 # @param string $url The URL of the file to download.
 # @param string $path An optionnal extraction path.
 # @param string $strip An optionnal strip components value.
-#
+# @param string $user_agent An optionnal user agent.
+
 # @return ${download_zip} The path to the extracted content.
-download_zip=''
 function download_zip {
   check_binary "unzip" "unzip"
   [[ ${#} -lt 1 ]] && exit 1
 
-  if [[ -n "${2}" ]]; then
-    download_zip="${2}"
+  local download_zip="${2}"
+  if [[ -n "${download_zip}" ]]; then
     mkdir -p "${download_zip}"
   else
     download_zip="$(mktemp -d -t "tmp.XXXXXXXXXX")"
   fi
 
-  strip="0"
+  local strip_components="0"
   if [[ -n "${3}" ]]; then
-    strip="${3}"
+    strip_components="${3}"
   fi
 
   extract_path="${download_zip}"
@@ -452,11 +479,11 @@ function download_zip {
     extract_path="$(mktemp -d -t "tmp.XXXXXXXXXX")"
   fi
 
-  download_file "${1}"
+  local download_file="$(download_file "${1}")"
 
   # Untar the downloaded file and place it at its final location.
-  unzip -d "${extract_path}" -qq "${download_file}"
-  rm "${download_file}"
+  [[ -e "${download_file}" ]] && unzip -d "${extract_path}" -qq "${download_file}"
+  [[ -e "${download_file}" ]] && rm "${download_file}"
 
   if [[ $(ls -1 "${extract_path}" | wc -l) -eq 0 ]]; then
     cecho 'redbold' "Error : unable to unzip file downloaded from '${1}'." >&2
@@ -464,7 +491,7 @@ function download_zip {
   fi
 
   if [[ "${strip}" != "0" ]]; then
-    find "${extract_path}" -mindepth "$((${strip} +1))" -maxdepth "$((${strip} +1))" -print0 \
+    find "${extract_path}" -mindepth "$((${strip_components} +1))" -maxdepth "$((${strip_components} +1))" -print0 \
       | xargs -0 -iFILE cp -a FILE "${download_zip}"
 
     rm -r "${extract_path}"
@@ -473,6 +500,9 @@ function download_zip {
   if [[ $(ls -1 "${download_zip}" | wc -l) -eq 1 ]]; then
     download_zip="${download_zip}/$(ls -1 "${download_zip}")"
   fi
+
+  echo "${download_zip}"
+  return 0
 } # download_zip
 
 
@@ -603,6 +633,7 @@ check_binary "wget;curl" "wget"
 download_command="$(basename "${binary}")"
 
 user_agent="Mozilla/5.0 (X11; U; Linux $(uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
+download_user_agent=""
 
 action=""
 forge="sourceforge"
@@ -769,6 +800,8 @@ case "${forge}" in
       source_url="${download_template//VERSION/${version}}"
     fi
 
+    # For generic download, use user agent.
+    download_user_agent="${user_agent}"
     ;;
 
   'sf-alt' )
@@ -835,20 +868,16 @@ case "${action}" in
     echo "${version}"
     ;;
   'untar-ungzip' )
-    download_tgz "${source_url}" "${output_directory}" "${strip_components}"
-    echo "${download_tgz}"
+    download_tgz "${source_url}" "${output_directory}" "${strip_components}" "${download_user_agent}"
     ;;
   'untar-unbzip2' )
-    download_tbz2 "${source_url}" "${output_directory}" "${strip_components}"
-    echo "${download_tbz2}"
+    download_tbz2 "${source_url}" "${output_directory}" "${strip_components}" "${download_user_agent}"
     ;;
   'unzip' )
-    download_zip "${source_url}" "${output_directory}" "${strip_components}"
-    echo "${download_zip}"
+    download_zip "${source_url}" "${output_directory}" "${strip_components}" "${download_user_agent}"
     ;;
   'download' | *)
-    download_file "${source_url}" "${filename_template//VERSION/${version}}" "${output_directory}"
-    echo "${download_file}"
+    download_file "${source_url}" "${filename_template//VERSION/${version}}" "${output_directory}" "${download_user_agent}"
     ;;
 esac
 
