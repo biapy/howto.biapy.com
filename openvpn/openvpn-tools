@@ -5,9 +5,35 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.1.2"
+VERSION="2.2.0"
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+
+
 
 SCRIPT_NAME="$(command basename "${0}")"
+
+
 
 # Print this script help.
 function usage {
@@ -241,90 +267,225 @@ INSTANCE_UNIX_COMPAT_EXPORT_PATH_EXPORT_TEMPLATE="${INSTANCE_UNIX_COMPAT_EXPORT_
 
 ############################################################
 
+# Bash 3 compat
+# predeclare global vars.
+for CONFIG_VAR in ${CONFIG_VARS}; do
+  command declare "${CONFIG_VAR}"="${!CONFIG_VAR}"
+done
+
+for EXPORT_TEMPLATE in ${EXPORT_TEMPLATES}; do
+  command declare "${EXPORT_TEMPLATE//_TEMPLATE/}"=""
+done
+############################################################
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+
 
 
 # Get the absolute path for a file or directory.
+# Print its path on &1 if found.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path.
-REALPATH=''
-function realpath {
-  # declare -g REALPATH=''
-  REALPATH=''
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
 
-  command test ${#} -ne 1 && exit 1
+  local realpath=''
 
-  case "$(command uname)" in
+  case "$(uname)" in
     'Linux' )
-      REALPATH="$(command readlink -f "${1}")"
+      realpath="$(readlink -f "${1}")"
       ;;
     'Darwin' )
-      REALPATH="$(command stat -f '%N' "${1}")"
+      realpath="$(stat -f '%N' "${1}")"
       ;;
     * )
-      REALPATH="$(command realpath "${1}")"
+      realpath="$(realpath "${1}")"
       ;;
   esac
+
+  echo -n "${realpath}"
+  return 0
 } # realpath
 
 
 
 # Get the absolute path for a file or directory and check the file existance.
 # If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=''
-function realpath_check {
-  # declare -g REALPATH=''
-  REALPATH=''
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
 
-  command test ${#} -ne 1 && exit 1
+  local realpath="$(realpath "${1}")"
 
-  realpath "${1}"
-
-  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
-    REALPATH=""
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
   fi
 
-  if [ -z "${REALPATH}" ]; then
-    echo "Error : File '${1}' does not exists." >&2
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
     exit 1
   fi
+
+  echo -n "${realpath}"
+  return 0
 } # realpath_check
 
 
 
-# Check if a binary is present
+# Check if a binary is present. Print its path on &1 if found.
 #
-# @param string $binary The binary to check.
+# @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-BINARY=""
-function check_binary {
-  # declare -g BINARY=''
-  BINARY=''
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
 
-  command test ${#} -ne 2 && exit 1
+  local primary="$(cut -d ';' -f 1 <<< "${1}")"
+  local binaries="";
+  local binary=''
 
-  local PRIMARY="$(echo "${1}" | command cut -d ';' -f 1)"
-  local BINARIES="";
-
-  IFS=';' command read -a BINARIES <<< "${1}"
+  read -d ';' -r -a binaries <<< "${1}"
 
   # Test the binary presence.
-  for BINARY in ${BINARIES[@]}; do
-    if [ -n "$(command -v "${BINARY}")" ]; then
+  for binary in ${binaries[@]}; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
       return 0
     fi
   done
 
-  echo "Error : '${PRIMARY}' is missing. Please install package '${2}'." >&2
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
   exit 1
-} # check_binary
+} # check_binary()
+
+
+
+# Call to openvpn according to system.
+#
+# @param string $instance_name the instance to apply the action to.
+# @param string $action The action (start, stop, restart)
+#
+# @return Return the error if action failed.
+function openvpnService() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local instance_name="${1}"
+  local action="${2}"
+
+  if type 'service' &>'/dev/null'; then
+    service openvpn "${action}" "${instance_name}"
+    return ${?}
+  elif [[ -x '/etc/init.d/openvpn' ]]; then
+    /etc/init.d/openvpn "${action}" "${instance_name}"
+    return ${?}
+  fi
+
+  # Failure
+  return 1
+} # openvpnService()
 
 
 
@@ -338,12 +499,13 @@ function update_config_vars
 {
   command test ${#} -ne 2 && exit 1
 
-  SEARCH="|${1}|"
-  REPLACE="${2}"
+  local SEARCH="|${1}|"
+  local REPLACE="${2}"
 
   # Set the paths.
   for CONFIG_VAR in ${CONFIG_VARS}; do
-    command declare -g "${CONFIG_VAR}"="${!CONFIG_VAR//${SEARCH}/${REPLACE}}"
+    command declare -g "${CONFIG_VAR}"="${!CONFIG_VAR//${SEARCH}/${REPLACE}}" 2>&- \
+      || eval "${CONFIG_VAR}='${!CONFIG_VAR//${SEARCH}/${REPLACE}}'"
   done
 } # update_config_vars()
 
@@ -359,12 +521,13 @@ function initialize_export_config_vars
 {
   command test ${#} -ne 2 && exit 1
 
-  SEARCH="|${1}|"
-  REPLACE="${2}"
+  local SEARCH="|${1}|"
+  local REPLACE="${2}"
 
   # Set the paths.
   for EXPORT_TEMPLATE in ${EXPORT_TEMPLATES}; do
-    command declare -g "${EXPORT_TEMPLATE//_TEMPLATE/}"="${!EXPORT_TEMPLATE//${SEARCH}/${REPLACE}}"
+    command declare -g "${EXPORT_TEMPLATE//_TEMPLATE/}"="${!EXPORT_TEMPLATE//${SEARCH}/${REPLACE}}" 2>&- \
+      || eval "${EXPORT_TEMPLATE//_TEMPLATE/}='${!EXPORT_TEMPLATE//${SEARCH}/${REPLACE}}'"
   done
 } # update_config_vars()
 
@@ -374,17 +537,22 @@ function initialize_export_config_vars
 #
 # @return $PROTO (tcp or udp)
 # @return $CURRENT_UDP (true or false).
+declare CURRENT_UDP='false'
+declare PROTO='tcp'
 function detect_instance_protocol
 {
-  declare -g CURRENT_UDP='false'
-  declare -g PROTO='tcp'
+  # declare -g CURRENT_UDP='false'
+  # declare -g PROTO='tcp'
+
+  CURRENT_UDP='false'
+  PROTO='tcp'
+
   # Detect current proto.
   if [ "$(command grep '^proto[ \t]*' "${INSTANCE_CONFIG_PATH}" \
-            | command cut --delimiter=' ' --fields=2)" = 'udp' ]; then
+            | command cut -d ' ' -f 2)" = 'udp' ]; then
     CURRENT_UDP='true'
     PROTO='udp'
   fi
-
 } # detect_instance_protocol
 
 
@@ -596,7 +764,7 @@ function set_nat
     NET_RANGE="$(command ifconfig "${NET_DEV}" \
         | command grep 'inet ' \
         | command sed -e 's/^.*inet [^:]*:\([^ ]*\) .*$/\1/' \
-        | command cut --delimiter='.' --fields='1-3').0"
+        | command cut -d '.' -f '1-3').0"
 
     # Update server details for NAT access to local network.
     if [ "${1}" = 'true' ]; then
@@ -839,7 +1007,7 @@ function install_bind
   fi
 
   # Create logs directory.
-  command mkdir --parent '/var/log/named/'
+  command mkdir -p '/var/log/named/'
   command chown -R bind:bind '/var/log/named/'
 
   # Setup logging.
@@ -1042,7 +1210,7 @@ server.${DOMAIN}. IN A ${CURRENT_IP_RANGE}.1;" \
 # Generate an instance hosts file extract.
 function export_hosts
 {
-  declare -g EXPORTED_HOSTS="# Add these lines to the \"/etc/hosts\" file.
+  echo "# Add these lines to the \"/etc/hosts\" file.
 # On Windows: \"c:\\windows\\system32\\drivers\\etc\\hosts\"
 ${CURRENT_IP_RANGE}.1 server.${DOMAIN}
 
@@ -1073,7 +1241,7 @@ function export_for_unix
   TEMP_CLIENT_DIR="${TEMP_DIR}/openvpn/${DOMAIN}"
   CLIENT_CONFIG_DIR="/etc/openvpn/${DOMAIN}"
 
-  command mkdir --parent "${TEMP_CLIENT_DIR}"
+  command mkdir -p "${TEMP_CLIENT_DIR}"
 
   PUBLIC_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PUBLIC_KEY_PATH_EXPORT}")"
   PRIVATE_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PRIVATE_KEY_PATH_EXPORT}")"
@@ -1100,8 +1268,7 @@ function export_for_unix
     "${TEMP_DIR}/openvpn/${DOMAIN}.conf"
 
   if [ "${CURRENT_C2C}" = "true" ]; then
-    export_hosts
-    echo "${EXPORTED_HOSTS}" > "${TEMP_CLIENT_DIR}/hosts.txt"
+    export_hosts > "${TEMP_CLIENT_DIR}/hosts.txt"
   fi
 
   # Build compat OpenVPN configuration, unable to update resolv.conf file upon connection.
@@ -1143,7 +1310,7 @@ function export_for_iphone
   TEMP_DIR="$(command mktemp -d)"
   TEMP_CLIENT_DIR="${TEMP_DIR}/openvpn"
 
-  command mkdir --parent "${TEMP_CLIENT_DIR}"
+  command mkdir -p "${TEMP_CLIENT_DIR}"
 
   PUBLIC_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PUBLIC_KEY_PATH_EXPORT}")"
   PRIVATE_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PRIVATE_KEY_PATH_EXPORT}")"
@@ -1201,7 +1368,7 @@ function export_for_tunnelblick
   TEMP_DIR="$(command mktemp -d)"
   TEMP_CLIENT_DIR="${TEMP_DIR}/${DOMAIN}.tblk"
 
-  command mkdir --parent "${TEMP_CLIENT_DIR}"
+  command mkdir -p "${TEMP_CLIENT_DIR}"
 
   PUBLIC_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PUBLIC_KEY_PATH_EXPORT}")"
   PRIVATE_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PRIVATE_KEY_PATH_EXPORT}")"
@@ -1233,8 +1400,7 @@ function export_for_tunnelblick
   command zip --quiet -pr "${INSTANCE_TBLK_EXPORT_PATH_EXPORT}" "${DOMAIN}.tblk"
 
   if [ "${CURRENT_C2C}" = "true" ]; then
-    export_hosts
-    echo "${EXPORTED_HOSTS}" > "${TEMP_DIR}/hosts.txt"
+    export_hosts > "${TEMP_DIR}/hosts.txt"
     command zip --quiet -pr "${INSTANCE_TBLK_EXPORT_PATH_EXPORT}" "hosts.txt"
   fi
 
@@ -1267,7 +1433,7 @@ function export_for_windows
   CLIENT_CONFIG_DIR_WIN32="C:\\\\Program Files\\\\OpenVPN\\\\${DOMAIN}"
   CLIENT_CONFIG_DIR_WIN64="C:\\\\Program Files (x86)\\\\OpenVPN\\\\${DOMAIN}"
 
-  command mkdir --parent "${TEMP_CLIENT_DIR}"
+  command mkdir -p "${TEMP_CLIENT_DIR}"
 
   PUBLIC_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PUBLIC_KEY_PATH_EXPORT}")"
   PRIVATE_KEY_FILENAME="$(command basename "${INSTANCE_CLIENT_PRIVATE_KEY_PATH_EXPORT}")"
@@ -1297,8 +1463,7 @@ function export_for_windows
   command unix2dos "${TEMP_DIR}/openvpn/${DOMAIN}.ovpn" 2>'/dev/null'
 
   if [ "${CURRENT_C2C}" = "true" ]; then
-    export_hosts
-    echo "${EXPORTED_HOSTS}" > "${TEMP_CLIENT_DIR}/hosts.txt"
+    export_hosts > "${TEMP_CLIENT_DIR}/hosts.txt"
     command unix2dos "${TEMP_CLIENT_DIR}/hosts.txt" 2>'/dev/null'
   fi
 
@@ -1364,12 +1529,14 @@ function export_client
 function export_all_clients
 {
   CLIENTS="$(command cat "${INSTANCE_CLIENTS_LIST_PATH}" \
-      | command cut --delimiter=' ' --fields=1)"
+      | command cut -d ' ' -f 1)"
 
   for CLIENT_LONG_NAME in ${CLIENTS}; do
     export_client "${CLIENT_LONG_NAME}"
   done
 }
+
+
 
 #######################################################################################
 #######################################################################################
@@ -1378,107 +1545,98 @@ function export_all_clients
 #######################################################################################
 #######################################################################################
 #######################################################################################
-function getoptex()
-{
+function getoptex() {
   let $# || return 1
   local optlist="${1#;}"
-  let OPTIND || OPTIND=1
-  [ $OPTIND -lt $# ] || return 1
-  shift $OPTIND
-  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
-  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
-  then
-    local o
-    o="-${1#-$OPTOFS}"
-    for opt in ${optlist#;}
-    do
-      OPTOPT="${opt%[;.:]}"
-      unset OPTARG
-      local opttype="${opt##*[^;:.]}"
-      [ -z "$opttype" ] && opttype=";"
-      if [ ${#OPTOPT} -gt 1 ]
-      then # long-named option
-
-    # Update bind config if needed.
-    setup_bind
-        case $o in
-          "--$OPTOPT")
-            if [ "$opttype" != ":" ]; then return 0; fi
-            OPTARG="$2"
-            if [ -z "$OPTARG" ];
-            then # error: must have an agrument
-              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT";
-              OPTOPT="?"
-              return 1;
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "--$OPTOPT="*)
-            if [ "$opttype" = ";" ];
-            then  # error: must not have arguments
-              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTARG=${o#"--$OPTOPT="}
-            return 0
-          ;;
-        esac
-      else # short-named option
-        case "$o" in
-          "-$OPTOPT")
-            unset OPTOFS
-            [ "$opttype" != ":" ] && return 0
-            OPTARG="$2"
-            if [ -z "$OPTARG" ]
-            then
-              echo "$0: error: -$OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "-$OPTOPT"*)
-            if [ $opttype = ";" ]
-            then # an option with no argument is in a chain of options
-              OPTOFS="$OPTOFS?" # move to the next option in the chain
-              OPTIND=$[OPTIND-1] # the chain still has other options
+  let optind || optind=1
+  [[ $optind -lt $# ]] || return 1
+  shift $optind
+  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
+    optind=$((optind+1));
+    if [[ "$1" != "--" ]]; then
+      local o
+      o="-${1#-$optofs}"
+      for opt in ${optlist#;}
+      do
+        optopt="${opt%[;.:]}"
+        unset optarg
+        local opttype="${opt##*[^;:.]}"
+        [[ -z "$opttype" ]] && opttype=";"
+        if [[ ${#optopt} -gt 1 ]]; then # long-named option
+          case $o in
+            "--$optopt")
+              if [[ "$opttype" != ":" ]]; then
+                return 0;
+              fi
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then # error: must have an agrument
+                let OPTERR && echo "$0: error: $optopt must have an argument" >&2
+                optarg="$optopt";
+                optopt="?"
+                return 1;
+              fi
+              optind=$((optind+1)) # skip option's argument
               return 0
-            else
-              unset OPTOFS
-              OPTARG="${o#-$OPTOPT}"
+            ;;
+            "--$optopt="*)
+              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
+                let OPTERR && echo "$0: error: $optopt must not have arguments" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optarg=${o#"--$optopt="}
               return 0
-            fi
-          ;;
-        esac
-      fi
-    done
-    echo "Error : invalid option : '${o}'." >&2
-    usage
-    exit 1
-  fi; fi
-  OPTOPT="?"
-  unset OPTARG
+            ;;
+          esac
+        else # short-named option
+          case "$o" in
+            "-$optopt")
+              unset optofs
+              [[ "$opttype" != ":" ]] && return 0
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then
+                echo "$0: error: -$optopt must have an argument" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optind=$((optind+1)) # skip option's argument
+              return 0
+            ;;
+            "-$optopt"*)
+              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
+                optofs="$optofs?" # move to the next option in the chain
+                optind=$((optind-1)) # the chain still has other options
+                return 0
+              else
+                unset optofs
+                optarg="${o#-$optopt}"
+                return 0
+              fi
+            ;;
+          esac
+        fi
+      done
+      cecho 'redbold' "Error : invalid option : '${o}'." >&2
+      usage
+      exit 1
+    fi
+  fi
+  optopt="?"
+  unset optarg
   return 1
 }
-function optlistex
-{
+function optlistex() {
   local l="$1"
   local m # mask
   local r # to store result
-  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
-  while [ -n "$l" ]
-  do
+  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
     m="${m#?}"  # cut one "?" sign from m
-    if [ -n "${l%%[^:.;]*}" ]
-    then # a special character (";", ".", or ":") was found
+    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
       r="$r${l%$m}" # append it to $r
       l="${l#?}" # cut the special character from l
       m="${m#?}"  # cut one more "?" sign
@@ -1486,8 +1644,7 @@ function optlistex
   done
   echo $r
 }
-function getopt()
-{
+function getopt() {
   local optlist=`optlistex "$1"`
   shift
   getoptex "$optlist" "$@"
@@ -1498,20 +1655,21 @@ function getopt()
 #######################################################################################
 
 
+
 # Check for binaries presence
-check_binary "basename" "coreutils"
-check_binary "dirname" "coreutils"
-check_binary "tar" "tar"
-check_binary "mktemp" "mktemp"
-check_binary "sed" "sed"
-check_binary "gzip" "gzip"
-check_binary "zip" "zip"
-check_binary "openvpn" "openvpn"
-check_binary "unix2dos" "dos2unix"
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "tar" "tar" > '/dev/null'
+check_binary "mktemp" "mktemp" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "gzip" "gzip" > '/dev/null'
+check_binary "zip" "zip" > '/dev/null'
+check_binary "openvpn" "openvpn" > '/dev/null'
+check_binary "unix2dos" "dos2unix" > '/dev/null'
 
 # Test EasyRSA presence.
 if [ ! -d "${EASYRSA_PATH}" ]; then
-  echo "Error : Easy-RSA v3 is missing. Please install it with:
+  cecho 'redbold' "Error : Easy-RSA v3 is missing. Please install it with:
   command apt-get -y install 'git'
   command git clone 'https://github.com/OpenVPN/easy-rsa' '/etc/openvpn/easy-rsa'" >&2
   exit 1
@@ -1536,9 +1694,9 @@ CIPHER="AES-256-CBC"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
 while getoptex "help h initialize init i create: c: destroy: x: list. l. status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind. convert-20-21." "${@}"; do
   # Options debuging.
-  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
-  case "${OPTOPT}" in
+  case "${optopt}" in
     'initialize' | 'init' | 'i' )
       ACTION="initialize"
       ;;
@@ -1546,70 +1704,70 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
     'create' | 'c' )
       ACTION="create"
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
     'destroy' | 'x' )
       ACTION="destroy"
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
     'status' | 's' )
       ACTION="status"
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
     'list' | 'l' )
       ACTION='list'
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
     'domain' | 'd' )
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
     'add' | 'a' )
       ACTION="add"
 
-      if [ -n "${OPTARG}" ]; then
-        CLIENT_NAME="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        CLIENT_NAME="${optarg}"
       fi
       ;;
 
     'remove' | 'r' )
       ACTION="remove"
 
-      if [ -n "${OPTARG}" ]; then
-        CLIENT_NAME="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        CLIENT_NAME="${optarg}"
       fi
       ;;
 
     'export-configs' )
       ACTION="export-configs"
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
     'export-hosts' )
       ACTION="export-hosts"
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
@@ -1618,8 +1776,8 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
         ACTION="update"
       fi
 
-      if [ -n "${OPTARG}" ]; then
-        SERVER_HOSTNAME="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        SERVER_HOSTNAME="${optarg}"
       fi
       ;;
 
@@ -1628,8 +1786,8 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
         ACTION="update"
       fi
 
-      if [ -n "${OPTARG}" ]; then
-        PORT="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        PORT="${optarg}"
       fi
       ;;
 
@@ -1638,9 +1796,9 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
         ACTION="update"
       fi
 
-      if [ -n "${OPTARG}" ]; then
-        IP_RANGE="$(command echo "${OPTARG}" \
-            | command cut --delimiter='.' --fields='1-3')"
+      if [ -n "${optarg}" ]; then
+        IP_RANGE="$(command echo "${optarg}" \
+            | command cut -d '.' -f '1-3')"
       else
         # Randomize VPN local domain IP range.
         IP_RANGE="10.$((${RANDOM}%256)).$((${RANDOM}%256))"
@@ -1653,10 +1811,10 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
       fi
 
       C2C="false"
-      if [ -z "${OPTARG}" \
-           -o "${OPTARG}" = "1" \
-           -o "${OPTARG}" = "y" \
-           -o "${OPTARG}" = "t" ]; then
+      if [ -z "${optarg}" \
+           -o "${optarg}" = "1" \
+           -o "${optarg}" = "y" \
+           -o "${optarg}" = "t" ]; then
         C2C="true"
       fi
       ;;
@@ -1667,10 +1825,10 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
       fi
 
       NAT="false"
-      if [ -z "${OPTARG}" \
-           -o "${OPTARG}" = "1" \
-           -o "${OPTARG}" = "y" \
-           -o "${OPTARG}" = "t" ]; then
+      if [ -z "${optarg}" \
+           -o "${optarg}" = "1" \
+           -o "${optarg}" = "y" \
+           -o "${optarg}" = "t" ]; then
         NAT="true"
       fi
       ;;
@@ -1681,10 +1839,10 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
       fi
 
       GATEWAY="false"
-      if [ -z "${OPTARG}" \
-           -o "${OPTARG}" = "1" \
-           -o "${OPTARG}" = "y" \
-           -o "${OPTARG}" = "t" ]; then
+      if [ -z "${optarg}" \
+           -o "${optarg}" = "1" \
+           -o "${optarg}" = "y" \
+           -o "${optarg}" = "t" ]; then
         GATEWAY="true"
       fi
       ;;
@@ -1695,10 +1853,10 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
       fi
 
       BIND="false"
-      if [ -z "${OPTARG}" \
-           -o "${OPTARG}" = "1" \
-           -o "${OPTARG}" = "y" \
-           -o "${OPTARG}" = "t" ]; then
+      if [ -z "${optarg}" \
+           -o "${optarg}" = "1" \
+           -o "${optarg}" = "y" \
+           -o "${optarg}" = "t" ]; then
         BIND="true"
       fi
       ;;
@@ -1709,10 +1867,10 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
       fi
 
       UDP="false"
-      if [ -z "${OPTARG}" \
-           -o "${OPTARG}" = "1" \
-           -o "${OPTARG}" = "y" \
-           -o "${OPTARG}" = "t" ]; then
+      if [ -z "${optarg}" \
+           -o "${optarg}" = "1" \
+           -o "${optarg}" = "y" \
+           -o "${optarg}" = "t" ]; then
         UDP="true"
       fi
       ;;
@@ -1723,8 +1881,8 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
     'convert-20-21' )
       ACTION='convert-20-21'
 
-      if [ -n "${OPTARG}" ]; then
-        DOMAIN="${OPTARG}"
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
       fi
       ;;
 
@@ -1734,11 +1892,11 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
   esac
 done
 
-shift $[OPTIND-1]
+shift $((optind-1))
 
 # Test if OpenVPN tools is initialized.
 if [ "${ACTION}" != 'initialize' -a ! -e "${EASYRSA_CONFIG_PATH}" ]; then
-  echo "Error : please initialize OpenVPN tools with:
+  cecho 'redbold' "Error : please initialize OpenVPN tools with:
     ${SCRIPT_NAME} --initialize" >&2
   exit 1
 fi
@@ -1748,7 +1906,7 @@ if [ -z "${DOMAIN}" \
       -a "${ACTION}" != 'initialize' \
       -a "${ACTION}" != 'list' \
       -a "${ACTION}" != 'help' ]; then
-  echo "Error: domain must be specified." >&2
+  cecho 'redbold' "Error: domain must be specified." >&2
   exit 1
 fi
 
@@ -1765,7 +1923,7 @@ if [ -n "${DOMAIN}" ]; then
       -a "${ACTION}" != 'create' \
       -a "${ACTION}" != 'help' \
       -a ! -e "${INSTANCE_CONFIG_PATH}" ]; then
-    echo "Error : instance '${DOMAIN}' does not exists." >&2
+    cecho 'redbold' "Error : instance '${DOMAIN}' does not exists." >&2
     exit 1
   fi
 
@@ -1817,7 +1975,7 @@ case "${ACTION}" in
     test -z "${KEY_ORG}" && KEY_ORG="${ORGANIZATION}"
     test -z "${KEY_EMAIL}" && KEY_EMAIL="${EMAIL}"
 
-    command mkdir --parent "$(command dirname "${EASYRSA_CONFIG_PATH}")"
+    command mkdir -p "$(command dirname "${EASYRSA_CONFIG_PATH}")"
     echo "# EasyRSA configuration for OpenVPN tools
 export KEY_COUNTRY='${KEY_COUNTRY}'
 export KEY_PROVINCE='${KEY_PROVINCE}'
@@ -1839,7 +1997,7 @@ export KEY_EMAIL='${KEY_EMAIL}'
   'create' )
 
     if [ -e "${INSTANCE_CONFIG_PATH}" ]; then
-      echo "Error : instance '${DOMAIN}' already exists." >&2
+      cecho 'redbold' "Error : instance '${DOMAIN}' already exists." >&2
       exit 1
     fi
 
@@ -1863,8 +2021,7 @@ export KEY_EMAIL='${KEY_EMAIL}'
     if [ -z "${SERVER_HOSTNAME}" ]; then
       # Default server hostname to public IP address.
       SERVER_HOSTNAME="$(command wget --quiet http://www.monip.org/ -O- \
-        | command grep "IP :" \
-        | command cut --characters=-80 \
+        | command grep -o "IP : <br>" \
         | command sed -e 's/^.* \(\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}\).*$/\1/')"
     fi
 
@@ -1876,9 +2033,9 @@ export KEY_EMAIL='${KEY_EMAIL}'
       fi
 
       PORT=1194
-      while [ -n "$(command grep "^port[\t ]*${PORT}$" "${OVPN_PATH}/"*.conf)" \
+      while [ -n "$(command grep "^port[\t ]*${PORT}$" "${OVPN_PATH}/"*.conf 2>&-)" \
           -o -n "$(command netstat ${NETSTAT_OPTIONS} \
-                    | cut --characters=21- \
+                    | cut -c 21- \
                     | command sed -e 's/^.*:\([0-9]*\) .*$/\1/' \
                     | command grep "^${PORT}$")" ]; do
         PORT=$((${RANDOM} + 10240))
@@ -2007,7 +2164,7 @@ CURRENT_BIND='${BIND}'
     set_bind "${BIND}"
 
     echo "Starting the new VPN instance..."
-    /etc/init.d/openvpn start "${DOMAIN}"
+    openvpnService start "${DOMAIN}"
 
     exit 0
     ;;
@@ -2043,7 +2200,7 @@ CURRENT_BIND='${BIND}'
     fi
 
     echo "Restarting the VPN instance..."
-    /etc/init.d/openvpn restart "${DOMAIN}"
+    openvpnService restart "${DOMAIN}"
 
     exit 0
     ;;
@@ -2059,7 +2216,7 @@ CURRENT_BIND='${BIND}'
   'destroy' )
 
     # Stop instance if needed.
-    /etc/init.d/openvpn stop "${DOMAIN}"
+    openvpnService stop "${DOMAIN}"
 
     # Update the configuration variables.
     update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
@@ -2122,7 +2279,7 @@ CURRENT_BIND='${BIND}'
       # List existing domains.
       echo "OpenVPN instances:"
       command find "${OVPN_PATH}" -name 'openvpn-tools.cnf' \
-          | command cut --delimiter='/' --fields=4 \
+          | command cut -d '/' -f 4 \
           | command sed -e 's/^/ * /'
 
     else
@@ -2170,7 +2327,7 @@ CURRENT_BIND='${BIND}'
     export EASYRSA_REQ_CN="${CLIENT_LONG_NAME}"
 
     if [ -n "$(command grep "^${CLIENT_LONG_NAME} " "${INSTANCE_CLIENTS_LIST_PATH}" )" ]; then
-      echo "Error : Client '${CLIENT_NAME}' already exists in instance '${DOMAIN}'." >&2
+      cecho 'redbold' "Error : Client '${CLIENT_NAME}' already exists in instance '${DOMAIN}'." >&2
       exit 1
     fi
 
@@ -2207,7 +2364,7 @@ Unix configuration:
     Install it on client with :
         sudo apt-get install openvpn resolvconf
         sudo tar --directory /etc -xzf '${CLIENT_LONG_NAME}.tar.gz'
-        sudo /etc/init.d/openvpn start '${DOMAIN}'
+        sudo service openvpn start '${DOMAIN}'
 Mac OS X Tunnelblick configuration:
     Install Tunnelblick.
     Extract the Zip file and double-click on the ${DOMAIN}.tblk file.
@@ -2255,7 +2412,7 @@ Windows 64bits configuration:
 
 
     if [ -z "$(command grep "^${CLIENT_LONG_NAME} " "${INSTANCE_CLIENTS_LIST_PATH}" )" ]; then
-      echo "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN}'." >&2
+      cecho 'redbold' "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN}'." >&2
       exit 1
     fi  
 
@@ -2296,7 +2453,7 @@ Unix configuration:
     Install it on client with :
         sudo apt-get install openvpn resolvconf
         sudo tar --directory /etc -xzf 'client.${DOMAIN}.tar.gz'
-        sudo /etc/init.d/openvpn start '${DOMAIN}'
+        sudo service openvpn start '${DOMAIN}'
 Mac OS X Tunnelblick configuration:
     Install Tunnelblick.
     Extract the Zip file and double-click on the ${DOMAIN}.tblk file.
@@ -2323,7 +2480,6 @@ Windows 64bits configuration:
     update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
 
     export_hosts
-    echo "${EXPORTED_HOSTS}"
 
     exit 0
     ;;
@@ -2343,7 +2499,7 @@ Windows 64bits configuration:
     update_config_vars 'RANGE' "${CURRENT_IP_RANGE}"
 
     if [ -e "${INSTANCE_KEYS_PATH}/private/${DOMAIN}.key" ]; then
-      echo "Error: instance '${DOMAIN}' is already in v2.1 format." >&2
+      cecho 'redbold' "Error: instance '${DOMAIN}' is already in v2.1 format." >&2
       exit 1
     fi
 
@@ -2384,7 +2540,7 @@ Windows 64bits configuration:
         "${INSTANCE_CONFIG_PATH}"
 
     echo "Restarting the VPN instance..."
-    /etc/init.d/openvpn restart "${DOMAIN}"
+    openvpnService restart "${DOMAIN}"
 
     exit 0
     ;;
@@ -2392,7 +2548,7 @@ Windows 64bits configuration:
 
 
   * )
-    echo "Error : '${1}' is not a valid action." >&2
+    cecho 'redbold' "Error : '${1}' is not a valid action." >&2
     usage 1
     ;;
 esac
