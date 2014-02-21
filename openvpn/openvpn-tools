@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.2.1"
+VERSION="2.2.2"
 
 # Get the basename of a path (multi-plateform version)
 # Print the result on &1 if found.
@@ -2021,7 +2021,7 @@ export KEY_EMAIL='${KEY_EMAIL}'
     if [ -z "${SERVER_HOSTNAME}" ]; then
       # Default server hostname to public IP address.
       SERVER_HOSTNAME="$(command wget --quiet http://www.monip.org/ -O- \
-        | command grep -o "IP : <br>" \
+        | command grep -o "IP : .*<br>" \
         | command sed -e 's/^.* \(\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}\).*$/\1/')"
     fi
 
