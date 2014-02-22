@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-version="1.3.3"
+version="1.3.4"
 
 
 
@@ -32,6 +32,8 @@ export -f 'basename'
 
 script_name="$(basename "${0}")"
 
+
+
 # Print this script help.
 function usage {
   echo "Sourceforge Downloader v${version}
@@ -39,11 +41,13 @@ This tool automates the download of software latest version from sourceforge or 
 
 Usage :
 
-  ${script_name} [ --sourceforge | --googlecode | --ckeditor | --generic='http://domain.com/download'  ] \\
+  ${script_name} [ --sourceforge | --googlecode | --ckeditor \\
+                  | --generic='http://domain.com/download'  ] \\
         [ --download | --zip | --tgz | --tbz2 | --version ] \\
         [ --strip-components=NUMBER | -s NUMBER ] \\
         [ --output-directory=/path | -d /path ] \\
         [ --download-template=file-name-template ] \\
+        [ --verbose ] \\
         project-name file-name-template
 
   Mandatory arguments are :
@@ -57,21 +61,24 @@ Usage :
   Available options are :
     * --help | -h   : Display this message.
     * --sourceforge : Fetch files from sourceforge.net (default).
-    * --sf-alt      : Fetch files from sourceforge.net, alternative version detection method.
+    * --sf-alt      : Fetch files from sourceforge.net,
+                      alternative version detection method.
     * --googlecode  : Fetch files from googlecode.com.
     * --ckeditor    : Fetch ckeditor files from cksource.com.
-    * --generic     : Fetch files from custom source. Take as argument the URL of
-                      page containing links to the file to download.
-    * --download    : Download the project sources archive.
-    * --tgz         : Download the sources archive and decompress it as tar.gz.
-    * --tbz2        : Download the sources archive and decompress it as tar.bz2.
-    * --zip         : Download the sources archive and decompress it as zip.
+    * --generic     : Fetch files from custom source. Take as argument the URL
+                      of page containing links to the file to download.
+    * --download    : Download a file.
+    * --tgz         : Download a archive and decompress it as tar.gz.
+    * --tbz2        : Download a archive and decompress it as tar.bz2.
+    * --zip         : Download a archive and decompress it as zip.
     * --version     : Print the detected sources version.
     * --strip-components | -s : When used with --tgz, --tbz2 or --zip, strip
                       NUMBER leading components from file names on extraction
     * --output-directory | -d : Path where to extract or download the files.
-    * --download-template     : Allow to specify a different filename template for download.
-                      The filename template use the same version as the main one.
+    * --download-template     : Allow to specify a different filename template
+                                for download. The filename template use the
+                                same version as the main one.
+    * --verbose     : Display detection and download process informations.
 "
 
   [[ -n "${1}" ]] && exit ${1}
@@ -489,7 +496,7 @@ function download_zip {
   fi
 
   if [[ "${strip}" != "0" ]]; then
-    find "${extract_path}" -mindepth "$((${strip_components} +1))" -maxdepth "$((${strip_components} +1))" -print0 \
+    find "${extract_path}" -mindepth "$((strip_components + 1))" -maxdepth "$((strip_components + 1))" -print0 \
       | xargs -0 -iFILE cp -a FILE "${download_zip}"
 
     rm -r "${extract_path}"
@@ -599,7 +606,7 @@ function optlistex
   local l="$1"
   local m # mask
   local r # to store result
-  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
   while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
@@ -610,11 +617,11 @@ function optlistex
       m="${m#?}"  # cut one more "?" sign
     fi
   done
-  echo $r
+  echo "${r}"
 }
 function getopt()
 {
-  local optlist=`optlistex "$1"`
+  local optlist=$(optlistex "${1}")
   shift
   getoptex "$optlist" "$@"
   return $?
@@ -642,9 +649,11 @@ download_template=""
 output_directory=""
 strip_components="0"
 
+verbose=false
+
 action="download"
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt googlecode ckeditor generic: download-template: strip-components: s: output-directory: d:" "${@}"; do
+while getoptex "help h verbose version v download tgz tbz2 zip sourceforge sf-alt googlecode ckeditor generic: download-template: strip-components: s: output-directory: d:" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -685,6 +694,9 @@ while getoptex "help h version v download tgz tbz2 zip sourceforge sf-alt google
       ;;
     'output-directory' | 'd' )
       output_directory="${optarg}"
+      ;;
+    'verbose' )
+      verbose=true
       ;;
     'help' | 'h' )
       usage
@@ -764,37 +776,48 @@ case "${forge}" in
     ;;
 
   'generic' )
+    ${verbose} && cecho "Step 1 : Detecting file URL using generic." >&2
+
     # Compute root url.
-    root_url="$(echo "${generic_url}" | cut --delimiter='/' --fields=1-3)"
+    root_url="$(echo "${generic_url}" | cut -d '/' -f 1-3)"
     base_url="$(echo "${generic_url}" | sed -e 's|/[^/]*$||')"
 
     case "${download_command}" in
       'curl' )
+        ${verbose} && cecho "Step 2 : use curl to fetch contents from '${generic_url}'." >&2
+
         source_url="$(curl "${generic_url}" \
             --user-agent="${user_agent}" --silent --location --output "-" \
             | sed -e "s|\(href=[\"']\)/|\1${root_url}/|g" \
                   -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${base_url}/\1\"|g" \
-            | grep --max-count=1 "://.*/${filename_template//VERSION/.*}" \
-            | sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
+            | grep --max-count=1 --only-matching "http[s]*://[^\"']*/${filename_template//VERSION/.*}[^\"']*\"" \
+            | sed -e 's|"$||' \
             )"
         ;;
       'wget' | * )
+        ${verbose} && cecho "Step 2 : use wget to fetch contents from '${generic_url}'." >&2
+
         source_url="$(wget "${generic_url}" \
             --user-agent="${user_agent}" --quiet \
             --no-check-certificate --output-document=- \
             | sed -e "s|\(href=[\"']\)/|\1${root_url}/|g" \
                           -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${base_url}/\1\"|g" \
-            | grep --max-count=1 "://.*/${filename_template//VERSION/.*}" \
-            | sed -e "s|.*href=[\"']\([^\"']*\)[\"'].*|\1|" \
+            | grep --max-count=1 --only-matching "http[s]*://[^\"']*/${filename_template//VERSION/.*}[^\"']*\"" \
+            | sed -e 's|"$||' \
             )"
          ;;
     esac
+
+    ${verbose} && cecho "Step 3 : detect version number in '${source_url}'." >&2
 
     version="$(echo "${source_url}" \
         | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
         )"
 
+    ${verbose} && cecho "Step 4 : detected version '${version}'." >&2
+
     if [[ -n "${download_template}" ]]; then
+      ${verbose} && cecho "Step 4b: applying version to download template '${download_template}'." >&2
       source_url="${download_template//VERSION/${version}}"
     fi
 
@@ -875,6 +898,7 @@ case "${action}" in
     download_zip "${source_url}" "${output_directory}" "${strip_components}" "${download_user_agent}"
     ;;
   'download' | *)
+    ${verbose} && cecho "Step 5 : download file from '${source_url}'." >&2
     download_file "${source_url}" "${filename_template//VERSION/${version}}" "${output_directory}" "${download_user_agent}"
     ;;
 esac
