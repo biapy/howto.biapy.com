@@ -1,0 +1,137 @@
+#!/bin/sh
+#
+# Clone a VMWare ESX virtual machine.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+# 
+# Thanks to:
+# http://linuxwave.blogspot.fr/2011/05/cloning-virtual-machine-on-vmware-esx.html
+# http://kb.vmware.com/selfservice/microsites/search.do?language=en_US&cmd=displayKC&externalId=1006160
+
+version="1.0.0"
+
+script_name="$(basename "${0}")"
+
+
+# Print this script help.
+usage() {
+  echo "VMWare ESX virtual machine clone utility v${version}
+This tool clone an existing VMWare ESX virtual machine and register it in VMWare ESX.
+
+Usage :
+
+  ${script_name} /path/to/source/virtual-machine /path/to/target/virtual-machine
+
+  Available options are :
+    * /path/to/source/virtual-machine: Path to folder containing the cloned virtual machine.
+            Example: /vmfs/volumes/BANK1/php5.domain.local where php5.domain.local is the cloned virtual machine.
+    * /path/to/target/virtual-machine: Path to folder containing the cloned virtual machine.
+            Example: /vmfs/volumes/BANK1/php53.domain.local where php53.domain.local is the name of the new virtual machine."
+
+  [ -n "${1}" ] && exit ${1}
+} # usage
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+realpath() {
+  [ ${#} -ne 1 ] && exit 1
+
+  readlink -f "${1}"
+
+  return 0
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return Exit with error if the path is missing.
+realpath_check() {
+  [ ${#} -ne 1 ] && exit 1
+
+  realpath="$(realpath "${1}")"
+
+  if [ -n "${realpath}" -a ! -e "${realpath}" ]; then
+    realpath=''
+  fi
+
+  if [ -z "${realpath}" ]; then
+    echo 'redbold' "Error: File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+
+
+
+### Checking arguments
+
+[ ${#} -ne 2 ] && usage 1
+
+sourceVirtualMachine="$(realpath_check "${1}")"
+targetVirtualMachine="${2}"
+
+sourceName="$(basename "${sourceVirtualMachine}")"
+targetName="$(basename "${targetVirtualMachine}")"
+targetPath="$(realpath_check "$(dirname "${targetVirtualMachine}")")"
+targetVirtualMachine="${targetPath}/${targetName}"
+
+if [ ! -e "${sourceVirtualMachine}/${sourceName}.vmx" ]; then
+  echo "Error: '${sourceVirtualMachine}' is not a VMWare ESX virtual machine." >&2
+  exit 1
+fi
+
+if [ -e "${targetVirtualMachine}/${targetName}.vmx" ]; then
+  echo "Error: '${targetName}' already exist." >&2
+  exit 1
+fi
+
+### Copying files.
+echo "Copying '${sourceVirtualMachine}' files to '${targetVirtualMachine}' (this can take a while)..."
+cp -r "${sourceVirtualMachine}" "${targetVirtualMachine}"
+
+### Fixing the virtual machine configuration.
+echo "Fixing '${targetName} configuration..."
+find "${targetVirtualMachine}" -type f \
+  | while read 'file'; do
+    mv "${file}" "$(echo "${file}" | sed -e "s/${sourceName}/${targetName}/")"
+  done
+sed -i -e "s/${sourceName}/${targetName}/" "${targetVirtualMachine}/${targetName}.vmx"
+sed -i -e "s/${sourceName}/${targetName}/" "${targetVirtualMachine}/${targetName}.vmxf"
+
+find "${targetVirtualMachine}" -type f -name "*.vmdk" | egrep -v -- "-flat" \
+  | while read file; do
+    sed -i -e "s/${sourceName}/${targetName}/" "${file}"
+  done
+
+sed -i \
+    -e '/^ethernet0\.generatedAddress =/d' \
+    -e '/^ethernet0\.generatedAddressOffset =/d' \
+    -e '/^uuid\.location =/d' \
+    -e '/^uuid\.bios =/d' \
+    -e '/^uuid\.action =/d' \
+  "${targetVirtualMachine}/${targetName}.vmx"
+
+echo 'uuid.action = "keep"' >> "${targetVirtualMachine}/${targetName}.vmx"
+
+### Registering the virtual machine.
+echo "Registering '${targetName}' virtual machine..."
+if [ -e '/bin/vmware-cmd' ]; then
+  vmware-cmd -s register "${targetVirtualMachine}/${targetName}.vmx"
+elif [ -e '/bin/vim-cmd' ]; then
+  vim-cmd solo/registervm "${targetVirtualMachine}/${targetName}.vmx"
+fi
+
+echo "Cloning done."
