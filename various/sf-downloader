@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-version="1.3.4"
+version="1.3.5"
 
 
 
@@ -855,14 +855,18 @@ case "${forge}" in
     case "${download_command}" in
       'curl' )
         version="$(curl --silent --location --output '-' \
-            --user-agent="${user_agent}" "${source_url}" \
+            --user-agent="${user_agent}" \
+            --cookie="FreedomCookie=true" \
+            "${source_url}" \
           | grep --max-count=1 "${filename_template//VERSION/.*}" \
           | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
       'wget' | * )
         version="$(wget --quiet --output-document=- \
-            --user-agent="${user_agent}" "${source_url}" \
+            --user-agent="${user_agent}" \
+            --header="Cookie: FreedomCookie=true" \
+            "${source_url}" \
           | grep --max-count=1 "${filename_template//VERSION/.*}" \
           | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
