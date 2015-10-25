@@ -4,7 +4,7 @@
 # Automates the download of software latest version from sourceforge or google code.
 #
 # For suggestion, bug reports, please contact Pierre-Yves Landuré <pierre-yves.landure@biapy.fr>
-version="1.3.5"
+version="1.3.6"
 
 
 
@@ -729,7 +729,7 @@ case "${forge}" in
       'curl' )
         version="$(curl "http://code.google.com/p/${project_name}/downloads/list" \
             --silent --location --output "-" \
-            | grep --max-count=1 "//${project_name}.googlecode.com/files/${filename_template//VERSION/.*}" \
+            | grep --max-count=1 "//${project_name}.googlecode.com/files/${filename_template//VERSION/[^\"\']*}" \
             | sed -e "s|.*href=\"//${project_name}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
             | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
             )"
@@ -737,7 +737,7 @@ case "${forge}" in
       'wget' | * )
         version="$(wget "http://code.google.com/p/${project_name}/downloads/list" \
             --quiet --output-document=- \
-            | grep --max-count=1 "//${project_name}.googlecode.com/files/${filename_template//VERSION/.*}" \
+            | grep --max-count=1 "//${project_name}.googlecode.com/files/${filename_template//VERSION/[^\"\']*}" \
             | sed -e "s|.*href=\"//${project_name}.googlecode.com/files/\([^\"]*\)\".*|\1|" \
             | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
             )"
@@ -757,14 +757,14 @@ case "${forge}" in
       'curl' )
         source_url="$(curl "http://ckeditor.com/download" \
             --silent --location --output "-" \
-            | grep --max-count=1 "http://.*/${filename_template//VERSION/.*}" \
+            | grep --max-count=1 "http://.*/${filename_template//VERSION/[^\"\']*}" \
             | sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
         ;;
       'wget' | * )
         source_url="$(wget "http://ckeditor.com/download" \
             --quiet --output-document=- \
-            | grep --max-count=1 "http://.*/${filename_template//VERSION/.*}" \
+            | grep --max-count=1 "http://.*/${filename_template//VERSION/[^\"\']*}" \
             | sed -e "s|.*href=\"\([^\"]*\)\".*|\1|" \
             )"
         ;;
@@ -790,7 +790,7 @@ case "${forge}" in
             --user-agent="${user_agent}" --silent --location --output "-" \
             | sed -e "s|\(href=[\"']\)/|\1${root_url}/|g" \
                   -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${base_url}/\1\"|g" \
-            | grep --max-count=1 --only-matching "http[s]*://[^\"']*/${filename_template//VERSION/.*}[^\"']*\"" \
+            | grep --max-count=1 --only-matching "http[s]*://[^\"']*/${filename_template//VERSION/[^\"\']*}[^\"']*\"" \
             | sed -e 's|"$||' \
             )"
         ;;
@@ -802,7 +802,7 @@ case "${forge}" in
             --no-check-certificate --output-document=- \
             | sed -e "s|\(href=[\"']\)/|\1${root_url}/|g" \
                           -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${base_url}/\1\"|g" \
-            | grep --max-count=1 --only-matching "http[s]*://[^\"']*/${filename_template//VERSION/.*}[^\"']*\"" \
+            | grep --max-count=1 --only-matching "http[s]*://[^\"']*/${filename_template//VERSION/[^\"\']*}[^\"']*\"" \
             | sed -e 's|"$||' \
             )"
          ;;
@@ -831,14 +831,14 @@ case "${forge}" in
       'curl' )
         version="$(curl --silent --location --output '-' \
               "http://sourceforge.net/projects/${project_name}/" \
-          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | grep --max-count=1 "${filename_template//VERSION/[^\"\']*}" \
           | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
       'wget' | * )
         version="$(wget --quiet --output-document=- \
               "http://sourceforge.net/projects/${project_name}/" \
-          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | grep --max-count=1 "${filename_template//VERSION/[^\"\']*}" \
           | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
@@ -858,7 +858,7 @@ case "${forge}" in
             --user-agent="${user_agent}" \
             --cookie="FreedomCookie=true" \
             "${source_url}" \
-          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | grep --max-count=1 "${filename_template//VERSION/[^\"\']*}" \
           | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
@@ -867,7 +867,7 @@ case "${forge}" in
             --user-agent="${user_agent}" \
             --header="Cookie: FreedomCookie=true" \
             "${source_url}" \
-          | grep --max-count=1 "${filename_template//VERSION/.*}" \
+          | grep --max-count=1 "${filename_template//VERSION/[^\"\']*}" \
           | sed -e "s/.*${filename_template//VERSION*/}\(.*\)${filename_template//*VERSION/}.*/\1/g" \
           )"
         ;;
