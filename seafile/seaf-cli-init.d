@@ -16,7 +16,7 @@
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH='/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/bin'
 DESC='Seafile client for user %USER%'
-NAME='seaf-cli-%USER%''
+NAME='seaf-cli-%USER%'
 DAEMON='/usr/local/bin/seaf-cli'
 SCRIPTNAME="/etc/init.d/${NAME}"
 
