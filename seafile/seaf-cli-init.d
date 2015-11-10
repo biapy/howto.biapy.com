@@ -110,12 +110,12 @@ case "${1}" in
 	esac
 	;;
 
-	status|init|list|download|sync|desync)
+	*)
 		command sudo -u "${USER}" -- "${DAEMON}" "${@}"
 	;;
 
   *)
-	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload|init|list|download|sync|desync}" >&2
+	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload|init|list|download|sync|desync|create|config|--status-all}" >&2
 	exit 3
 	;;
 esac
