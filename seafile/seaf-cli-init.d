@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/bash
 ### BEGIN INIT INFO
 # Provides:          seaf-cli-%USER%
 # Required-Start:    $remote_fs $syslog $network
@@ -66,25 +66,25 @@ do_reload() {
 	# restarting (for example, when it is sent a SIGHUP),
 	# then implement that here.
 	#
-	start-stop-daemon --stop --signal 1 --quiet --pidfile $PIDFILE --name $NAME
+	start-stop-daemon --stop --signal 1 --quiet --pidfile "${PIDFILE}" --name "${NAME}"
 	return 0
 }
 
-case "$1" in
+case "${1}" in
   start)
-	[ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+	[ "${VERBOSE}" != no ] && log_daemon_msg "Starting ${DESC}" "${NAME}"
 	do_start
-	case "$?" in
-		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+	case "${?}" in
+		0|1) [ "${VERBOSE}" != no ] && log_end_msg 0 ;;
+		2) [ "${VERBOSE}" != no ] && log_end_msg 1 ;;
 	esac
 	;;
   stop)
-	[ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+	[ "${VERBOSE}" != no ] && log_daemon_msg "Stopping ${DESC}" "${NAME}"
 	do_stop
-	case "$?" in
-		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+	case "${?}" in
+		0|1) [ "${VERBOSE}" != no ] && log_end_msg 0 ;;
+		2) [ "${VERBOSE}" != no ] && log_end_msg 1 ;;
 	esac
 	;;
   restart|force-reload)
@@ -92,12 +92,12 @@ case "$1" in
 	# If the "reload" option is implemented then remove the
 	# 'force-reload' alias
 	#
-	log_daemon_msg "Restarting $DESC" "$NAMEb1e9c3e9-e11b-46d4-a565-f3d7beaa8b08"
+	log_daemon_msg "Restarting ${DESC}" "${NAME}"
 	do_stop
-	case "$?" in
+	case "${?}" in
 	  0|1)
 		do_start
-		case "$?" in
+		case "${?}" in
 			0) log_end_msg 0 ;;
 			1) log_end_msg 1 ;; # Old process is still running
 			*) log_end_msg 1 ;; # Failed to start
@@ -111,7 +111,7 @@ case "$1" in
 	;;
 
 	status|init|list|download|sync|desync)
-		command sudo -u "${USER}" -- "${DAEMON}" ${@}
+		command sudo -u "${USER}" -- "${DAEMON}" "${@}"
 	;;
 
   *)
