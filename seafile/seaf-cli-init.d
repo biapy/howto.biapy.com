@@ -115,7 +115,7 @@ case "${1}" in
 	;;
 
   *)
-	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload|init|list|download|sync|desync|create|config|--status-all}" >&2
+	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload|init|list|download|sync|desync|create|config}" >&2
 	exit 3
 	;;
 esac
