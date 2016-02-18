@@ -1,0 +1,16 @@
+[Unit]
+Description=rTorrent
+Requires=network.target local-fs.target
+
+[Service]
+User=www-data
+Type=forking
+KillMode=none
+ExecStart=/usr/bin/screen -fn -dmS rtorrent-www-data nice -19 rtorrent -n -o import=/etc/rtorrent.rc
+ExecStop=/usr/bin/screen -S 'rtorrent-www-data' -X quit
+SuccessExitStatus=1
+TimeoutSec=5
+Restart=always
+
+[Install]
+WantedBy=default.target
