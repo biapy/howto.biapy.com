@@ -4,7 +4,7 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-VERSION=2.0.4
+VERSION=3.1.0
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -138,12 +138,15 @@ SSL_TEMPLATE="
     # Mitigating the BEAST attack on TLS
     # see https://community.qualys.com/blogs/securitylabs/2011/10/17/mitigating-the-beast-attack-on-tls
     SSLHonorCipherOrder On
-    SSLCipherSuite ECDHE-RSA-AES256-SHA384:AES256-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH:!AESGCM
+    SSLCipherSuite EECDH+ECDSA+AESGCM EECDH+aRSA+AESGCM EECDH+ECDSA+SHA384 EECDH+ECDSA+SHA256 EECDH+aRSA+SHA384 EECDH+aRSA+SHA256 EECDH+aRSA+RC4 EECDH EDH+aRSA RC4 !aNULL !eNULL !LOW !3DES !MD5 !EXP !PSK !SRP !DSS !RC4
+    # Allow RC4 for older browsers.
+    # see https://www.digicert.com/ssl-support/ssl-enabling-perfect-forward-secrecy.htm#apache_forward_secrecy
+    # SSLCipherSuite EECDH+ECDSA+AESGCM EECDH+aRSA+AESGCM EECDH+ECDSA+SHA384 EECDH+ECDSA+SHA256 EECDH+aRSA+SHA384 EECDH+aRSA+SHA256 EECDH+aRSA+RC4 EECDH EDH+aRSA RC4 !aNULL !eNULL !LOW !3DES !MD5 !EXP !PSK !SRP !DSS +RC4 RC4
 
     # We allow SSLv3 and TLSv1 only, we reject the old SSLv2.
     # TLSv1 is needed to support SNI (Server Name Indication).
     # SNI allow to have multiple SSL certificates on one IP address.
-    SSLProtocol All +TLSv1 -SSLv2
+    SSLProtocol All +TLSv1 -SSLv2 -SSLv3
 
     # Server public and private certificate files:
     SSLCertificateFile \"CERTIFICATE_FILE\"
@@ -284,6 +287,10 @@ PATH_TEMPLATE="
     # http://httpd.apache.org/docs/2.0/mod/core.html#allowoverride
     AllowOverride ALLOW_OVERRIDE
 
+    <IfVersion >= 2.4>
+      Require all granted
+    </IfVersion>
+
     Order allow,deny
     Allow from all
   </Directory>
@@ -305,7 +312,7 @@ REVERSE_PROXY_TEMPLATE="
       ProxyPreserveHost On
 
       # Fix IE problem (http error 408/409)
-      SetEnv proxy-nokeepalive 1
+      BrowserMatch \"MSIE [2-6]\" proxy-nokeepalive 1
 
       <IfModule mod_ssl.c>
         # Turn this on if the site behind the reverse proxy is on HTTPS.
@@ -320,19 +327,23 @@ REVERSE_PROXY_TEMPLATE="
         ProxySet connectiontimeout=600 timeout=4000
       </Proxy>
 
-      # Here is the magic that proxyfy the LAN server. 
+      # Here is the magic that proxyfy the LAN server.
       # The first line is .... i don't remember what...
       # but trust me, it is usefull ;p.
       # The second line is a rewrite rule that do the proxy
       # magic. I was used to use a ProxyPass rule to do this work, but it
       # turned out that sometimes ProxyPass give you a 503 error when under
-      # heavy load. The RewriteRule does not have this flow.
+      # heavy load. The RewriteRule does not have this flaw.
       ProxyPassReverse  /       TARGET_VALUE
       RewriteRule       ^/(.*)  TARGET_VALUE\$1  [P,L]
 
       # This Location directives allow users to access to the proxyfied contents.
       # Do not remove this if you want your site to work.
       <Location />
+        <IfVersion >= 2.4>
+          Require all granted
+        </IfVersion>
+
         Order deny,allow
         Allow from all
       </Location>
@@ -352,6 +363,10 @@ REDIRECT_TEMPLATE="
   # This Location directives allow users to access the redirection.
   # Do not remove this if you want your site to work.
   <Location />
+    <IfVersion >= 2.4>
+      Require all granted
+    </IfVersion>
+
     Order deny,allow
     Allow from all
   </Location>"
@@ -363,10 +378,11 @@ REDIRECT_TEMPLATE="
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path.
-REALPATH=""
 function realpath {
+  declare -g REALPATH=''
+
   command test ${#} -ne 1 && exit 1
-  REALPATH=$(/bin/readlink -f "${1}")
+  REALPATH="$(command readlink -f "${1}")"
 } # realpath
 
 
@@ -377,8 +393,9 @@ function realpath {
 # @param string $path A relative path.
 #
 # @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=""
 function realpath_check {
+  declare -g REALPATH=''
+
   command test ${#} -ne 1 && exit 1
 
   realpath "${1}"
@@ -641,7 +658,11 @@ function getopt()
 # @return void
 function apache2_reload {
   if command apache2ctl -t > /dev/null 2>&1; then
-    /etc/init.d/apache2 reload
+    if [ -n "$(command which 'service')" ]; then
+      command service 'apache2' 'reload'
+    else
+      /etc/init.d/apache2 'reload'
+    fi
   else
     echo "Error in Apache 2 configuration : reload cancelled."
     exit 1
@@ -656,7 +677,11 @@ function apache2_reload {
 # @return void
 function apache2_force_reload {
   if command apache2ctl -t > /dev/null 2>&1; then
-    /etc/init.d/apache2 force-reload
+    if [ -n "$(command which 'service')" ]; then
+      command service 'apache2' 'force-reload'
+    else
+      /etc/init.d/apache2 'force-reload'
+    fi
   else
     echo "Error in Apache 2 configuration : forced reload cancelled."
     exit 1
@@ -702,7 +727,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
   # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
 
   case "${OPTOPT}" in
-    template | t )
+    'template' | 't' )
 
       case "${OPTARG}" in
         vhost | virtual-host )
@@ -726,7 +751,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
       esac
 
       ;;
-    ssl | s )
+    'ssl' | 's' )
       SSL_ENABLED="1"
       PROTOCOL="https"
       APACHE_MODULES="${APACHE_MODULES} ssl"
@@ -753,45 +778,45 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
         fi
       fi
       ;;
-    alias | a )
+    'alias' | 'a' )
       if [ -n "${OPTARG}" ]; then
         SERVER_ALIAS="${SERVER_ALIAS} ${OPTARG}"
       fi
       ;;
-    private-key | key | k )
+    'private-key' | 'key' | 'k' )
       realpath_check "${OPTARG}"
       SSL_PRIVATE_KEY="${REALPATH}"
       ;;
-    public-key | crt | p )
+    'public-key' | 'crt' | 'p' )
       realpath_check "${OPTARG}"
       SSL_PUBLIC_KEY="${REALPATH}"
       ;;
-    root-ca | root | r )
+    'root-ca' | 'root' | 'r' )
       realpath_check "${OPTARG}"
       SSL_ROOT_CA="${REALPATH}"
       ;;
-    chain-ca | chain | c )
+    'chain-ca' | 'chain' | 'c' )
       realpath_check "${OPTARG}"
       SSL_CHAIN_CA="${REALPATH}"
       ;;
-    bind-ip | ip | i )
+    'bind-ip' | 'ip' | 'i' )
       if [ -n "${OPTARG}" ]; then
         SSL_BIND_IP="${OPTARG}"
       fi
       ;;
-    overrides | o )
+    'overrides' | 'o' )
       if [ -n "${OPTARG}" ]; then
         ALLOW_OVERRIDE="${OPTARG}"
       fi
       ;;
-    without-multiviews )
+    'without-multiviews' )
       MULTI_VIEWS="-MultiViews"
       ;;
-    remove | d )
+    'remove' | 'd' )
       IS_REMOVAL="1"
       ;;
 
-    help | h | * )
+    'help' | 'h' | '*' )
       usage
       exit 0
       ;;
@@ -807,56 +832,56 @@ SCRIPT_PATH="${REALPATH}"
 
 # Process retro-compatibility.
 case "${1}" in
-  add-virtual-host|add-vhost )
+  'add-virtual-host' | 'add-vhost' )
     ${SCRIPT_PATH} --template="virtual-host" \
                     --overrides="${4}" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-reverse-proxy|add-reverse )
+  'add-reverse-proxy' | 'add-reverse' )
     ${SCRIPT_PATH} --template="reverse-proxy" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-ssl-virtual-host|add-ssl-vhost )
+  'add-ssl-virtual-host' | 'add-ssl-vhost' )
     ${SCRIPT_PATH} --template="virtual-host" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" --overrides="${7}" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-ssl-reverse-proxy )
+  'add-ssl-reverse-proxy' )
     ${SCRIPT_PATH} --template="reverse-proxy" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-redirect )
+  'add-redirect' )
     ${SCRIPT_PATH} --template="redirect" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-ssl-redirect )
+  'add-ssl-redirect' )
     ${SCRIPT_PATH} --template="redirect" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-custom )
+  'add-custom' )
     ${SCRIPT_PATH} --template="custom" \
                     "${2}" "${3}"
     exit 0
     ;;
-  add-ssl-custom )
+  'add-ssl-custom' )
     ${SCRIPT_PATH} --template="custom" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" \
                     "${2}" "${3}"
     exit 0
     ;;
-  remove )
+  'remove' )
     ${SCRIPT_PATH} --remove "${2}"
     exit 0
     ;;
@@ -875,10 +900,14 @@ if [ "${IS_REMOVAL}" = "1" ]; then
   # Process the virtualhosts removal.
 
   declare -a CONFIG_FILES
-  CONFIG_FILES[0]="http-${SITE_HOSTNAME}"
-  CONFIG_FILES[1]="https-${SITE_HOSTNAME}"
-  CONFIG_FILES[2]="redirect-http-${SITE_HOSTNAME}"
-  CONFIG_FILES[3]="redirect-https-${SITE_HOSTNAME}"
+  CONFIG_FILES[0]="http-${SITE_HOSTNAME}.conf"
+  CONFIG_FILES[1]="https-${SITE_HOSTNAME}.conf"
+  CONFIG_FILES[2]="redirect-http-${SITE_HOSTNAME}.conf"
+  CONFIG_FILES[3]="redirect-https-${SITE_HOSTNAME}.conf"
+  CONFIG_FILES[4]="http-${SITE_HOSTNAME}"
+  CONFIG_FILES[5]="https-${SITE_HOSTNAME}"
+  CONFIG_FILES[6]="redirect-http-${SITE_HOSTNAME}"
+  CONFIG_FILES[7]="redirect-https-${SITE_HOSTNAME}"
 
   for FILE in ${CONFIG_FILES[@]}; do
     if [ -e "/etc/apache2/sites-available/${FILE}" ]; then
@@ -895,7 +924,7 @@ else
   TARGET_VALUE="${2}"
 
   # Compute the VirtualHost filename.
-  VHOST_FILE="${TYPE_PREFIX}${PROTOCOL}-${SITE_HOSTNAME}"
+  VHOST_FILE="${TYPE_PREFIX}${PROTOCOL}-${SITE_HOSTNAME}.conf"
 
   # Setup defaults.
   SSL_PROXY_ENGINE="Off"
