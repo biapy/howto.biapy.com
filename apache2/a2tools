@@ -4,7 +4,7 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-VERSION=3.1.1
+VERSION=3.1.2
 
 SCRIPT_NAME="$(command basename ${0})"
 
@@ -149,7 +149,12 @@ SSL_TEMPLATE="
     SSLProtocol All +TLSv1 -SSLv2 -SSLv3
 
     # Server public and private certificate files:
-    SSLCertificateFile \"CERTIFICATE_FILE\"
+    <IfVersion < 2.4>
+      SSLCertificateFile \"CERTIFICATE_FILE\"
+    </IfVersion>
+    <IfVersion >= 2.4>
+      SSLCertificateFile \"CERTIFICATE_COMPLETE_FILE\"
+    </IfVersion>
     SSLCertificateKeyFile \"KEY_FILE\"
 
     #   Server Certificate Chain:
@@ -159,7 +164,9 @@ SSL_TEMPLATE="
     #   the referenced file can be the same as SSLCertificateFile
     #   when the CA certificates are directly appended to the server
     #   certificate for convinience.
-    # SSLCertificateChainFile \"CHAIN_FILE\"
+    <IfVersion < 2.4>
+      SSLCertificateChainFile \"CHAIN_FILE\"
+    </IfVersion>
 
     #   Certificate Authority (CA):
     #   Set the CA certificate verification path where to find CA
@@ -317,6 +324,10 @@ REVERSE_PROXY_TEMPLATE="
       <IfModule mod_ssl.c>
         # Turn this on if the site behind the reverse proxy is on HTTPS.
         SSLProxyEngine Off
+        # SSLProxyVerify none
+        # SSLProxyCheckPeerCN off
+        # SSLProxyCheckPeerName off
+        SSLProxyCheckPeerExpire off
       </IfModule>
 
       # Declare the current request protocol.
@@ -762,9 +773,18 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
           SSL_PRIVATE_KEY="/etc/ssl/private/${OPTARG}.key"
         fi
 
+        if [ -z "${SSL_COMPLETE_PUBLIC_KEY}" \
+            -a -e "/etc/ssl/certificates/${OPTARG}.crt+chain+root" ]; then
+          SSL_COMPLETE_PUBLIC_KEY="/etc/ssl/certificates/${OPTARG}.crt+chain+root"
+        fi
+
         if [ -z "${SSL_PUBLIC_KEY}" \
             -a -e "/etc/ssl/certificates/${OPTARG}.crt" ]; then
           SSL_PUBLIC_KEY="/etc/ssl/certificates/${OPTARG}.crt"
+
+          if [ -z "${SSL_COMPLETE_PUBLIC_KEY}" ]; then
+            SSL_COMPLETE_PUBLIC_KEY="${SSL_PUBLIC_KEY}"
+          fi
         fi
 
         if [ -z "${SSL_ROOT_CA}" \
@@ -790,6 +810,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
     'public-key' | 'crt' | 'p' )
       realpath_check "${OPTARG}"
       SSL_PUBLIC_KEY="${REALPATH}"
+      SSL_COMPLETE_PUBLIC_KEY="${SSL_PUBLIC_KEY}"
       ;;
     'root-ca' | 'root' | 'r' )
       realpath_check "${OPTARG}"
@@ -988,6 +1009,7 @@ ${VHOST_TEMPLATE[1]}"
     VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
       | command sed -e "s|*:80|${SSL_BIND_IP}:443|g" \
         -e "s|CERTIFICATE_FILE|${SSL_PUBLIC_KEY}|g" \
+        -e "s|CERTIFICATE_COMPLETE_FILE|${SSL_COMPLETE_PUBLIC_KEY}|g" \
         -e "s|KEY_FILE|${SSL_PRIVATE_KEY}|g" \
         -e "s|X-Forwarded-Proto \"http|X-Forwarded-Proto \"${PROTOCOL}|")"
 
