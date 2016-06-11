@@ -5,20 +5,54 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="0.1.3"
+version="1.0"
 
-SCRIPT_NAME="$(command basename ${0})"
+# History
+# -------
+#
+# 1.0:
+#  - add compatibility for Debian 8.0 Jessie php5enmod
+#
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+
+
+
+script_name="$(basename "${0}")"
+
+
 
 # Print this script help.
 function usage {
-  command echo "PHP Tools v${VERSION}
-This tool ease PHP5 ini configuration from command line.
+
+  echo "PHP Tools v${version}
+This tool ease PHP5 ini configuration from line.
 All ini configurations changed by this tool are in
 /etc/php5/conf.d/zzz-php-tools.ini
 
 Usage :
 
-  ${SCRIPT_NAME} [ --analyze 'ini-config-rule' ]
+  ${script_name} [ --analyze 'ini-config-rule' ]
       [ --set 'init-config-rule' 'value' ]
       [ --fix 'init-config-rule' 'value' ]
       [ --get 'init-config-rule' ]
@@ -37,63 +71,193 @@ Usage :
     * --get | -g      : Get config rule value.
 "
 
-  test -n "${1}" && exit ${1}
+  [[ -n "${1}" ]] && exit ${1}
 } # usage
 
 
 
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+
+
+
 # Get the absolute path for a file or directory.
+# Print its path on &1 if found.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path.
-REALPATH=""
-function realpath {
-  command test ${#} -ne 1 && exit 1
-  REALPATH="$(/bin/readlink -f "${1}")"
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath=''
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
 } # realpath
 
 
 
 # Get the absolute path for a file or directory and check the file existance.
 # If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path or an empty string if file don't exists.
-REALPATH=""
-function realpath_check {
-  command test ${#} -ne 1 && exit 1
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
 
-  realpath "${1}"
+  local realpath="$(realpath "${1}")"
 
-  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
-    REALPATH=""
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
   fi
 
-  if [ -z "${REALPATH}" ]; then
-    echo "Error : File '${1}' does not exists." >&2
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
     exit 1
   fi
+
+  echo -n "${realpath}"
+  return 0
 } # realpath_check
 
 
 
-# Check if a binary is present
+# Check if a binary is present. Print its path on &1 if found.
 #
-# @param string $binary The binary to check.
+# @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-function check_binary {
-  command test ${#} -ne 2 && exit 1
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary="$(cut -d ';' -f 1 <<< "${1}")"
+  local binaries="";
+  local binary=''
+
+  read -d ';' -r -a binaries <<< "${1}"
 
   # Test the binary presence.
-  if [ -z "$(command which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
-} # check_binary
+  for binary in ${binaries[@]}; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
 
 
 
@@ -102,42 +266,42 @@ function check_binary {
 # @param string $value The ini value.
 #
 # @return string The ini value as integer.
-function parse_value {
-  command test ${#} -ne 1 && exit 1
+function parse_value() {
+  test ${#} -ne 1 && exit 1
 
-  VALUE="${1}"
+  value="${1}"
 
-  INTEGER_VALUE="$(echo "${VALUE}" | command sed -e 's/^\([0-9]*\)[^0-9]\{0,1\}.*$/\1/')"
-  UNIT="$(echo "${VALUE}" | command sed -e 's/^[0-9]*\([^0-9]*\)$/\1/' | command tr 'A-Z' 'a-z')"
+  integer_value="$(sed -e 's/^\([0-9]*\)[^0-9]\{0,1\}.*$/\1/' <<< "${value}")"
+  unit="$(echo -n "${value}" | sed -e 's/^[0-9]*\([^0-9]*\)$/\1/' | tr '[:upper:]' '[:lower:]')"
 
-  RESULT=""
-  if [ -z "${INTEGER_VALUE}" ]; then
-    case "${UNIT}" in
-      "true" | "on" | "yes" | "y" )
-        RESULT="1"
+  result=""
+  if [ -z "${integer_value}" ]; then
+    case "${unit}" in
+      'true' | 'on' | 'yes' | 'y' )
+        result="1"
         ;;
 
-      "false" | "off" | "no" | "n" | * )
-        RESULT="0"
+      'false' | 'off' | 'no' | 'n' | * )
+        result="0"
         ;;
     esac
   else
-    case "${UNIT}" in
-      "g" | "gb" )
-        RESULT=$(( ${INTEGER_VALUE} * 1024 * 1024 * 1024 ))
+    case "${unit}" in
+      'g' | 'gb' )
+        result=$(( ${integer_value} * 1024 * 1024 * 1024 ))
         ;;
-      "m" | "mb" )
-        RESULT=$(( ${INTEGER_VALUE} * 1024 * 1024 ))
+      'm' | 'mb' )
+        result=$(( ${integer_value} * 1024 * 1024 ))
         ;;
-      "k" | "kb" )
-        RESULT=$(( ${INTEGER_VALUE} * 1024 ))
+      'k' | 'kb' )
+        result=$(( ${integer_value} * 1024 ))
         ;;
       * )
-        RESULT="${INTEGER_VALUE}"
+        result="${integer_value}"
     esac
   fi
 
-  echo "${RESULT}"
+  echo "${result}"
 } # parse_value
 
 
@@ -149,104 +313,98 @@ function parse_value {
 #######################################################################################
 #######################################################################################
 #######################################################################################
-function getoptex()
-{
+function getoptex() {
   let $# || return 1
   local optlist="${1#;}"
-  let OPTIND || OPTIND=1
-  [ $OPTIND -lt $# ] || return 1
-  shift $OPTIND
-  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
-  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
-  then
-    local o
-    o="-${1#-$OPTOFS}"
-    for opt in ${optlist#;}
-    do
-      OPTOPT="${opt%[;.:]}"
-      unset OPTARG
-      local opttype="${opt##*[^;:.]}"
-      [ -z "$opttype" ] && opttype=";"
-      if [ ${#OPTOPT} -gt 1 ]
-      then # long-named option
-        case $o in
-          "--$OPTOPT")
-            if [ "$opttype" != ":" ]; then return 0; fi
-            OPTARG="$2"
-            if [ -z "$OPTARG" ];
-            then # error: must have an agrument
-              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT";
-              OPTOPT="?"
-              return 1;
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "--$OPTOPT="*)
-            if [ "$opttype" = ";" ];
-            then  # error: must not have arguments
-              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTARG=${o#"--$OPTOPT="}
-            return 0
-          ;;
-        esac
-      else # short-named option
-        case "$o" in
-          "-$OPTOPT")
-            unset OPTOFS
-            [ "$opttype" != ":" ] && return 0
-            OPTARG="$2"
-            if [ -z "$OPTARG" ]
-            then
-              echo "$0: error: -$OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
-              return 1
-            fi
-            OPTIND=$[OPTIND+1] # skip option's argument
-            return 0
-          ;;
-          "-$OPTOPT"*)
-            if [ $opttype = ";" ]
-            then # an option with no argument is in a chain of options
-              OPTOFS="$OPTOFS?" # move to the next option in the chain
-              OPTIND=$[OPTIND-1] # the chain still has other options
+  let optind || optind=1
+  [[ $optind -lt $# ]] || return 1
+  shift $optind
+  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
+    optind=$((optind+1));
+    if [[ "$1" != "--" ]]; then
+      local o
+      o="-${1#-$optofs}"
+      for opt in ${optlist#;}
+      do
+        optopt="${opt%[;.:]}"
+        unset optarg
+        local opttype="${opt##*[^;:.]}"
+        [[ -z "$opttype" ]] && opttype=";"
+        if [[ ${#optopt} -gt 1 ]]; then # long-named option
+          case $o in
+            "--$optopt")
+              if [[ "$opttype" != ":" ]]; then
+                return 0;
+              fi
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then # error: must have an agrument
+                let OPTERR && echo "$0: error: $optopt must have an argument" >&2
+                optarg="$optopt";
+                optopt="?"
+                return 1;
+              fi
+              optind=$((optind+1)) # skip option's argument
               return 0
-            else
-              unset OPTOFS
-              OPTARG="${o#-$OPTOPT}"
+            ;;
+            "--$optopt="*)
+              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
+                let OPTERR && echo "$0: error: $optopt must not have arguments" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optarg=${o#"--$optopt="}
               return 0
-            fi
-          ;;
-        esac
-      fi
-    done
-    echo "Error : invalid option : '${o}'." >&2
-    usage
-    exit 1
-  fi; fi
-  OPTOPT="?"
-  unset OPTARG
+            ;;
+          esac
+        else # short-named option
+          case "$o" in
+            "-$optopt")
+              unset optofs
+              [[ "$opttype" != ":" ]] && return 0
+              optarg="$2"
+              if [[ -z "$optarg" ]]; then
+                echo "$0: error: -$optopt must have an argument" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optind=$((optind+1)) # skip option's argument
+              return 0
+            ;;
+            "-$optopt"*)
+              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
+                optofs="$optofs?" # move to the next option in the chain
+                optind=$((optind-1)) # the chain still has other options
+                return 0
+              else
+                unset optofs
+                optarg="${o#-$optopt}"
+                return 0
+              fi
+            ;;
+          esac
+        fi
+      done
+      cecho 'redbold' "Error : invalid option : '${o}'." >&2
+      usage
+      exit 1
+    fi
+  fi
+  optopt="?"
+  unset optarg
   return 1
 }
-function optlistex
-{
+function optlistex() {
   local l="$1"
   local m # mask
   local r # to store result
-  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
-  while [ -n "$l" ]
-  do
+  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
     m="${m#?}"  # cut one "?" sign from m
-    if [ -n "${l%%[^:.;]*}" ]
-    then # a special character (";", ".", or ":") was found
+    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
       r="$r${l%$m}" # append it to $r
       l="${l#?}" # cut the special character from l
       m="${m#?}"  # cut one more "?" sign
@@ -254,8 +412,7 @@ function optlistex
   done
   echo $r
 }
-function getopt()
-{
+function getopt() {
   local optlist=`optlistex "$1"`
   shift
   getoptex "$optlist" "$@"
@@ -266,180 +423,193 @@ function getopt()
 #######################################################################################
 
 
-
 # Check for binaries presence
-check_binary "basename" "coreutils"
-check_binary "dirname" "coreutils"
-check_binary "mktemp" "mktemp"
-check_binary "sed" "sed"
-check_binary "php" "php5-cli"
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "mktemp" "mktemp" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "php" "php5-cli" > '/dev/null'
 
 
 # Application defaults
-FOR="false"
-ACTION="false"
-INI_RULE="false"
-VALUE=""
+for="false"
+action="false"
+ini_rule="false"
+value=""
 
-PHP_BASE="/etc/php5"
-PHP_CONFIG_D="${PHP_BASE}/conf.d"
-PHP_CONFIG_FILE="${PHP_CONFIG_D}/zzz-php-tools.ini"
+php_base="/etc/php5"
+php_config_d="${php_base}/conf.d"
+test -d '/etc/php5/mods-available' \
+  && php_config_d='/etc/php5/mods-available'
+php_config_name="zzz-php-tools"
+php_config_file="${php_config_d}/${php_config_name}.ini"
+
+
+priority=99
+php_config_file_template="; Enable APC ressources sharing.
+; priority=${priority}
+"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
 while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g:" "${@}"; do
   # Options debuging.
-  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
-  case "${OPTOPT}" in
-    set | s )
-      ACTION="set"
-      INI_RULE="${OPTARG}"
+  case "${optopt}" in
+    'set' | 's' )
+      action='set'
+      ini_rule="${optarg}"
       ;;
 
-    fix | f )
-      ACTION="fix"
-      INI_RULE="${OPTARG}"
+    'fix' | 'f' )
+      action='fix'
+      ini_rule="${optarg}"
       ;;
 
-    get | g )
-      ACTION="get"
-      INI_RULE="${OPTARG}"
+    'get' | 'g' )
+      action='get'
+      ini_rule="${optarg}"
       ;;
 
-    analyze | a )
-      ACTION="analyze"
-      INI_RULE="${OPTARG}"
+    'analyze' | 'a' )
+      action='analyze'
+      ini_rule="${optarg}"
       ;;
 
-    for | f )
-      FOR="${OPTARG}"
+    'for' | 'f' )
+      for="${optarg}"
       ;;
 
-    help | h | * )
+    'help' | 'h' | * )
       usage 0
       ;;
   esac
 done
 
-shift $[OPTIND-1]
+shift $((optind-1))
 
-if [ "${ACTION}" = "false" ]; then
-  echo "Error: no action specified." >&2
+if [[ "${action}" = 'false' ]]; then
+  cecho 'redbold' 'Error: no action specified.' >&2
+  usage 1
+fi
+
+# Check that ini_rule exists.
+if [[ -n "$(php --run "echo (ini_get('${ini_rule}') === false) ? 'error':'';")" ]]; then
+  cecho 'redbold' "Error: '${ini_rule}' is not a valid PHP configuration option." >&2
   exit 1
 fi
 
-# Check that INI_RULE exists.
-if [ "$(command php --run "echo (ini_get('${INI_RULE}') === false) ? 'error':'ok';")" = "error" ]; then
-  echo "Error: '${INI_RULE}' is not a valid PHP configuration option." >&2
-  exit 1
-fi
 
-
-case "${ACTION}" in
-  analyze )
-    echo "Analysing '${INI_RULE}' settings
+case "${action}" in
+  'analyze' )
+    echo "Analysing '${ini_rule}' settings
 ============================================================="
 
-    FIRST=1
-    command find "${PHP_BASE}" -name "php.ini" \
-      | command grep -v "${PHP_CONFIG_D}" \
-      | command sort \
-      | command xargs -iFILE /bin/egrep --with-filename "^[\t ]*${INI_RULE}[\t ]*=" "FILE" \
-      | while read LINE; do
-      if [ ${FIRST} -eq 1 ]; then
+    first=1
+    find "${php_base}" -name "php.ini" \
+      | grep -v "${php_config_d}" \
+      | sort \
+      | xargs -ifile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "file" \
+      | while read line; do
+      if [ ${first} -eq 1 ]; then
         echo "Base PHP ini files
 -------------------------------------------------------------"
-        FIRST=0
+        first=0
       fi
-      FILE="$(command echo "${LINE}" | command cut --delimiter=":" --fields=1)"
-      RULE="$(command echo "${LINE}" | command cut --delimiter=":" --fields=2-)"
-      VALUE="$(command echo "${RULE}" | command sed -e 's/^[^=]*=[ \t]*//' -e 's/;.*$//')"
-      printf "%-60s: %s\n" "${FILE}" "${VALUE}"
+      file="$(cut --delimiter=":" --fields=1 <<< "${line}")"
+      rule="$(cut --delimiter=":" --fields=2- <<< "${line}")"
+      value="$(sed -e 's/^[^=]*=[ \t]*//' -e 's/;.*$//' <<< "${rule}")"
+      printf "%-60s: %s\n" "${file}" "${value}"
     done
-    FIRST=1
-    command find "${PHP_CONFIG_D}" -name "*.ini" \
-      | command sort \
-      | command xargs -iFILE /bin/egrep --with-filename "^[\t ]*${INI_RULE}[\t ]*=" "FILE" \
-      | while read LINE; do
-      if [ ${FIRST} -eq 1 ]; then
+    first=1
+    find "${php_config_d}" -name "*.ini" \
+      | sort \
+      | xargs -ifile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "file" \
+      | while read line; do
+      if [ ${first} -eq 1 ]; then
         echo "
 conf.d ini files
 -------------------------------------------------------------"
-        FIRST=0
+        first=0
       fi
-      FILE="$(command echo "${LINE}" | command cut --delimiter=":" --fields=1)"
-      RULE="$(command echo "${LINE}" | command cut --delimiter=":" --fields=2-)"
-      VALUE="$(command echo "${RULE}" | command sed -e 's/^[^=]*=[ \t]*//' -e 's/;.*$//')"
-      printf "%-60s: %s\n" "${FILE}" "${VALUE}"
+      file="$(cut --delimiter=":" --fields=1 <<< "${line}")"
+      rule="$(cut --delimiter=":" --fields=2- <<< "${line}")"
+      value="$(sed -e 's/^[^=]*=[ \t]*//' -e 's/;.*$//' <<< "${rule}")"
+      printf "%-60s: %s\n" "${file}" "${value}"
     done
 
     echo "
 ============================================================="
-    command printf "%-60s: %s\n" "Current '${INI_RULE}' value" "$(command php --run "echo ini_get('${INI_RULE}');")"
+    printf "%-60s: %s\n" "Current '${ini_rule}' value" "$(php --run "echo ini_get('${ini_rule}');")"
     exit 0
     ;;
 
 
 
-  get )
-    command php --run "echo ini_get('${INI_RULE}');"
+  'get' )
+    php --run "echo ini_get('${ini_rule}');"
     echo
     exit 0
     ;;
 
 
 
-  set )
-    VALUE="${1}"
+  'set' )
+    value="${1}"
 
-    CURRENT_VALUE="$(command php --run "echo ini_get('${INI_RULE}');")"
+    # Create configuration file if necessary:
+    if [[ ! -e "${php_config_file}" ]]; then
+      echo "${php_config_file_template}" > "${php_config_file}"
+      [[ -x '/usr/sbin/php5enmod' ]] && ${cmdProxy} php5enmod "${php_config_name}/${priority}"
+    fi
 
-    PARSED_VALUE="$(parse_value "${VALUE}")"
-    PARSED_CURRENT_VALUE="$(parse_value "${CURRENT_VALUE}")"
+    current_value="$(php --run "echo ini_get('${ini_rule}');")"
 
-    if [ "${PARSED_VALUE}" -gt "${PARSED_CURRENT_VALUE}" ]; then
+    parsed_value="$(parse_value "${value}")"
+    parsed_current_value="$(parse_value "${current_value}")"
+
+    if [ "${parsed_value}" -gt "${parsed_current_value}" ]; then
       # Update the current value to use the new value.
-      SET_DONE="false"
-      if [  -e "${PHP_CONFIG_FILE}" ]; then
-        if [ -n "$(command egrep "^[\t ]*${INI_RULE}[\t ]*=" "${PHP_CONFIG_FILE}")" ]; then
-          command sed -i -e "s;^[\t ]*${INI_RULE}[\t ]*=.*$;${INI_RULE} = ${VALUE};" \
-              "${PHP_CONFIG_FILE}"
-          SET_DONE="true"
-        fi
+      set_done="false"
+      if [ -n "$(egrep "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}")" ]; then
+        sed -i -e "s;^[\t ]*${ini_rule}[\t ]*=.*$;${ini_rule} = ${value};" \
+            "${php_config_file}"
+        set_done="true"
       fi
 
-      if [ "${SET_DONE}" = "false" ]; then
-        command echo "
-; === ${INI_RULE} ===
-${INI_RULE} = ${VALUE}" \
-          >> "${PHP_CONFIG_FILE}"
-        SET_DONE="true"
+      # add new setting to configuration file if necessary.
+      if [ "${set_done}" = "false" ]; then
+        echo "
+; === ${ini_rule} ===
+${ini_rule} = ${value}" \
+          >> "${php_config_file}"
+        set_done="true"
       fi
     else
       # Set current value in ini file if it does not exists yet.
-      if [ -z "$(command egrep "^[\t ]*${INI_RULE}[\t ]*=" "${PHP_CONFIG_FILE}")" ]; then
-        command echo "
-; === ${INI_RULE} ===
-${INI_RULE} = ${CURRENT_VALUE}" \
-          >> "${PHP_CONFIG_FILE}"
+      if [ -z "$(egrep "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}")" ]; then
+        echo "
+; === ${ini_rule} ===
+${ini_rule} = ${current_value}" \
+          >> "${php_config_file}"
       fi
     fi
 
     # Add the "for" information as comment.
-    if [ "${FOR}" != "false" -a -n "${FOR}" ]; then
-      FOR_TEXT="; - for '${FOR}' : ${VALUE}"
-      if [ -z "$(command sed -e "0,/; === ${INI_RULE} ===/d" \
-                  -e "/^[\t ]*${INI_RULE}[\t ]*/,10000d" \
-                  "${PHP_CONFIG_FILE}" \
-                | command grep "${FOR_TEXT}")" ]; then
-        command sed -i -e "/^[\t ]*${INI_RULE}[\t ]*=/i\\
-${FOR_TEXT}" \
-          "${PHP_CONFIG_FILE}"
+    if [ "${for}" != "false" -a -n "${for}" ]; then
+      for_text="; - for '${for}' : ${value}"
+      if [ -z "$(sed -e "0,/; === ${ini_rule} ===/d" \
+                  -e "/^[\t ]*${ini_rule}[\t ]*/,10000d" \
+                  "${php_config_file}" \
+                | grep "${for_text}")" ]; then
+        sed -i -e "/^[\t ]*${ini_rule}[\t ]*=/i\\
+${for_text}" \
+          "${php_config_file}"
       fi
     fi
 
-    if [ "${SET_DONE}" = "true" ]; then
-      echo "'${INI_RULE}' is set to '${VALUE}'."
+    if [ "${set_done}" = "true" ]; then
+      echo "'${ini_rule}' is set to '${value}'."
     fi
     exit 0;
 
@@ -447,41 +617,48 @@ ${FOR_TEXT}" \
 
 
 
-  fix )
-    VALUE="${1}"
+  'fix' )
+    value="${1}"
 
-    SET_DONE="false"
-    if [  -e "${PHP_CONFIG_FILE}" ]; then
-      if [ -n "$(command egrep "^[\t ]*${INI_RULE}[\t ]*=" "${PHP_CONFIG_FILE}")" ]; then
-        command sed -i -e "s;^[\t ]*${INI_RULE}[\t ]*=.*$;${INI_RULE} = ${VALUE};" \
-            "${PHP_CONFIG_FILE}"
-        SET_DONE="true"
-      fi
+    set_done="false"
+
+    # Create configuration file if necessary:
+    if [[ ! -e "${php_config_file}" ]]; then
+      echo "${php_config_file_template}" > "${php_config_file}"
+      [[ -x '/usr/sbin/php5enmod' ]] && ${cmdProxy} php5enmod "${php_config_name}/${priority}"
     fi
 
-    if [ "${SET_DONE}" = "false" ]; then
-      command echo "
-; === ${INI_RULE} ===
-${INI_RULE} = ${VALUE}" \
-        >> "${PHP_CONFIG_FILE}"
-      SET_DONE="true"
+    # update existing setting if possible.
+    if [ -n "$(egrep "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}")" ]; then
+      sed -i -e "s;^[\t ]*${ini_rule}[\t ]*=.*$;${ini_rule} = ${value};" \
+          "${php_config_file}"
+      set_done="true"
+    fi
+
+    # add new setting to configuration file if necessary.
+    if [ "${set_done}" = "false" ]; then
+      echo "
+; === ${ini_rule} ===
+${ini_rule} = ${value}" \
+        >> "${php_config_file}"
+      set_done="true"
     fi
 
     # Add the "for" information as comment.
-    if [ "${FOR}" != "false" -a -n "${FOR}" ]; then
-      FOR_TEXT="; - for '${FOR}' : ${VALUE}"
-      if [ -z "$(command sed -e "0,/; === ${INI_RULE} ===/d" \
-                  -e "/^[\t ]*${INI_RULE}[\t ]*/,10000d" \
-                  "${PHP_CONFIG_FILE}" \
-                | command grep "${FOR_TEXT}")" ]; then
-        command sed -i -e "/^[\t ]*${INI_RULE}[\t ]*=/i\\
-${FOR_TEXT}" \
-          "${PHP_CONFIG_FILE}"
+    if [ "${for}" != "false" -a -n "${for}" ]; then
+      for_text="; - for '${for}' : ${value}"
+      if [ -z "$(sed -e "0,/; === ${ini_rule} ===/d" \
+                  -e "/^[\t ]*${ini_rule}[\t ]*/,10000d" \
+                  "${php_config_file}" \
+                | grep "${for_text}")" ]; then
+        sed -i -e "/^[\t ]*${ini_rule}[\t ]*=/i\\
+${for_text}" \
+          "${php_config_file}"
       fi
     fi
 
-    if [ "${SET_DONE}" = "true" ]; then
-      echo "'${INI_RULE}' is set to '${VALUE}'."
+    if [ "${set_done}" = "true" ]; then
+      echo "'${ini_rule}' is set to '${value}'."
     fi
     exit 0;
     ;;
@@ -489,7 +666,7 @@ ${FOR_TEXT}" \
 
 
   * )
-    echo "Error : '${1}' is not a valid action." >&2
+    cecho 'redbold' "Error : '${1}' is not a valid action." >&2
     usage 1
     ;;
 esac
