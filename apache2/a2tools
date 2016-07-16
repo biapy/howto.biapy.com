@@ -4,13 +4,16 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-version=3.2.0
+version=3.2.1
 
 # History
 # -------
 #
+# 3.2.1:
+#  - bug fix for redirect template with acme.
 # 3.2.0:
 #  - add support for Let's Encrypt via acme.sh.
+#  - use cecho to add some colors in message output.
 #
 
 
@@ -418,7 +421,7 @@ REDIRECT_TEMPLATE="
   # Redirect every body to the HTTPS site.
   # This make sure that all users use secure version of the site.
   # Note the \"permanent\" : It is good for search engine optimization :D.
-  <LocationMatch !^/.well-known/acme-challenge/.*>
+  <LocationMatch ^(?!/.well-known/acme-challenge)/>
     Redirect permanent / TARGET_VALUE
   </LocationMatch>
 
