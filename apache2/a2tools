@@ -4,33 +4,64 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-VERSION=3.1.2
+version=3.2.0
 
-SCRIPT_NAME="$(command basename ${0})"
+# History
+# -------
+#
+# 3.2.0:
+#  - add support for Let's Encrypt via acme.sh.
+#
+
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+scriptName="$(basename ${0})"
 
 # Print this script help.
 function usage {
-  command echo "Apache 2 Tools v${VERSION}
+  command echo "Apache 2 Tools v${version}
 This tool ease Apache 2 HTTP server administration from command line.
 
 Usage :
 
-  ${SCRIPT_NAME} --template={ vhost | virtual-host } [ options ]
+  ${scriptName} --template={ vhost | virtual-host } [ options ]
                   domain.name /path/to/www
         Setup a named virtualhost using domain.name as ServerName
         and /path/to/www as DocumentRoot.
-  ${SCRIPT_NAME} --template={ rproxy | reverse-proxy } [ options ]
+  ${scriptName} --template={ rproxy | reverse-proxy } [ options ]
                   domain.name http://server.local/
         Setup a reverse proxy using domain.name as ServerName
         and http://server.local/ proxied server.
-  ${SCRIPT_NAME} --template=redirect [ options ]
+  ${scriptName} --template=redirect [ options ]
                   domain.name http://domain.com/
         Setup a permanent redirection from http://domain.name/
         to http://domain.com/ as target url.
-  ${SCRIPT_NAME} --template=custom [ options ]
+  ${scriptName} --template=custom [ options ]
                  domain.name '# Custom Apache 2 configuration chunck.'
         Setup a customized virtual host using domain.name as ServerName.
-  ${SCRIPT_NAME} --remove domain.name
+  ${scriptName} --remove domain.name
         Remove all virtualhosts for the given domain.
 
 Available options are:
@@ -54,9 +85,12 @@ Available options are:
         Set AllowOverride directive (only for 'virtual-host' template).
   * --without-multiviews
         Disable MultiViews for VirtualHost. Can fix some rewriting problems.
-  * --ssl= | -s key_name
+  * --ssl= | -s { key_name | auto }
         Create a HTTP virtual host with mod_ssl.
         Require a key name or --private-key and --public-key
+        If 'auto' is used instead of a key name, a Let's Encrypt certificate
+        is created (require acme.sh installed for root user,
+        see https://github.com/Neilpang/acme.sh ).
         Using the key_name option set the following defaults:
          - private-key : /etc/ssl/private/key_name.key
          - public-key  : /etc/ssl/certificates/key_name.crt
@@ -73,7 +107,8 @@ Available options are:
   * --bind-ip= | --ip= | -i xx.xx.xx.xx
         Set the bind IP for a SSL virtual host (with --ssl only).
 "
-  exit 1
+
+  [[ -n "${1}" ]] && exit ${1}
 } # usage
 
 
@@ -278,7 +313,20 @@ SSL_TEMPLATE="
   </IfModule>
 "
 
+CERTBOT_TEMPLATE="
+  # Certbot acme challenge.
+  Alias \"/.well-known/acme-challenge\" \"CERTBOT_PATH\"
 
+  <Directory \"CERTBOT_PATH\">
+
+    <IfVersion >= 2.4>
+      Require all granted
+    </IfVersion>
+
+    Order allow,deny
+    Allow from all
+  </Directory>
+"
 
 # Apache 2 standard Virtual Host template.
 PATH_TEMPLATE="
@@ -346,6 +394,7 @@ REVERSE_PROXY_TEMPLATE="
       # turned out that sometimes ProxyPass give you a 503 error when under
       # heavy load. The RewriteRule does not have this flaw.
       ProxyPassReverse  /       TARGET_VALUE
+      RewriteCond %{REQUEST_URI} !^/.well-known/acme-challenge/.*
       RewriteRule       ^/(.*)  TARGET_VALUE\$1  [P,L]
 
       # This Location directives allow users to access to the proxyfied contents.
@@ -369,7 +418,9 @@ REDIRECT_TEMPLATE="
   # Redirect every body to the HTTPS site.
   # This make sure that all users use secure version of the site.
   # Note the \"permanent\" : It is good for search engine optimization :D.
-  Redirect permanent / TARGET_VALUE
+  <LocationMatch !^/.well-known/acme-challenge/.*>
+    Redirect permanent / TARGET_VALUE
+  </LocationMatch>
 
   # This Location directives allow users to access the redirection.
   # Do not remove this if you want your site to work.
@@ -381,6 +432,108 @@ REDIRECT_TEMPLATE="
     Order deny,allow
     Allow from all
   </Location>"
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
 
 
 
@@ -416,7 +569,7 @@ function realpath_check {
   fi
 
   if [ -z "${REALPATH}" ]; then
-    echo "Error : File '${1}' does not exists." >&2
+    cecho "red" "Error : File '${1}' does not exists." >&2
     exit 1
   fi
 } # realpath_check
@@ -425,106 +578,33 @@ function realpath_check {
 
 # Check if a binary is present
 #
-# @param string $binary The binary to check.
+# @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-function check_binary {
-  command test ${#} -ne 2 && exit 1
+binary=''
+function check_binary() {
+  # declare -g binary=''
+  binary=''
+
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary="$(echo -n "${1}" | cut -d ';' -f 1)"
+  local binaries="";
+
+  IFS=';' read -a binaries <<< "${1}"
 
   # Test the binary presence.
-  if [ -z "$(which "${1}")" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
+  for binary in ${binaries[@]}; do
+    if type -f "${binary}" &>'/dev/null'; then
+      binary="$(command -v "${binary}")"
+      return 0
+    fi
+  done
+
+  cecho "red" "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
 } # check_binary
-
-
-
-# Check if a patckage file is present
-#
-# @param string $file The file to check.
-# @param string $package The package the binary come from.
-#
-# @return Exit with error if the file is missing.
-function check_package_file {
-  command test ${#} -ne 2 && exit 1
-
-  # Test the file presence.
-  if [ ! -e "${1}" ]; then
-    echo "Error : '${1}' is missing. Please install package '${2}'." >&2
-    exit 1
-  fi
-} # check_package_file
-
-
-
-# Check if MySQL connection is working
-#
-# @param string $mysql_host The MySQL host.
-# @param string $mysql_user The MySQL user.
-# @param string $mysql_password The MySQL password.
-# @param string $mysql_db The MySQL DB.
-#
-# @return Exit with error if connection to MySQL fail.
-function check_mysql {
-  command test ${#} -ne 4 && exit 1
-
-  # Test the MySQL connection.
-  if ! command mysql --execute="SELECT 1" \
-            --host="${1}" --user="${2}" --password="${3}" \
-            "${4}" 2>&1 > /dev/null; then
-    echo "Error : Unable to connect to MySQL. Please provide valid MySQL connection parameters." >&2
-    exit 1
-  fi
-} # check_mysql
-
-
-
-# Download a file from the given URL.
-#
-# @param string $url The URL of the file to download.
-#
-# @return ${DOWNLOAD_FILE} The path to the downloaded file.
-DOWNLOAD_FILE=""
-function download_file {
-  command test ${#} -ne 1 && exit 1
-
-  # Download a file.
-  DOWNLOAD_FILE="$(command mktemp)"
-  command wget --quiet "${1}" \
-      --output-document="${DOWNLOAD_FILE}"
-
-  if [ ! -s "${DOWNLOAD_FILE}" ]; then
-    command rm "${DOWNLOAD_FILE}"
-    echo "Error : Unable to download file from '${1}'." >&2
-    exit 1
-  fi
-} # download_file
-
-
-
-# Download and uncompress a tgz file from the given URL.
-#
-# @param string $url The URL of the file to download.
-#
-# @return ${DOWNLOAD_TGZ} The path to the extracted content.
-DOWNLOAD_TGZ=""
-function download_tgz {
-  command test ${#} -ne 1 && exit 1
-
-  download_file "${1}"
-
-  # Untar the downloaded file and place it at its final location.
-  DOWNLOAD_TGZ="$(command mktemp -d)"
-  command tar --directory "${DOWNLOAD_TGZ}" -xzf "${DOWNLOAD_FILE}"
-  command rm "${DOWNLOAD_FILE}"
-
-  if [ $(command ls -1 --all "${DOWNLOAD_TGZ}" | command wc --lines) -eq 0 ]; then
-    echo "Error : unable to untar file downloaded from '${1}'." >&2
-    exit 1
-  fi
-} # download_tgz
 
 
 
@@ -623,8 +703,7 @@ function getoptex()
       fi
     done
     echo "Error : invalid option : '${o}'." >&2
-    usage
-    exit 1
+    usage 1
   fi; fi
   OPTOPT="?"
   unset OPTARG
@@ -675,10 +754,9 @@ function apache2_reload {
       /etc/init.d/apache2 'reload'
     fi
   else
-    echo "Error in Apache 2 configuration : reload cancelled."
+    cecho "red" "Error in Apache 2 configuration : reload cancelled."
     exit 1
   fi
-  exit 0
 } # apache2_reload
 
 
@@ -694,11 +772,10 @@ function apache2_force_reload {
       /etc/init.d/apache2 'force-reload'
     fi
   else
-    echo "Error in Apache 2 configuration : forced reload cancelled."
+    cecho "red" "Error in Apache 2 configuration : forced reload cancelled."
     exit 1
   fi
 
-  exit 0
 } # apache2_force_reload
 
 
@@ -722,6 +799,9 @@ CURRENT_TEMPLATE="${PATH_TEMPLATE}"
 TARGET_VALUE_IS_PATH="1"
 SERVER_ALIAS=""
 SSL_ENABLED="0"
+SSL_CERTBOT="0"
+SSL_CERTBOT_BASE_PATH="/var/lib/a2tools"
+SSL_ACME_SH="${HOME}/.acme.sh/acme.sh"
 SSL_BIND_IP="$(eth0_ip)"
 ALLOW_OVERRIDE="None"
 IS_REMOVAL="0"
@@ -768,6 +848,10 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
       APACHE_MODULES="${APACHE_MODULES} ssl"
 
       if [ -n "${OPTARG}" ]; then
+        if [ "${OPTARG}" = "auto" -a -e "${SSL_ACME_SH}" ]; then
+          SSL_CERTBOT="1"
+        fi
+
         if [ -z "${SSL_PRIVATE_KEY}" \
             -a -e "/etc/ssl/private/${OPTARG}.key" ]; then
           SSL_PRIVATE_KEY="/etc/ssl/private/${OPTARG}.key"
@@ -838,8 +922,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
       ;;
 
     'help' | 'h' | '*' )
-      usage
-      exit 0
+      usage 0
       ;;
   esac
 done
@@ -911,9 +994,8 @@ esac
 SITE_HOSTNAME=${1}
 
 if [ -z "${SITE_HOSTNAME}" ]; then
-  echo "Error : no domain name has been provided." >&2
-  usage
-  exit 1
+  cecho "red" "Error : no domain name has been provided." >&2
+  usage 1
 fi
 
 if [ "${IS_REMOVAL}" = "1" ]; then
@@ -939,6 +1021,7 @@ if [ "${IS_REMOVAL}" = "1" ]; then
 
   if command apache2ctl -t; then
     apache2_reload
+    exit 0
   fi
 
 else
@@ -949,6 +1032,16 @@ else
 
   # Setup defaults.
   SSL_PROXY_ENGINE="Off"
+
+  # Setup certbot defaults.
+  SSL_CERTBOT_PATH="${SSL_CERTBOT_BASE_PATH}/${SITE_HOSTNAME}"
+  command mkdir -p "${SSL_CERTBOT_PATH}"
+  if [ "${SSL_CERTBOT}" = "1" ]; then
+    SSL_PRIVATE_KEY="/etc/ssl/private/${SITE_HOSTNAME}.key"
+    SSL_COMPLETE_PUBLIC_KEY="/etc/ssl/certificates/${SITE_HOSTNAME}.crt+chain+root"
+    SSL_PUBLIC_KEY="/etc/ssl/certificates/${SITE_HOSTNAME}.crt"
+    SSL_CHAIN_CA="/etc/ssl/chains/${SITE_HOSTNAME}.ca"
+  fi
 
   # For custom template, the target value is used as template.
   if [ "${CURRENT_TEMPLATE}" = "CUSTOM" ]; then
@@ -974,19 +1067,17 @@ else
   # Disable SSL template if not needed
   if [ "${SSL_ENABLED}" = "0" ]; then
     SSL_TEMPLATE=""
-  else
-    if [ -z "${SSL_PRIVATE_KEY}" -o -z "${SSL_PUBLIC_KEY}" ]; then
-      echo "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
-      usage
-      exit 1
-    fi
+  elif [ "${SSL_CERTBOT}" = "0" -a \( -z "${SSL_PRIVATE_KEY}" -o -z "${SSL_PUBLIC_KEY}" \) ]; then
+    cecho "red" "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
+    usage 1
   fi
 
-  echo "Creating /etc/apache2/sites-available/${VHOST_FILE}..."
+  cecho "green" "Creating /etc/apache2/sites-available/${VHOST_FILE}..."
 
   VHOST_CONTENT="${VHOST_TEMPLATE[0]}
 ${LOGS_TEMPLATE}
 ${SSL_TEMPLATE}
+${CERTBOT_TEMPLATE}
 ${CURRENT_TEMPLATE}
 ${VHOST_TEMPLATE[1]}"
 
@@ -996,7 +1087,8 @@ ${VHOST_TEMPLATE[1]}"
                   -e "s|TARGET_VALUE|${TARGET_VALUE}|g" \
                   -e "s|MULTI_VIEWS|${MULTI_VIEWS}|g" \
                   -e "s|ALLOW_OVERRIDE|${ALLOW_OVERRIDE}|g" \
-                  -e "s|SSLProxyEngine.*|SSLProxyEngine ${SSL_PROXY_ENGINE}|")"
+                  -e "s|SSLProxyEngine.*|SSLProxyEngine ${SSL_PROXY_ENGINE}|" \
+                  -e "s|CERTBOT_PATH|${SSL_CERTBOT_PATH}/.well-known/acme-challenge/|g")"
 
   # Setup sed rules to enable ServerAlias if needed.
   if [ -n "${SERVER_ALIAS}" ]; then
@@ -1006,6 +1098,28 @@ ${VHOST_TEMPLATE[1]}"
 
   # Apply SSL specific transforms.
   if [ "${SSL_ENABLED}" = "1" ]; then
+    if [ "${SSL_CERTBOT}" = "1" ]; then
+
+      # If no existing http configuration exists;
+      if [ -n "http-${SITE_HOSTNAME}.conf" \
+        -a -n "redirect-http-${SITE_HOSTNAME}.conf" ]; then
+        # Create HTTP redirect VirtualHost with Certbot Webroot path included (for certificate validation).
+        command ${scriptName} -t redirect "${SITE_HOSTNAME}" "https://${SITE_HOSTNAME}/"
+      fi
+
+      # Use acme.sh to create a Let's Encrypt certificate for the domain.
+      command bash "${SSL_ACME_SH}" --issue  --domain "${SITE_HOSTNAME}"  --webroot "${SSL_CERTBOT_PATH}"
+
+      # Install the certificate on the system.
+      command bash "${SSL_ACME_SH}" --installcert -d "${SITE_HOSTNAME}" \
+            --keypath "${SSL_PRIVATE_KEY}" \
+            --certpath "${SSL_PUBLIC_KEY}" \
+            --capath "${SSL_CHAIN_CA}" \
+            --fullchainpath "${SSL_COMPLETE_PUBLIC_KEY}" \
+            --reloadcmd "service apache2 reload"
+
+    fi
+
     VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
       | command sed -e "s|*:80|${SSL_BIND_IP}:443|g" \
         -e "s|CERTIFICATE_FILE|${SSL_PUBLIC_KEY}|g" \
@@ -1026,7 +1140,6 @@ ${VHOST_TEMPLATE[1]}"
     fi
   fi
 
-
   echo "${VHOST_CONTENT}" > "/etc/apache2/sites-available/${VHOST_FILE}"
 
   command a2enmod "${APACHE_MODULES}" > /dev/null
@@ -1036,6 +1149,7 @@ ${VHOST_TEMPLATE[1]}"
   # Disable the site if there is a configuration error.
   if command apache2ctl -t; then
     apache2_reload
+    exit 0
   else
     command a2dissite "${VHOST_FILE}"
   fi
