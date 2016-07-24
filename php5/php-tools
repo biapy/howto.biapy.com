@@ -5,12 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.0"
+version="1.1.0"
 
 # History
 # -------
 #
-# 1.0:
+# 1.1.0:
+#  - add compatibility for Ubuntu 16.04 Xenial Xerus PHP 7.0.
 #  - add compatibility for Debian 8.0 Jessie php5enmod
 #
 
@@ -441,9 +442,13 @@ php_base="/etc/php5"
 php_config_d="${php_base}/conf.d"
 test -d '/etc/php5/mods-available' \
   && php_config_d='/etc/php5/mods-available'
+test -d '/etc/php/7.0/mods-available' \
+  && phpConfPath='/etc/php/7.0/mods-available'
 php_config_name="zzz-php-tools"
 php_config_file="${php_config_d}/${php_config_name}.ini"
 
+[[ -x '/usr/sbin/php5enmod' ]] && phpEnMod="php5enmod"
+[[ -x '/usr/sbin/phpenmod' ]] && phpEnMod="phpenmod"
 
 priority=99
 php_config_file_template="; Enable APC ressources sharing.
@@ -560,7 +565,7 @@ conf.d ini files
     # Create configuration file if necessary:
     if [[ ! -e "${php_config_file}" ]]; then
       echo "${php_config_file_template}" > "${php_config_file}"
-      [[ -x '/usr/sbin/php5enmod' ]] && ${cmdProxy} php5enmod "${php_config_name}/${priority}"
+      [[ -n "${phpEnMod}" ]] && ${phpEnMod} "${php_config_name}/${priority}"
     fi
 
     current_value="$(php --run "echo ini_get('${ini_rule}');")"
@@ -625,7 +630,7 @@ ${for_text}" \
     # Create configuration file if necessary:
     if [[ ! -e "${php_config_file}" ]]; then
       echo "${php_config_file_template}" > "${php_config_file}"
-      [[ -x '/usr/sbin/php5enmod' ]] && ${cmdProxy} php5enmod "${php_config_name}/${priority}"
+      [[ -n "${phpEnMod}" ]] && ${phpEnMod} "${php_config_name}/${priority}"
     fi
 
     # update existing setting if possible.
