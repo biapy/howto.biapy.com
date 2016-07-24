@@ -10,7 +10,8 @@ sync_binlog = 1
 max_binlog_size = 50M
 
 # Enable slow query log for Query debuging:
-log_slow_queries = /var/log/mysql/mysql-slow.log
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/mysql-slow.log
 long_query_time = 5
 
 # Uncomment this to log unoptimized queries.
