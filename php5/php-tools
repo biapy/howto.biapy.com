@@ -5,7 +5,7 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.1.0"
+version="1.1.1"
 
 # History
 # -------
@@ -443,7 +443,7 @@ php_config_d="${php_base}/conf.d"
 test -d '/etc/php5/mods-available' \
   && php_config_d='/etc/php5/mods-available'
 test -d '/etc/php/7.0/mods-available' \
-  && phpConfPath='/etc/php/7.0/mods-available'
+  && php_config_d='/etc/php/7.0/mods-available'
 php_config_name="zzz-php-tools"
 php_config_file="${php_config_d}/${php_config_name}.ini"
 
