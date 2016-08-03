@@ -12,9 +12,19 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.4.10"
+version="1.5.0"
 
-
+# History
+# -------
+#
+# 1.5.0:
+#  - fix bug #4. application/octect-stream audio files are now accepted.
+#  - fix bug #5. optionnal arguments were ignored while parsing command line.
+#  - fix feature request #6 add support for aac m4a output.
+#  - use shellcheck to sanitize code.
+#  - use collectiongain from package python-rgain instead of vorbisgain and mp3gain.
+#  - add missing vbrfix dependency
+#
 
 # Get the basename of a path (multi-plateform version)
 # Print the result on &1 if found.
@@ -58,7 +68,6 @@ Usage :
       [ --input-format='*' ] [ --output-format='mp3' ]
       [ --bitrate='320k' | --quality=5 ]
       [ --sync-delete ] [ --copy-all ]
-      [ --avconv-options='--more --avconv --options' ]
 
   Available options are :
     * --help | -h                   : Display this message.
@@ -81,8 +90,6 @@ Usage :
                                       input library is deleted.
     * --copy-all | --copy | -c      : Copy non audio files found in source
                                       library to target library.
-    * --avconv-options | -a         : Additionnal options for avconv.
-                                      See avconv man page.
     * --threads | -t                : Threads number.
                                       Default to 1 thread by CPU.
     * --quiet | --silent | -s       : Disable almost all outputs.
@@ -92,12 +99,13 @@ Usage :
     * MP3 (mp3)
     * Flac (flac)
     * Ogg/Vorbis (ogg)
+    * m4a (aac)
 
     When converting from/to this formats, metadatas and cover art are
     transfered to the created files.
 "
 
-  [[ -n "${1}" ]] && exit ${1}
+  [[ -n "${1}" ]] && exit "${1}"
 } # usage
 
 
@@ -193,13 +201,13 @@ function check_binary() {
 
   [[ ${#} -ne 2 ]] && exit 1
 
-  local primary="$(echo -n "${1}" | cut -d ';' -f 1)"
-  local binaries="";
+  local primary="${1%%;*}"
+  local binaries=""
 
   IFS=';' read -a binaries <<< "${1}"
 
   # Test the binary presence.
-  for binary in ${binaries[@]}; do
+  for binary in "${binaries[@]}"; do
     if type -f "${binary}" &>'/dev/null'; then
       binary="$(command -v "${binary}")"
       return 0
@@ -209,6 +217,26 @@ function check_binary() {
   echo "Error: '${primary}' is missing. Please install package '${2}'." >&2
   exit 1
 } # check_binary
+
+
+
+#
+# Multi platform avprobe support.
+#
+function avprobe() {
+  if type -f 'avprobe' &>'/dev/null'; then
+    command avprobe "${@}"
+    return ${?}
+  fi
+
+  if type -f 'ffprobe' &>'/dev/null'; then
+    command ffprobe "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # avprobe()
+export -f 'avprobe'
 
 
 
@@ -358,6 +386,13 @@ function cecho() {
   # remove color information from arguments.
   shift 1
 
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
   # Bash 4 version with associative array.
   ## Color and weight definitions.
   #declare -A font
@@ -444,18 +479,25 @@ export -f 'cecho'
 function transfert_images() {
   [[ ${#} -ne 2 ]] && exit 1
 
-  local input_file="${1}"
-  local output_file="${2}"
+  local input_file
+  local output_file
+  local input_file_has_cover
+  local image_path
+  local image_with_headers_path
+  local comments_path
+  local mp3_images_path
+
+  input_file="${1}"
+  output_file="${2}"
 
   # Detect if input file has cover art.
-  local input_file_has_cover="$(mediainfo --Inform="General;%Cover%" "${input_file}")"
-  local metadata_block_picture='False'
+  input_file_has_cover="$(mediainfo --Inform="General;%Cover%" "${input_file}")"
 
   # temporary files.
-  local image_path=""
-  local image_with_headers_path=""
-  local comments_path=""
-  local mp3_images_path=""
+  image_path=""
+  image_with_headers_path=""
+  comments_path=""
+  mp3_images_path=""
 
   #------------------------
   # Trap handling function
@@ -464,16 +506,28 @@ function transfert_images() {
   # @param string $output_file The converted/copied output file.
   # @param string $image_path The extracted image temporary file.
   function exit_transfert_images_on_signal() {
-    local interrupt=${?}
+    local interrupt
+    local output_file
+    local image_path
+    local image_with_headers_path
+    local comments_path
+    local mp3_images_path
+    local output_filename
+    local image_mime_type
+    local image_extension
+    local input_file_format
+    local input_file_audio_format
+    local block_number
 
-    local output_file="${1}"
-    local image_path="${2}"
-    local image_with_headers_path="${3}"
-    local comments_path="${4}"
-    local mp3_images_path="${5}"
+    interrupt=${?}
 
-    local vctemp="${output_file}.vctemp"
-    local output_filename="$(basename "${output_file}")"
+    output_file="${1}"
+    image_path="${2}"
+    image_with_headers_path="${3}"
+    comments_path="${4}"
+    mp3_images_path="${5}"
+
+    output_filename="$(basename "${output_file}")"
 
     cecho 'boldred' "Image transfert to '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
@@ -500,10 +554,9 @@ function transfert_images() {
   #------------------------
 
 
-  if [[ "${input_file_has_cover}" != 'Yes' \
-      && -n "$(mediainfo "${input_file}" | grep --ignore-case '^METADATA_BLOCK_PICTURE')" ]]; then
+  if [[ "${input_file_has_cover}" != 'Yes' ]] \
+      && grep -q --ignore-case '^METADATA_BLOCK_PICTURE' <<< "$(mediainfo "${input_file}")"; then
     input_file_has_cover='Yes'
-    metadata_block_picture='True'
   fi
 
   if [[ "${input_file_has_cover}" = 'Yes' ]]; then
@@ -514,27 +567,20 @@ function transfert_images() {
     # Setup trap since there is processing needed.
     trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
-
     # Detect Cover MIME type.
-    local image_mime_type="$(mediainfo --Inform="General;%Cover_Mime%" "${input_file}")"
-    local image_extension="$(echo -n "${image_mime_type}" | cut -d '/' -f 2)"
+    image_mime_type="$(mediainfo --Inform="General;%Cover_Mime%" "${input_file}")"
+    image_extension="${image_mime_type#*/}"
 
-    if [[ -z "${image_extension}" ]]; then
-      if [[ "${metadata_block_picture}" != 'True' ]]; then
-        # Unable to determine cover mime type.
-        echo "Failed (MIME type unsupported (${image_mime_type}))."
-        return 1
-      fi
-    else
-      # Create image temporary file. 
-      image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+    # Create image temporary file. 
+    image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+    if [[ -n "${image_extension}" ]]; then
       mv "${image_path}" "${image_path}.${image_extension}" 2>&-
       image_path="${image_path}.${image_extension}"
     fi
 
     # Detect input file format and audio format.
-    local input_file_format="$(mediainfo --Inform="General;%Format%" "${input_file}")"
-    local input_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${input_file}")"
+    input_file_format="$(mediainfo --Inform="General;%Format%" "${input_file}")"
+    input_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${input_file}")"
 
     cecho 'blue' -n "Extracting... "
 
@@ -545,7 +591,7 @@ function transfert_images() {
 
         # List IMAGE metadata blocs.
         # Assume first bloc is cover art.
-        local block_number="$(metaflac --list --block-type='PICTURE' "${input_file}" \
+        block_number="$(metaflac --list --block-type='PICTURE' "${input_file}" \
             | grep --max-count=1 '^METADATA block' \
             | sed -e 's/^.*#//')"
 
@@ -576,12 +622,43 @@ function transfert_images() {
         rm -r "${mp3_images_path}"
         ;;
 
+      'MPEG-4' )
+        # File is M4A / AAC
+        m4a_images_path="$(mktemp -d -t "tmp.XXXXXXXXXX")"
+
+        if [[ "${verbose}" = 'True' ]]; then
+          AtomicParsley "${input_file}" --extractPixToPath "${m4a_images_path}/"
+        else
+          AtomicParsley "${input_file}" --extractPixToPath "${m4a_images_path}/" &>'/dev/null'
+        fi
+
+        cover_image_file_path="$(find "${m4a_images_path}" -name '_artwork_1.*')"
+
+        if [[ -e "${cover_image_file_path}" ]]; then
+          # Redetect extension.
+          image_extension="${cover_image_file_path##*.}"
+
+          mv "${image_path}" "${image_path}.${image_extension}" 2>&-
+          image_path="${image_path}.${image_extension}"
+
+          mv "${cover_image_file_path}" "${image_path}" 2>&-
+        fi
+
+        rm -r "${m4a_images_path}"
+        ;;
+
       'OGG' )
         # File is an OGG container.
         case "${input_file_audio_format}" in
 
           'Vorbis' )
             # File is OGG Vorbis.
+            local mime_length
+            local description_skip
+            local description_length
+            local image_length_skip
+            local image_length
+            local image_skip
 
             image_with_headers_path="$(mktemp -t "tmp.XXXXXXXXXX")"
 
@@ -592,7 +669,7 @@ function transfert_images() {
               > "${image_with_headers_path}"
 
             # Fetch data lengths.
-            local mime_length="$(dd skip=4 count=4 bs=1 \
+            mime_length="$(dd skip=4 count=4 bs=1 \
                 if="${image_with_headers_path}" 2>&- \
                 | xxd -p -g0 \
                 | xargs -IHEX printf "%d" '0xHEX')"
@@ -601,7 +678,7 @@ function transfert_images() {
                 if="${image_with_headers_path}" 2>&-)"
 
             # Now we try to detect extension and create the temporary image file.
-            image_extension="$(echo -n "${image_mime_type}" | cut -d '/' -f 2)"
+            image_extension="${image_mime_type#*/}"
             if [[ -z "${image_extension}" ]]; then
               # Unable to determine cover mime type.
               [[ -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
@@ -614,27 +691,27 @@ function transfert_images() {
             mv "${image_path}" "${image_path}.${image_extension}" 2>&-
             image_path="${image_path}.${image_extension}"
 
-            local description_skip="$((8 + ${mime_length}))"
-            local description_length="$(dd skip=${description_skip} count=4 bs=1 \
+            description_skip="$((8 + mime_length))"
+            description_length="$(dd skip=${description_skip} count=4 bs=1 \
                 if="${image_with_headers_path}" 2>&- \
                 | xxd -p -g0 \
                 | xargs -IHEX printf "%d" '0xHEX')"
-            local image_length_skip="$((${description_skip} + ${description_length} + 20))"
-            local image_length="$(dd skip=${image_length_skip} count=4 bs=1 \
+            image_length_skip="$((description_skip + description_length + 20))"
+            image_length="$(dd skip=${image_length_skip} count=4 bs=1 \
                 if="${image_with_headers_path}" 2>&- \
                 | xxd -p -g0 \
                 | xargs -IHEX printf "%d" '0xHEX')"
 
-            local image_skip="$((${image_length_skip} + 4))"
+            image_skip="$((image_length_skip + 4))"
             # Extract image.
 
             if [[ "${verbose}" = 'True' ]]; then
-              dd skip=${image_skip} count=${image_length} bs=1 \
+              dd skip="${image_skip}" count="${image_length}" bs=1 \
                   if="${image_with_headers_path}" of="${image_path}"
             else
-              dd skip=${image_skip} count=${image_length} bs=1 \
+              dd skip="${image_skip}" count="${image_length}" bs=1 \
                   if="${image_with_headers_path}" of="${image_path}" 2>&-
-             fi
+            fi
 
             # Delete vorbiscomment raw file.
             [[ -e "${image_with_headers_path}" ]] && rm "${image_with_headers_path}"
@@ -663,9 +740,12 @@ function transfert_images() {
     if [[ -s "${image_path}" && -e "${output_file}" ]]; then
       cecho 'blue' -n "Importing... "
 
+      local output_file_format
+      local output_file_audio_format
+
       # Detect output file format and audio format.
-      local output_file_format="$(mediainfo --Inform="General;%Format%" "${output_file}")"
-      local output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
+      output_file_format="$(mediainfo --Inform="General;%Format%" "${output_file}")"
+      output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
 
       case "${output_file_format}" in
 
@@ -689,6 +769,21 @@ function transfert_images() {
             eyed3_remove_all "${output_file}" &>'/dev/null'
             # Insert cover image from file
             eyed3 --add-image="${image_path}:FRONT_COVER" "${output_file}" &>'/dev/null'
+          fi
+          ;;
+
+        'MPEG-4' )
+          # File is M4A AAC
+          if [[ "${verbose}" = 'True' ]]; then
+            # Remove existing images.
+            AtomicParsley "${output_file}" --artwork REMOVE_ALL --overWrite
+            # Insert cover image from file
+            AtomicParsley "${output_file}" --artwork "${image_path}" --overWrite
+          else
+            # Remove existing images.
+            AtomicParsley "${output_file}" --artwork REMOVE_ALL --overWrite &> '/dev/null'
+            # Insert cover image from file
+            AtomicParsley "${output_file}" --artwork "${image_path}" --overWrite &> '/dev/null'
           fi
           ;;
 
@@ -722,13 +817,13 @@ function transfert_images() {
               printf "0: %.8x" 3 | xxd -r -g0 \
                       >> "${image_with_headers_path}"
               # Mime type length <32>.
-              printf "0: %.8x" $(echo -n "${image_mime_type}" | wc -c) \
+              printf "0: %.8x" ${#image_mime_type} \
                         | xxd -r -g0 \
                       >> "${image_with_headers_path}"
               # Mime type (n * 8)
               echo -n "${image_mime_type}" >> "${image_with_headers_path}"
               # Description length <32>.
-              printf "0: %.8x" $(echo -n "${description}" | wc -c) \
+              printf "0: %.8x" ${#description} \
                         | xxd -r -g0 \
                       >> "${image_with_headers_path}"
               # Description (n * 8)
@@ -746,8 +841,8 @@ function transfert_images() {
               printf "0: %.8x" 0 | xxd -r -g0 \
                       >> "${image_with_headers_path}"
               # Image file size <32>.
-              printf "0: %.8x" $(wc -c "${image_path}" \
-                        | cut -d ' ' -f 1) \
+              printf "0: %.8x" "$(wc -c "${image_path}" \
+                        | cut -d ' ' -f 1)" \
                         | xxd -r -g0 \
                       >> "${image_with_headers_path}"
               # Image file.
@@ -782,7 +877,7 @@ function transfert_images() {
           ;;
 
       esac
- 
+
     fi
 
     [[ -e "${image_path}" ]] && rm "${image_path}"
@@ -808,33 +903,50 @@ function convert_file() {
   local input_file="${1}"
 
   ## Build output file path based on input file path.
-  local input_file_path="$(dirname "${input_file}")"
-  local output_file_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
-  local short_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}/||")"
+  local input_file_path
+  local output_file_path
+  local input_filename
+  local output_filename
+  local input_file_mimetype
+  local input_file_brief
+  local input_file_extension
+  local output_file
+  #local short_input_file
+  local short_input_file
+  local short_output_file
+  local output_temp_file
+  local vbrfix_temp_path
 
-  local input_filename="$(basename "${input_file}")"
-  local output_filename="$(echo -n "${input_filename}" \
+  input_file="${1}"
+
+  ## Build output file path based on input file path.
+  input_file_path="$(dirname "${input_file}")"
+  output_file_path="$(echo -n "${input_file_path}" | sed -e "s|^${input_path}|${output_path}|")"
+
+  input_filename="$(basename "${input_file}")"
+  output_filename="$(echo -n "${input_filename}" \
         | sed -e "s/\.[^\.]*$/\.${output_extension}/")"
-  local input_file_mimetype="$(file --brief --mime-type "${input_file}")"
+  input_file_mimetype="$(file --brief --mime-type "${input_file}")"
+  input_file_brief="$(file --brief "${input_file}")"
 
   # Detect input extension
-  local input_file_extension="$(echo -n "${input_filename}" \
+  input_file_extension="$(echo -n "${input_filename}" \
         | sed -e 's/^.*\.\([^\.]*\)$/\1/')"
 
-  local output_file="${output_file_path}/${output_filename}"
+  output_file="${output_file_path}/${output_filename}"
 
-  #local short_input_file="${short_path}/${input_filename}"
-  local short_input_file="${input_filename}"
-  local short_output_file="${output_filename}"
+  #short_input_file="${short_path}/${input_filename}"
+  short_input_file="${input_filename}"
+  short_output_file="${output_filename}"
 
   # Generate a temporary filename for processing cache.
   # Use the same extension to make sure format detection work properly.
-  local output_temp_file="$(mktemp -t "tmp.XXXXXXXXXX")"
+  output_temp_file="$(mktemp -t "tmp.XXXXXXXXXX")"
   mv "${output_temp_file}" "${output_temp_file}.${output_extension}" 2>&-
   output_temp_file="${output_temp_file}.${output_extension}"
 
   # Declare the variable for vbrfix temporary directory.
-  local vbrfix_temp_path=''
+  vbrfix_temp_path=''
 
   #------------------------
   # Trap handling function
@@ -842,18 +954,24 @@ function convert_file() {
   #
   # @param string $output_file The converted/copied output file.
   function exit_convert_file_on_signal() {
-    local interrupt=${?}
-    local output_file="${1}"
-    local output_temp_path="${2}"
-    local vbrfix_temp_path="${3}"
-    local output_filename="$(basename "${output_file}")"
+    local interrupt
+    local output_file
+    local output_temp_file
+    local vbrfix_temp_path
+    local output_filename
+
+    interrupt=${?}
+    output_file="${1}"
+    output_temp_file="${2}"
+    vbrfix_temp_path="${3}"
+    output_filename="$(basename "${output_file}")"
 
     cecho 'boldred' "Conversion of '${output_filename}' interrupted." >&2
     [[ -n "${output_file}" && -e "${output_file}" ]] && rm "${output_file}"
     [[ -n "${output_temp_file}" && -e "${output_temp_file}" ]] && rm "${output_temp_file}"
     [[ -n "${vbrfix_temp_path}" && -d "${vbrfix_temp_path}" ]] && rm -r "${vbrfix_temp_path}"
 
-    #local running_jobs=($(jobs -p))
+    local running_jobs=($(jobs -p))
     #if [[ -n "${running_jobs}" ]]; then
     #  cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
     #  kill ${running_jobs[@]} 2>&-
@@ -872,8 +990,8 @@ function convert_file() {
 
   # Test if input file is an audio file.
   if [[ "${input_file_mimetype}" != 'application/ogg' \
-      && "$(echo -n "${input_file_mimetype}" \
-            | cut -d '/' -f 1)" != 'audio' ]]; then
+      && "${input_file_mimetype%/*}" != 'audio' \
+      && "${input_file_brief,,}" != *audio* ]]; then
     # Input file is not an audio file.
     echo -n '   - '
     cecho 'magenta' -n "${short_input_file}"
@@ -984,97 +1102,216 @@ function convert_file() {
           case "${encoding_mode}" in
             'CBR' )
               # Constant bitrate selected.
-              encoding_options="-b:a ${encoding_bitrate}"
+              encoding_options=(-b:a "${encoding_bitrate}")
              ;;
 
             'VBR' | * )
               # Variable bitrate selected. Default.
-              encoding_options="-q:a ${encoding_quality}"
+              encoding_options=(-q:a "${encoding_quality}")
               ;;
           esac
 
-          local map_metadata=' 0:g'
-          local output_options=''
+          local map_metadata=(-map_metadata 0:g)
+          local output_options=()
           # Specific needs for some input formats/
           case "${input_file_mimetype}" in
             'application/ogg' )
               # Get input metadata from first audio stream and direct it to global.
               # See https://bugs.kde.org/show_bug.cgi?id=306895
-              map_metadata=' 0:s:0'
+              map_metadata=(-map_metadata 0:s:0)
 
               # Clean picture metadata.
-              output_options="${output_options} -metadata metadata_block_picture=''"
+              output_options=(${output_options[@]} -metadata "metadata_block_picture=''")
               ;;
             * )
               # Do nothing.
-              # map_metadata=' 0:g'
+              # map_metadata=(-map_metadata 0:g)
               ;;
           esac
 
-          # Specific needs for some output formats/
+          # Specific needs for some output formats
           case "${output_format}" in
-            'flac' )
-              # No encoding options needed.
-              encoding_options=""
-              output_options="${output_options} -f ${output_format}"
-              ;;
+            'm4a' | 'aac' )
+              # avconv has an experimental aac encoder but aac-enc from libfdk-aac is better.
+              # create the m4a aac file with aac-enc.
 
-            'ogg' | 'vorbis' )
-              # Set vorbis as default codec for ogg.
-              output_options="${output_options} -codec:a libvorbis -f ogg"
-              # Map input metadata to all audio streams in ogg container.
-              # See https://bugs.kde.org/show_bug.cgi?id=306895
-              if [[ "${input_file_mimetype}" = 'application/ogg' ]]; then
-                map_metadata=" 0:s:0"
+
+              if type -f "fdkaac" &>'/dev/null'; then
+                # Use fdkaac, the best command line for aac transcoding.
+
+                # Specific options for encoding mode.
+                case "${encoding_mode}" in
+                  'CBR' )
+                    # Constant bitrate selected.
+                    encoding_options=(--bitrate-mode 0 --bitrate "${encoding_bitrate}")
+                    ;;
+
+                  'VBR' | * )
+                    # Variable bitrate selected. Default.
+                    encoding_options=(--bitrate-mode "${encoding_quality}")
+                    ;;
+                esac
+
+                # Create temporary files.
+                temporary_json_file="$(mktemp -t "tmp.XXXXXXXXXX.json")"
+
+                # Fetch input file tags in json format.
+                avprobe \
+                        -loglevel "${log_level}" \
+                        -show_format \
+                        -of 'json' \
+                        "${input_file}" \
+                    > "${temporary_json_file}"
+
+                # Convert input file to aac.
+                if [[ "${verbose}" = 'True' ]]; then
+                  avconv -i "${input_file}" \
+                          -vn -sn \
+                          -loglevel "${log_level}" \
+                          -f caf pipe:1 \
+                    | fdkaac \
+                          --profile 2 \
+                          --afterburner 1 \
+                          --transport-format 0 \
+                          --tag-from-json="${temporary_json_file}"?format.tags \
+                          "${encoding_options[@]}" \
+                          - -o "${output_temp_file}"
+                else
+                  avconv -i "${input_file}" \
+                          -vn -sn \
+                          -loglevel "${log_level}" \
+                          -f caf pipe:1 \
+                    | fdkaac \
+                          --profile 2 \
+                          --afterburner 1 \
+                          --transport-format 0 \
+                          --tag-from-json="${temporary_json_file}"?format.tags \
+                          "${encoding_options[@]}" \
+                          - -o "${output_temp_file}" 2>'/dev/null'
+                fi
+
+                [[ -e "${temporary_json_file}" ]] && rm "${temporary_json_file}"
+
               else
-                map_metadata=":s:a 0:s:0"
+                # Use aac-enc that is very disk intensive.
+
+                # Create temporary files.
+                temporary_wav_file="$(mktemp -t "tmp.XXXXXXXXXX")"
+                temporary_m4a_file="$(mktemp -t "tmp.XXXXXXXXXX")"
+
+                # Create temporary Wav file with avconv.
+                avconv -y -i "${input_file}" \
+                          -vn -sn \
+                          -loglevel "${log_level}" \
+                          -sample_fmt s16 -ac 2 -f wav \
+                          "${temporary_wav_file}"
+
+                if [[ -e "${temporary_wav_file}" ]]; then
+                  # flac -sdc "$i" | fdkaac - -o "${i[@]/%flac/m4a}" -p2 -m5 -a1 --tag-from-json="${i[@]/flac/json}"?format.tags
+
+                  # Specific options for encoding mode.
+                  case "${encoding_mode}" in
+                    'CBR' )
+                      # Constant bitrate selected.
+                      encoding_options=(-v 0 -r "${encoding_bitrate}")
+                      ;;
+
+                    'VBR' | * )
+                      # Variable bitrate selected. Default.
+                      encoding_options=(-v "${encoding_quality}")
+                      ;;
+                  esac
+
+                  # convert temporary wav file to m4a without metadata.
+                  aac-enc -t 2 "${encoding_options[@]}" "${temporary_wav_file}" "${temporary_m4a_file}"
+
+                  if [[ -e "${temporary_m4a_file}" ]]; then
+                    # copy metadata from input file to m4a file.
+                    avconv -y -i "${temporary_m4a_file}" \
+                          -i "${input_file}" \
+                          -vn -sn \
+                          -loglevel "${log_level}" \
+                          -map 0 -c:a copy -bsf:a aac_adtstoasc \
+                          -map_metadata 1 -map_metadata 1:s:0 \
+                          "${output_temp_file}"
+
+                    rm "${temporary_m4a_file}"
+                  fi
+
+                  # Remove temporary files.
+                  rm "${temporary_wav_file}"
+                fi
               fi
-              ;;
-
-            'mp3' )
-              # Force libmp3lame use.
-              output_options="${output_options} -f ${output_format} -codec:a libmp3lame"
-
-              if [[ ${encoding_mode} = 'CBR' ]]; then
-                pipe_mode='True'
-              fi
-
               ;;
 
             * )
-              # Add output format.
-              # map_metadata="${map_metadata}"
-              output_options="${output_options} -f ${output_format}"
-              ;;
+              # Process formats mixing well with avconv.
+              case "${output_format}" in
+                'flac' )
+                  # No encoding options needed.
+                  encoding_options=""
+                  output_options=(${output_options[@]}  -f "${output_format}")
+                  ;;
+
+                'ogg' | 'vorbis' )
+                  # Set vorbis as default codec for ogg.
+                  output_options=(${output_options[@]} -codec:a 'libvorbis' -f 'ogg')
+                  # Map input metadata to all audio streams in ogg container.
+                  # See https://bugs.kde.org/show_bug.cgi?id=306895
+                  if [[ "${input_file_mimetype}" = 'application/ogg' ]]; then
+                    map_metadata=(-map_metadata 0:s:0)
+                  else
+                    map_metadata=(-map_metadata:s:a 0:s:0)
+                  fi
+                  ;;
+
+                'm4a' | 'aac' )
+                  # Set vorbis as default codec for ogg.
+                  output_options=(${output_options[@]} -ar 48000 -codec:a 'aac' -strict 'experimental')
+                  ;;
+
+                'mp3' )
+                  # Force libmp3lame use.
+                  output_options=(${output_options[@]} -f "${output_format}" -codec:a 'libmp3lame')
+
+                  if [[ ${encoding_mode} = 'CBR' ]]; then
+                    pipe_mode='True'
+                  fi
+
+                  ;;
+
+                * )
+                  # Add output format.
+                  output_options=(${output_options[@]} -f "${output_format}")
+                  ;;
+              esac
+
+              if [[ "${pipe_mode}" = 'True' ]]; then
+                # Fix for mp3 cbr format, breaks mp3 vbr files since
+                # Xing header writing needs seekable file..
+                # Write output on pipe and then directed to file.
+                # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
+                #
+                # Note: log output is alway on 2. avconv keep 1 empty.
+
+                avconv -i "${input_file}" \
+                        -vn -sn \
+                        "${map_metadata[@]}" \
+                        -loglevel "${log_level}" \
+                        "${output_options[@]}" \
+                        "${encoding_options[@]}" \
+                        - > "${output_temp_file}";
+              else
+                avconv -y -i "${input_file}" \
+                        -vn -sn \
+                        "${map_metadata[@]}" \
+                        -loglevel "${log_level}" \
+                        "${output_options[@]}" \
+                        "${encoding_options[@]}" \
+                        "${output_temp_file}";
+              fi
+            ;;
           esac
-
-          if [[ "${pipe_mode}" = 'True' ]]; then
-            # Fix for mp3 cbr format, breaks mp3 vbr files since
-            # Xing header writing needs seekable file..
-            # Write output on pipe and then directed to file.
-            # See: http://ffmpeg.zeranoe.com/forum/viewtopic.php?f=7&t=377
-            #
-            # Note: log output is alway on 2. avconv keep 1 empty.
-
-            avconv -i "${input_file}" \
-                     -vn -sn \
-                    -map_metadata${map_metadata} \
-                    -loglevel "${log_level}" \
-                    ${avconv_options} \
-                    ${output_options} \
-                    ${encoding_options} \
-                    - > "${output_temp_file}";
-          else
-            avconv -y -i "${input_file}" \
-                     -vn -sn \
-                    -map_metadata${map_metadata} \
-                    -loglevel "${log_level}" \
-                    ${avconv_options} \
-                    ${output_options} \
-                    ${encoding_options} \
-                    "${output_temp_file}";
-          fi
-
 
           if [[ ${?} -ne 0 ]]; then
             cecho 'red' "Failed."
@@ -1212,26 +1449,44 @@ export -f 'convert_file'
 # @param string $output_extension The output audio file extension.
 # @param string $verbose True for verbose output.
 # @param string $input_album_path The input album path.
+# @param string $threads The threads option for collectiongain.
 function replaygain_album() {
-  [[ ${#} -ne 4 ]] && exit 1
+  [[ ${#} -ne 5 ]] && exit 1
 
-  local output_format="${1}"
-  local output_extension="${2}"
-  local verbose="${3}"
-  local input_album_path="${4}"
+  local output_format
+  local output_extension
+  local verbose
+  #local input_album_path
+  local threads
+  local output_album_path
+  local album_name
+  local album_files
+
+  output_format="${1}"
+  output_extension="${2}"
+  verbose="${3}"
+  export input_album_path="${4}"
+  threads="${5}"
+
+  if [[ "${threads}" = "100%" ]]; then
+    threads=1
+    if [[ -e '/proc/cpuinfo' ]]; then
+      threads=$(grep -c '^processor' '/proc/cpuinfo')
+    fi
+  fi
 
   ## Build output album path based on input album path.
-  local output_album_path="$(echo -n "${input_album_path}" \
+  output_album_path="$(echo -n "${input_album_path}" \
         | sed -e "s|^${input_path}|${output_path}|")"
 
-  local album_name="$(basename "${output_album_path}")"
+  album_name="$(basename "${output_album_path}")"
 
   # test if output album path exists.
   [[ -d "${output_album_path}" ]] || return 1
 
   # test if output album path is empty.
   shopt -s nullglob dotglob
-  local album_files=("${output_album_path}"/*".${output_extension}")
+  album_files=("${output_album_path}"/*".${output_extension}")
   shopt -u nullglob dotglob
 
   (( ${#album_files[*]} )) || return 1
@@ -1240,50 +1495,6 @@ function replaygain_album() {
   echo -n "'... "
 
   case "${output_format}" in
-    'mp3' )
-      # reference:
-      # mp3gain  -a -t -p -s r -k -f
-
-      local processed_list_log_path="$(mktemp -t "tmp.XXXXXXXXXX")"
-
-      if [[ "${verbose}" = 'True' ]]; then
-        mp3gain -a -t -p -k -f -q "${album_files[@]}" | tee "${processed_list_log_path}"
-      else
-        mp3gain -a -t -p -k -f -q "${album_files[@]}" > "${processed_list_log_path}" 2>&-
-      fi
-
-      local error_code=${?}
-
-      if [[ ${error_code} -ne 0 ]]; then
-        cecho 'red' 'Failure.'
-
-        if [[ ${error_code} = 139 ]]; then
-          # mp3gain segfaulted. Handling the faulty mp3 file removal and regeneration.
-          local faulty_file_index=$(wc -l "${processed_list_log_path}" \
-                                    | cut --delimiter=' ' --fields=1)
-          local faulty_file="${album_files[${faulty_file_index}]}"
-          if [[ -n "${faulty_file}" ]]; then
-            local faulty_filename="$(basename "${faulty_file}")"
-
-            cecho 'red' -n 'File '
-            cecho 'magenta' -n "${faulty_filename}"
-            cecho 'red' -n ' is faulty... '
-            cecho 'red' -n 'Deleting... '
-
-            test -e "${faulty_file}" && rm "${faulty_file}"
-            test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
-
-            cecho 'yellow' 'Regenerating.'
-            return 139
-          fi
-        fi
-
-        test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
-        return 1
-      fi
-
-      test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
-      ;;
     'flac' )
       metaflac --add-replay-gain "${album_files[@]}"
 
@@ -1292,12 +1503,11 @@ function replaygain_album() {
         return 1
       fi
       ;;
-    'ogg' | 'vorbis' )
-
+    'ogg' | 'vorbis' | 'mp3' | 'm4a' | 'aac' | * )
       if [[ "${verbose}" = 'True' ]]; then
-        vorbisgain --album --fast "${album_files[@]}"
+        collectiongain --jobs="${threads}" "${output_album_path}"
       else
-        vorbisgain --album --fast --quiet "${album_files[@]}"
+        collectiongain --jobs="${threads}" "${output_album_path}" > '/dev/null'
       fi
 
       if [[ ! ${?} ]]; then
@@ -1305,11 +1515,81 @@ function replaygain_album() {
         return 1
       fi
       ;;
-    * )
-      # unsupported format.
-      return 1
-      ;;
   esac
+
+  # Old gain method. deprecated by python-rgain.
+  #
+  # case "${output_format}" in
+  #   'mp3' )
+  #     # reference:
+  #     # mp3gain  -a -t -p -s r -k -f
+
+  #     local processed_list_log_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+
+  #     if [[ "${verbose}" = 'True' ]]; then
+  #       mp3gain -a -t -p -k -f -q "${album_files[@]}" | tee "${processed_list_log_path}"
+  #     else
+  #       mp3gain -a -t -p -k -f -q "${album_files[@]}" > "${processed_list_log_path}" 2>&-
+  #     fi
+
+  #     local error_code=${?}
+
+  #     if [[ ${error_code} -ne 0 ]]; then
+  #       cecho 'red' 'Failure.'
+
+  #       if [[ ${error_code} = 139 ]]; then
+  #         # mp3gain segfaulted. Handling the faulty mp3 file removal and regeneration.
+  #         local faulty_file_index=$(wc -l "${processed_list_log_path}" \
+  #                                   | cut --delimiter=' ' --fields=1)
+  #         local faulty_file="${album_files[${faulty_file_index}]}"
+  #         if [[ -n "${faulty_file}" ]]; then
+  #           local faulty_filename="$(basename "${faulty_file}")"
+
+  #           cecho 'red' -n 'File '
+  #           cecho 'magenta' -n "${faulty_filename}"
+  #           cecho 'red' -n ' is faulty... '
+  #           cecho 'red' -n 'Deleting... '
+
+  #           test -e "${faulty_file}" && rm "${faulty_file}"
+  #           test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
+
+  #           cecho 'yellow' 'Regenerating.'
+  #           return 139
+  #         fi
+  #       fi
+
+  #       test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
+  #       return 1
+  #     fi
+
+  #     test -e "${processed_list_log_path}" && rm "${processed_list_log_path}"
+  #     ;;
+  #   'flac' )
+  #     metaflac --add-replay-gain "${album_files[@]}"
+
+  #     if [[ ! ${?} ]]; then
+  #       cecho 'red' 'Failure.'
+  #       return 1
+  #     fi
+  #     ;;
+  #   'ogg' | 'vorbis' )
+
+  #     if [[ "${verbose}" = 'True' ]]; then
+  #       vorbisgain --album --fast "${album_files[@]}"
+  #     else
+  #       vorbisgain --album --fast --quiet "${album_files[@]}"
+  #     fi
+
+  #     if [[ ! ${?} ]]; then
+  #       cecho 'red' 'Failure.'
+  #       return 1
+  #     fi
+  #     ;;
+  #   * )
+  #     # unsupported format.
+  #     return 1
+  #     ;;
+  # esac
 
   cecho 'green' 'Done.'
 
@@ -1329,13 +1609,19 @@ function sync_delete_album()
 {
   [[ ${#} -ne 4 ]] && exit 1
 
-  local input_album_path="${1}"
-  local input_path="${2}"
-  local output_path="${3}"
-  local lock_dir="${4}"
+  local input_album_path
+  local input_path
+  local output_path
+  local lock_dir
+  local output_album_path
+
+  input_album_path="${1}"
+  input_path="${2}"
+  output_path="${3}"
+  lock_dir="${4}"
 
   ## Build output album path based on input album path.
-  local output_album_path="$(echo -n "${input_album_path}" \
+  output_album_path="$(echo -n "${input_album_path}" \
         | sed -e "s|^${input_path}|${output_path}|")"
 
   if [[ -d "${output_album_path}" ]]; then
@@ -1343,21 +1629,30 @@ function sync_delete_album()
       | grep --null-data -v "${lock_dir}" \
       | while read -r -d '' 'output_file'; do
 
+      local output_file_path
+      local input_file_path
+      local output_filename
+      local input_filename_base
+      local short_input_file_base
+      local short_output_file
+
       ## Build input file path based on output file path.
-      local output_file_path="$(dirname "${output_file}")"
-      local input_file_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
-      local short_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}||")"
+      output_file_path="$(dirname "${output_file}")"
+      input_file_path="$(echo -n "${output_file_path}" | sed -e "s|^${output_path}|${input_path}|")"
 
-      local output_filename="$(basename "${output_file}")"
-      local input_filename_base="$(echo -n "${output_filename}" | sed -e "s/\.[^\.]*$//")"
+      output_filename="$(basename "${output_file}")"
+      input_filename_base="$(echo -n "${output_filename}" | sed -e "s/\.[^\.]*$//")"
 
-      local short_input_file_base="${input_filename_base}.*"
-      local short_output_file="${output_filename}"
+      short_input_file_base="${input_filename_base}.*"
+      short_output_file="${output_filename}"
 
       # Test for file with same name (or without extension).
       if [[ ! -e "${input_file_path}/${output_filename}" ]]; then
-        local input_file="$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")"
-        local short_input_file="$(basename "${input_file}")"
+        local input_file
+        local short_input_file
+
+        input_file="$(find "${input_file_path}" -maxdepth 1 -type 'f' -iname "${input_filename_base}.*")"
+        short_input_file="$(basename "${input_file}")"
         if [[ -z "${input_file}"  ]]; then
           # Input file not found. Removing output file.
           echo -n '   - Input file '
@@ -1402,31 +1697,44 @@ function convert_album() {
   # Enable the trapped errors to be passed to called functions.
   #set -o errtrace
 
-  local threads="${1}"
-  local replaygain="${2}"
-  local sync_delete="${3}"
-  local lock_dir="${4}"
-  local input_album_path="${5}"
+  local threads
+  local replaygain
+  local sync_delete
+  local lock_dir
+  local input_album_path
+  local album_name
+  local short_album_path
 
-  local album_name="$(basename "${input_album_path}")"
-  local short_album_path="$(echo -n "${input_album_path}" | sed -e "s|^${input_path}/||")"
+  threads="${1}"
+  replaygain="${2}"
+  sync_delete="${3}"
+  lock_dir="${4}"
+  input_album_path="${5}"
+
+  album_name="$(basename "${input_album_path}")"
+  short_album_path="$(echo -n "${input_album_path}" | sed -e "s|^${input_path}/||")"
 
   #------------------------
   # Trap handling function
   #
   # @param string $input_album_path The currently processed path.
   function exit_convert_album_on_signal() {
-    local interrupt=${?}
+    local interrupt
+    local input_album_path
+    local album_name
+    local running_jobs
 
-    local input_album_path="${1}"
-    local album_name="$(basename "${input_album_path}")"
+    interrupt=${?}
+
+    input_album_path="${1}"
+    album_name="$(basename "${input_album_path}")"
 
     cecho 'boldred' "Convertion of album '${album_name}' interrupted." >&2
 
-    local running_jobs=($(jobs -p))
-    if [[ -n "${running_jobs}" ]]; then
+    running_jobs=($(jobs -p))
+    if [[ -n "${running_jobs[@]}" ]]; then
       # cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
-      kill ${running_jobs[@]} 2>&-
+      kill "${running_jobs[@]}" 2>&-
     fi
 
     if [[ ${interrupt} -eq 2 ]]; then
@@ -1440,21 +1748,27 @@ function convert_album() {
   } # exitconvert_album__on_signal()
   #------------------------
 
-  trap "exit_convert_album_on_signal '${input_album_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  trap 'exit_convert_album_on_signal "${input_album_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
   # Find folder files and put them in a array.
   # See: http://mywiki.wooledge.org/BashFAQ/020
-  local file_list_path="$(mktemp -t "tmp.XXXXXXXXXX")"
-  find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
-              | sort --zero-terminated > "${file_list_path}"
+ # local file_list_path="$(mktemp -t "tmp.XXXXXXXXXX")"
+ # find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
+ #             | sort --zero-terminated > "${file_list_path}"
 
-  unset files
+ # unset files
+ # declare -a files
+ # while read -d '' -r; do
+ #   files+=("${REPLY}")
+ # done < "${file_list_path}"
+
   declare -a files
   while read -d '' -r; do
     files+=("${REPLY}")
-  done < "${file_list_path}"
+  done < <(find "${input_album_path}" -maxdepth 1 -type 'f' -print0 \
+               | sort --zero-terminated)
 
-  test -e "${file_list_path}" && rm "${file_list_path}"
+  # test -e "${file_list_path}" && rm "${file_list_path}"
 
   # see : http://mywiki.wooledge.org/UsingFind
   # Note to self: when -print0 option is not available.
@@ -1473,19 +1787,19 @@ function convert_album() {
     fi
 
     # See http://mywiki.wooledge.org/ProcessManagement#I_want_to_process_a_bunch_of_files_in_parallel.2C_and_when_one_finishes.2C_I_want_to_start_the_next._And_I_want_to_make_sure_there_are_exactly_5_jobs_running_at_a_time.
-    parallel --halt 2 --jobs "${threads}" --null 'convert_file' ::: "${files[@]}"
+    parallel --no-notice --halt 2 --jobs "${threads}" --null 'convert_file' ::: "${files[@]}"
 
     # Warning: when interrupted, parallel does not print threads output
     # (including the traps output).
     # use --res /path/to/folder to store and debug tasks outputs.
 
     # Wait for all files to be done.
-    parallel --wait
+    parallel --no-notice --wait
 
     # Compute album replaygain.
     if [[ "${replaygain}" = 'True' ]]; then
       replaygain_album "${output_format}" "${output_extension}" \
-                      "${verbose}" "${input_album_path}"
+                      "${verbose}" "${input_album_path}" "${threads}"
 
       local return_code=${?}
       if [[ ${return_code} = 139 ]]; then
@@ -1516,15 +1830,15 @@ export -f 'convert_album'
 #
 # @param string $lock_path The path to lock file.
 function exit_on_signal() {
-  local interrupt=${?}
+  local interrupt="${?}"
 
   local lock_path="${1}"
   cecho 'boldred' "${script_name} is stopping at your request." >&2
 
   local running_jobs=($(jobs -p))
-  if [[ -n "${running_jobs}" ]]; then
+  if [[ -n "${running_jobs[@]}" ]]; then
     #cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
-    kill ${running_jobs[@]} 2>&-
+    kill "${running_jobs[@]}" 2>&-
   fi
   # remove lock file.
   [[ -n "${lock_path}" && -d "${lock_path}" ]] && rm -rf "${lock_path}"
@@ -1545,19 +1859,19 @@ lock_dir=".${script_name}.lock"
 pid_file="${script_name}.pid"
 
 # exit codes and text for them - additional features nobody needs :-)
-ENO_SUCCESS=0; ETXT[0]="ENO_SUCCESS"
-ENO_GENERAL=1; ETXT[1]="ENO_GENERAL"
-ENO_LOCKFAIL=2; ETXT[2]="ENO_LOCKFAIL"
-ENO_RECVSIG=3; ETXT[3]="ENO_RECVSIG"
+# ENO_SUCCESS=0; ETXT[0]="ENO_SUCCESS"
+# ENO_GENERAL=1; ETXT[1]="ENO_GENERAL"
+# ENO_LOCKFAIL=2; ETXT[2]="ENO_LOCKFAIL"
+# ENO_RECVSIG=3; ETXT[3]="ENO_RECVSIG"
 
 base_lock_path="/var/lock"
-lock_path="${base_lock_path}/${lock_dir}"
+export lock_path="${base_lock_path}/${lock_dir}"
 
 # Lock the system.
 #
 # @param string $base_lock_path Optionnal custom path to lock file.
 #                               Default to /var/lock.
-# 
+#
 # @return unlock (rm) error code.
 function lock {
     if [[ -n "${1}" ]]; then
@@ -1575,7 +1889,7 @@ function lock {
         # the following handler will exit the script on receiving these signals
         # the trap on "0" (EXIT) from above will be triggered by this trap's
         # "exit" command!
-        trap "exit_on_signal '${lock_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+        trap 'exit_on_signal "${lock_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
 
         return ${ENO_SUCCESS}
     else
@@ -1591,14 +1905,14 @@ function lock {
             exit ${ENO_LOCKFAIL}
         fi
 
-        if ! kill -0 ${other_pid} &>'/dev/null'; then
+        if ! kill -0 "${other_pid}" &>'/dev/null'; then
             # lock is stale, remove it and restart
             unlock
             lock "${base_lock_path}"
             return $?
         else
             # lock is valid and OTHERPID is active - exit, we're locked!
-            echo "lock failed, PID ${other_pid} is active" >&2
+            cecho 'redbold' "lock failed, PID ${other_pid} is active" >&2
             exit ${ENO_LOCKFAIL}
         fi
     fi
@@ -1606,7 +1920,7 @@ function lock {
 } # lock()
 
 # Unlock the system.
-# 
+#
 # @return unlock (rm) error code.
 function unlock {
     [[ -d "${lock_path}" ]] && rm -r "${lock_path}" &>'/dev/null'
@@ -1641,22 +1955,28 @@ function getoptex()
         if [[ ${#optopt} -gt 1 ]]; then # long-named option
           case $o in
             "--$optopt")
-              if [[ "$opttype" != ":" ]]; then
-                return 0;
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: $optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
               fi
-              optarg="$2"
-              if [[ -z "$optarg" ]]; then # error: must have an agrument
-                let OPTERR && echo "$0: error: $optopt must have an argument" >&2
-                optarg="$optopt";
-                optopt="?"
-                return 1;
-              fi
-              optind=$((optind+1)) # skip option's argument
               return 0
             ;;
             "--$optopt="*)
               if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
-                let OPTERR && echo "$0: error: $optopt must not have arguments" >&2
+                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
                 optarg="$optopt"
                 optopt="?"
                 return 1
@@ -1669,15 +1989,23 @@ function getoptex()
           case "$o" in
             "-$optopt")
               unset optofs
-              [[ "$opttype" != ":" ]] && return 0
-              optarg="$2"
-              if [[ -z "$optarg" ]]; then
-                echo "$0: error: -$optopt must have an argument" >&2
-                optarg="$optopt"
-                optopt="?"
-                return 1
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: -$optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
               fi
-              optind=$((optind+1)) # skip option's argument
               return 0
             ;;
             "-$optopt"*)
@@ -1694,7 +2022,7 @@ function getoptex()
           esac
         fi
       done
-      echo "Error : invalid option : '${o}'." >&2
+      cecho 'redbold' "Error : invalid option : '${o}'." >&2
       usage
       exit 1
     fi
@@ -1708,7 +2036,7 @@ function optlistex
   local l="$1"
   local m # mask
   local r # to store result
-  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
   while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
@@ -1719,11 +2047,13 @@ function optlistex
       m="${m#?}"  # cut one more "?" sign
     fi
   done
-  echo $r
+  echo "$r"
 }
 function getopt()
 {
-  local optlist=`optlistex "$1"`
+  local optlist
+
+  optlist=$(optlistex "$1")
   shift
   getoptex "$optlist" "$@"
   return $?
@@ -1737,16 +2067,20 @@ check_binary "basename" "coreutils"
 check_binary "dirname" "coreutils"
 check_binary "mktemp" "mktemp"
 check_binary "sed" "sed"
+check_binary "bc" "bc"
 check_binary "avconv;ffmpeg" "libav-tools"
 check_binary "parallel" "parallel"
 check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
 check_binary "mediainfo" "mediainfo"
 check_binary "vorbiscomment" "vorbis-tools"
 check_binary "metaflac" "flac"
-check_binary "mp3gain;aacgain" "mp3gain"
-check_binary "vorbisgain" "vorbisgain"
+#check_binary "mp3gain;aacgain" "mp3gain"
+#check_binary "vorbisgain" "vorbisgain"
+check_binary "collectiongain" "python-rgain"
+check_binary "AtomicParsley" "atomicparsley"
 check_binary "vbrfix" "vbrfix"
 check_binary "mp3val" "mp3val"
+check_binary "fdkaac;aac-enc" "fdkaac aac-enc"
 
 # Application defaults
 
@@ -1765,8 +2099,6 @@ replaygain="false"
 
 threads="100%"
 
-export avconv_options=""
-
 export sync_delete='False'
 export copy_all='False'
 
@@ -1777,7 +2109,7 @@ export input_extension="${input_format}"
 export output_extension="${output_format}"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: output-format: of: e: bitrate. b. quality. q. threads: t: avconv-options: a: replaygain gain g sync-delete delete d copy-all copy c quiet silent s verbose v" "${@}"; do
+while getoptex "help h input-path: in: i: output-path: out: o: input-format: if: output-format: of: e: bitrate. b. quality. q. threads: t: replaygain gain g sync-delete delete d copy-all copy c quiet silent s verbose v" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -1834,12 +2166,6 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
       fi
       ;;
 
-    'avconv-options' | 'a' )
-      if [[ -n "${optarg}" ]]; then
-        avconv_options="${optarg}"
-      fi
-      ;;
-
     'sync-delete' | 'delete' | 'd' )
       sync_delete='True'
       ;;
@@ -1886,6 +2212,10 @@ case "${input_format}" in
     input_format='vorbis'
     input_extension='ogg'
     ;;
+  'aac' | 'm4a' )
+    input_format='aac'
+    input_extension='m4a'
+    ;;
 esac
 
 export output_extension="${output_format}"
@@ -1895,12 +2225,20 @@ case "${output_format}" in
     ;;
   'mp3' )
     # Invert quality setting (9 is lowest, 0 highest).
-    # This way mp3 and ogg/vorbis quality is set the same way.
-    encoding_quality=$((9 - ${encoding_quality}))
+    # This way aac, mp3 and ogg/vorbis quality is set the same way.
+    encoding_quality=$((9 - encoding_quality))
     ;;
   'ogg' | 'vorbis' )
     output_extension='ogg'
     output_format='vorbis'
+    ;;
+  'aac' | 'm4a' )
+    output_extension='m4a'
+    output_format='aac'
+
+    # Change quality setting range (1 is lowest, 5 highest, 0 is CBR).
+    # This way aac, mp3 and ogg/vorbis quality is set the same way.
+    encoding_quality="$(bc <<< "scale=10; result = 1.5 + (4 * (${encoding_quality} / 9)); scale=0; result / 1")"
     ;;
   * )
     echo "Error: unsupported output format '${output_format}'." >&2
