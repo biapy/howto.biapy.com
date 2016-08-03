@@ -10,6 +10,9 @@ version="1.1.1"
 # History
 # -------
 #
+# 1.1.1:
+#  - fix bad var name in PHP 7.0 config path detection.
+#
 # 1.1.0:
 #  - add compatibility for Ubuntu 16.04 Xenial Xerus PHP 7.0.
 #  - add compatibility for Debian 8.0 Jessie php5enmod
