@@ -5,10 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.2.0"
+version="1.3.0"
 
 # History
 # -------
+#
+# 1.3.0:
+#  - add feature to reload php configuration by restarting php-fpm or apache2.
 #
 # 1.2.0:
 #  - add feature to install custom php configurations (modules).
@@ -77,6 +80,7 @@ Usage :
     * --set | -s      : Set config rule value if current value is lower.
     * --fix | -f      : Set config rule value wathever the current value is.
     * --get | -g      : Get config rule value.
+    * --reload | -r   : Reload PHP config by restarting PHP-FPM or Apache 2.
     * --add-mod       : Add a new PHP module and enable it. Useful for custom build modules.
     * --mod-priority  : Set new module priority (default 50).
     * --mod-name      : Set new module name (for creating the file).
@@ -498,7 +502,7 @@ php_config_file_template="; Settings managed by php-tools command line utility.
 "
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: add-mod mod-priority: mod-name: mod-settings: force" "${@}"; do
+while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: reload r add-mod mod-priority: mod-name: mod-settings: force" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -525,6 +529,10 @@ while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: add-mod mod-p
 
     'for' | 'f' )
       for_software="${optarg}"
+      ;;
+
+    'reload' | 'r' )
+      action='reload'
       ;;
 
     'add-mod' )
@@ -577,7 +585,7 @@ esac
 case "${action}" in
 
   #######################################################################################
-  # analyze : analyse values setted in php-tools config file..
+  # analyze : analyse where a value is setted in php config files.
   #######################################################################################
   'analyze' )
     echo "Analysing '${ini_rule}' settings
@@ -800,6 +808,51 @@ Please restart PHP (Apache 2 or PHP-FPM)." >&2
     ;;
 
 
+
+  #######################################################################################
+  # reload : Reload PHP config : restart php-fpm or Apache 2.
+  #######################################################################################
+  'reload' )
+      if [[ -x '/etc/init.d/php7.0-fpm' ]]; then
+        echo -n "Restarting php7.0-fpm..."
+        service php7.0-fpm restart
+
+        if [[ ${?} -ne 0 ]]; then
+          cecho 'red' 'failed.'
+        else
+          cecho 'green' 'done.'
+        fi
+      fi
+
+      if [[ -x '/etc/init.d/php5-fpm' ]]; then
+        echo -n "Restarting php5-fpm..."
+        service php5-fpm restart
+
+        if [[ ${?} -ne 0 ]]; then
+          cecho 'red' 'failed.'
+        else
+          cecho 'green' 'done.'
+        fi
+      fi
+
+      # Reloading apache2 if mod_php is enabled.
+      if type "a2query" &>'/dev/null'; then
+        echo -n "Graceful restarting Apache 2..."
+        if a2query -q -m 'php7.0' || a2query -q -m 'php5'; then
+          test -x /etc/init.d/apache2 && service apache2 force-reload
+
+          if [[ ${?} -ne 0 ]]; then
+            cecho 'red' 'failed.'
+          else
+            cecho 'green' 'done.'
+          fi
+        else
+          cecho 'yellow' 'skipped.'
+        fi
+      fi
+
+      exit 0
+    ;;
 
   * )
     cecho 'redbold' "Error : '${1}' is not a valid action." >&2
