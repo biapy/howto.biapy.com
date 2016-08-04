@@ -5,10 +5,14 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.1.1"
+version="1.2.0"
 
 # History
 # -------
+#
+# 1.2.0:
+#  - add feature to install custom php configurations (modules).
+#  - use shellcheck to sanitize code.
 #
 # 1.1.1:
 #  - fix bad var name in PHP 7.0 config path detection.
@@ -73,9 +77,14 @@ Usage :
     * --set | -s      : Set config rule value if current value is lower.
     * --fix | -f      : Set config rule value wathever the current value is.
     * --get | -g      : Get config rule value.
+    * --add-mod       : Add a new PHP module and enable it. Useful for custom build modules.
+    * --mod-priority  : Set new module priority (default 50).
+    * --mod-name      : Set new module name (for creating the file).
+    * --mod-settings  : Set new module settings contents.
+    * --force         : Force module creation if file already exists.
 "
 
-  [[ -n "${1}" ]] && exit ${1}
+  [[ -n "${1}" ]] && exit "${1}"
 } # usage
 
 
@@ -189,7 +198,7 @@ function cecho() {
 function realpath() {
   [[ ${#} -ne 1 ]] && exit 1
 
-  local realpath=''
+  local realpath
 
   case "$(uname)" in
     'Linux' )
@@ -219,7 +228,8 @@ function realpath() {
 function realpath_check() {
   [[ ${#} -ne 1 ]] && exit 1
 
-  local realpath="$(realpath "${1}")"
+  local realpath
+  realpath="$(realpath "${1}")"
 
   if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
     realpath=''
@@ -245,14 +255,17 @@ function realpath_check() {
 function check_binary() {
   [[ ${#} -ne 2 ]] && exit 1
 
-  local primary="$(cut -d ';' -f 1 <<< "${1}")"
-  local binaries="";
-  local binary=''
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
 
   read -d ';' -r -a binaries <<< "${1}"
 
   # Test the binary presence.
-  for binary in ${binaries[@]}; do
+  for binary in "${binaries[@]}"; do
     if type "${binary}" &>'/dev/null'; then
       command -v "${binary}"
       return 0
@@ -292,13 +305,13 @@ function parse_value() {
   else
     case "${unit}" in
       'g' | 'gb' )
-        result=$(( ${integer_value} * 1024 * 1024 * 1024 ))
+        result=$(( integer_value * 1024 * 1024 * 1024 ))
         ;;
       'm' | 'mb' )
-        result=$(( ${integer_value} * 1024 * 1024 ))
+        result=$(( integer_value * 1024 * 1024 ))
         ;;
       'k' | 'kb' )
-        result=$(( ${integer_value} * 1024 ))
+        result=$(( integer_value * 1024 ))
         ;;
       * )
         result="${integer_value}"
@@ -317,7 +330,8 @@ function parse_value() {
 #######################################################################################
 #######################################################################################
 #######################################################################################
-function getoptex() {
+function getoptex()
+{
   let $# || return 1
   local optlist="${1#;}"
   let optind || optind=1
@@ -337,22 +351,28 @@ function getoptex() {
         if [[ ${#optopt} -gt 1 ]]; then # long-named option
           case $o in
             "--$optopt")
-              if [[ "$opttype" != ":" ]]; then
-                return 0;
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: $optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
               fi
-              optarg="$2"
-              if [[ -z "$optarg" ]]; then # error: must have an agrument
-                let OPTERR && echo "$0: error: $optopt must have an argument" >&2
-                optarg="$optopt";
-                optopt="?"
-                return 1;
-              fi
-              optind=$((optind+1)) # skip option's argument
               return 0
             ;;
             "--$optopt="*)
               if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
-                let OPTERR && echo "$0: error: $optopt must not have arguments" >&2
+                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
                 optarg="$optopt"
                 optopt="?"
                 return 1
@@ -365,15 +385,23 @@ function getoptex() {
           case "$o" in
             "-$optopt")
               unset optofs
-              [[ "$opttype" != ":" ]] && return 0
-              optarg="$2"
-              if [[ -z "$optarg" ]]; then
-                echo "$0: error: -$optopt must have an argument" >&2
-                optarg="$optopt"
-                optopt="?"
-                return 1
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: -$optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
               fi
-              optind=$((optind+1)) # skip option's argument
               return 0
             ;;
             "-$optopt"*)
@@ -391,19 +419,19 @@ function getoptex() {
         fi
       done
       cecho 'redbold' "Error : invalid option : '${o}'." >&2
-      usage
-      exit 1
+      usage 1
     fi
   fi
   optopt="?"
   unset optarg
   return 1
 }
-function optlistex() {
+function optlistex
+{
   local l="$1"
   local m # mask
   local r # to store result
-  while [[ ${#m} -lt $[${#l}-1] ]]; do m="$m?"; done # create a "???..." mask
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
   while [[ -n "$l" ]]; do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
@@ -414,10 +442,13 @@ function optlistex() {
       m="${m#?}"  # cut one more "?" sign
     fi
   done
-  echo $r
+  echo "$r"
 }
-function getopt() {
-  local optlist=`optlistex "$1"`
+function getopt()
+{
+  local optlist
+
+  optlist=$(optlistex "$1")
   shift
   getoptex "$optlist" "$@"
   return $?
@@ -436,17 +467,25 @@ check_binary "php" "php5-cli" > '/dev/null'
 
 
 # Application defaults
-for="false"
+for_software="false"
 action="false"
 ini_rule="false"
 value=""
+# Add module only options.
+force="false"
+module_priority="50"
+module_name=""
+module_settings=""
 
-php_base="/etc/php5"
+php_base='/etc/php5'
 php_config_d="${php_base}/conf.d"
-test -d '/etc/php5/mods-available' \
-  && php_config_d='/etc/php5/mods-available'
-test -d '/etc/php/7.0/mods-available' \
-  && php_config_d='/etc/php/7.0/mods-available'
+test -d "${php_base}/mods-available" \
+  && php_config_d="${php_base}/mods-available"
+if [[ -d '/etc/php/7.0/mods-available' ]]; then
+  php_base='/etc/php/7.0'
+  php_config_d="${php_base}/mods-available"
+fi
+
 php_config_name="zzz-php-tools"
 php_config_file="${php_config_d}/${php_config_name}.ini"
 
@@ -454,12 +493,12 @@ php_config_file="${php_config_d}/${php_config_name}.ini"
 [[ -x '/usr/sbin/phpenmod' ]] && phpEnMod="phpenmod"
 
 priority=99
-php_config_file_template="; Enable APC ressources sharing.
+php_config_file_template="; Settings managed by php-tools command line utility.
 ; priority=${priority}
 "
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g:" "${@}"; do
+while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: add-mod mod-priority: mod-name: mod-settings: force" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -485,7 +524,27 @@ while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g:" "${@}"; do
       ;;
 
     'for' | 'f' )
-      for="${optarg}"
+      for_software="${optarg}"
+      ;;
+
+    'add-mod' )
+      action='add-mod'
+      ;;
+
+    'mod-priority' )
+      module_priority="${optarg}"
+      ;;
+
+    'mod-name' )
+      module_name="${optarg}"
+      ;;
+
+    'mod-settings' )
+      module_settings="${optarg}"
+      ;;
+
+    'force' )
+      force='true'
       ;;
 
     'help' | 'h' | * )
@@ -501,14 +560,25 @@ if [[ "${action}" = 'false' ]]; then
   usage 1
 fi
 
-# Check that ini_rule exists.
-if [[ -n "$(php --run "echo (ini_get('${ini_rule}') === false) ? 'error':'';")" ]]; then
-  cecho 'redbold' "Error: '${ini_rule}' is not a valid PHP configuration option." >&2
-  exit 1
-fi
 
 
 case "${action}" in
+  'analyze' | 'get' | 'set' | 'fix' )
+    # Check that ini_rule exists.
+    if [[ -n "$(php --run "echo (ini_get('${ini_rule}') === false) ? 'error':'';")" ]]; then
+      cecho 'redbold' "Error: '${ini_rule}' is not a valid PHP configuration option." >&2
+      exit 1
+    fi
+  ;;
+esac
+
+
+
+case "${action}" in
+
+  #######################################################################################
+  # analyze : analyse values setted in php-tools config file..
+  #######################################################################################
   'analyze' )
     echo "Analysing '${ini_rule}' settings
 ============================================================="
@@ -517,22 +587,22 @@ case "${action}" in
     find "${php_base}" -name "php.ini" \
       | grep -v "${php_config_d}" \
       | sort \
-      | xargs -ifile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "file" \
+      | xargs -iconfigFile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "configFile" \
       | while read line; do
       if [ ${first} -eq 1 ]; then
         echo "Base PHP ini files
 -------------------------------------------------------------"
         first=0
       fi
-      file="$(cut --delimiter=":" --fields=1 <<< "${line}")"
-      rule="$(cut --delimiter=":" --fields=2- <<< "${line}")"
+      file="${line%%:*}"
+      rule="${line#*:}"
       value="$(sed -e 's/^[^=]*=[ \t]*//' -e 's/;.*$//' <<< "${rule}")"
       printf "%-60s: %s\n" "${file}" "${value}"
     done
     first=1
     find "${php_config_d}" -name "*.ini" \
       | sort \
-      | xargs -ifile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "file" \
+      | xargs -iconfigFile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "configFile" \
       | while read line; do
       if [ ${first} -eq 1 ]; then
         echo "
@@ -540,8 +610,8 @@ conf.d ini files
 -------------------------------------------------------------"
         first=0
       fi
-      file="$(cut --delimiter=":" --fields=1 <<< "${line}")"
-      rule="$(cut --delimiter=":" --fields=2- <<< "${line}")"
+      file="${line%%:*}"
+      rule="${line#*:}"
       value="$(sed -e 's/^[^=]*=[ \t]*//' -e 's/;.*$//' <<< "${rule}")"
       printf "%-60s: %s\n" "${file}" "${value}"
     done
@@ -554,6 +624,9 @@ conf.d ini files
 
 
 
+  #######################################################################################
+  # get : get the current value of a PHP setting.
+  #######################################################################################
   'get' )
     php --run "echo ini_get('${ini_rule}');"
     echo
@@ -562,6 +635,9 @@ conf.d ini files
 
 
 
+  #######################################################################################
+  # set : set the value of a PHP setting, if greater than current value.
+  #######################################################################################
   'set' )
     value="${1}"
 
@@ -579,7 +655,7 @@ conf.d ini files
     if [ "${parsed_value}" -gt "${parsed_current_value}" ]; then
       # Update the current value to use the new value.
       set_done="false"
-      if [ -n "$(egrep "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}")" ]; then
+      if egrep -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
         sed -i -e "s;^[\t ]*${ini_rule}[\t ]*=.*$;${ini_rule} = ${value};" \
             "${php_config_file}"
         set_done="true"
@@ -595,7 +671,7 @@ ${ini_rule} = ${value}" \
       fi
     else
       # Set current value in ini file if it does not exists yet.
-      if [ -z "$(egrep "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}")" ]; then
+      if ! egrep -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
         echo "
 ; === ${ini_rule} ===
 ${ini_rule} = ${current_value}" \
@@ -604,12 +680,11 @@ ${ini_rule} = ${current_value}" \
     fi
 
     # Add the "for" information as comment.
-    if [ "${for}" != "false" -a -n "${for}" ]; then
-      for_text="; - for '${for}' : ${value}"
-      if [ -z "$(sed -e "0,/; === ${ini_rule} ===/d" \
+    if [ "${for_software}" != "false" -a -n "${for_software}" ]; then
+      for_text="; - for '${for_software}' : ${value}"
+      if ! grep "${for_text}" <<< "$(sed -e "0,/; === ${ini_rule} ===/d" \
                   -e "/^[\t ]*${ini_rule}[\t ]*/,10000d" \
-                  "${php_config_file}" \
-                | grep "${for_text}")" ]; then
+                  "${php_config_file}")"; then
         sed -i -e "/^[\t ]*${ini_rule}[\t ]*=/i\\
 ${for_text}" \
           "${php_config_file}"
@@ -625,6 +700,9 @@ ${for_text}" \
 
 
 
+  #######################################################################################
+  # fix : set the value of a PHP setting, even if lower than current value.
+  #######################################################################################
   'fix' )
     value="${1}"
 
@@ -637,7 +715,7 @@ ${for_text}" \
     fi
 
     # update existing setting if possible.
-    if [ -n "$(egrep "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}")" ]; then
+    if egrep -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
       sed -i -e "s;^[\t ]*${ini_rule}[\t ]*=.*$;${ini_rule} = ${value};" \
           "${php_config_file}"
       set_done="true"
@@ -653,12 +731,11 @@ ${ini_rule} = ${value}" \
     fi
 
     # Add the "for" information as comment.
-    if [ "${for}" != "false" -a -n "${for}" ]; then
-      for_text="; - for '${for}' : ${value}"
-      if [ -z "$(sed -e "0,/; === ${ini_rule} ===/d" \
+    if [ "${for_software}" != "false" -a -n "${for_software}" ]; then
+      for_text="; - for '${for_software}' : ${value}"
+      if ! grep "${for_text}" <<< "$(sed -e "0,/; === ${ini_rule} ===/d" \
                   -e "/^[\t ]*${ini_rule}[\t ]*/,10000d" \
-                  "${php_config_file}" \
-                | grep "${for_text}")" ]; then
+                  "${php_config_file}")"; then
         sed -i -e "/^[\t ]*${ini_rule}[\t ]*=/i\\
 ${for_text}" \
           "${php_config_file}"
@@ -669,6 +746,57 @@ ${for_text}" \
       echo "'${ini_rule}' is set to '${value}'."
     fi
     exit 0;
+    ;;
+
+
+
+  #######################################################################################
+  # add-mod : add a new php module and enable it.
+  #######################################################################################
+  'add-mod' )
+    if [[ -z "${module_name}" || -z "${module_settings}" ]]; then
+      cecho 'red' 'Error: --add-mod must be used with --mod-name and --mod-settings options.' >&2
+      usage 1
+    fi
+
+    escaped_module_name="$(echo "${module_name}" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -r 's/[^a-zA-Z0-9\-\_]+/-/g')"
+
+    module_priority_int=$(( module_priority * 1 ))
+
+    module_config_file="${php_config_d}/${escaped_module_name}.ini"
+
+    if [[ -e "${module_config_file}" && "${force}" = 'false' ]]; then
+      cecho 'red' "Error: config file already exists (${module_config_file}).
+Use --force option to overwrite." >&2
+      exit 1
+    fi
+
+    # Creating configuration file.
+    echo "; Settings for '${module_name}'.
+; file created using php-tools --add-mod.
+; priority=${module_priority_int}
+
+${module_settings}" \
+          > "${module_config_file}"
+
+      if [[ ${?} -ne 0 ]]; then
+        cecho 'red' "Error: failed to create configuration file '${module_config_file}'." >&2
+        exit 1
+      fi
+
+      [[ -n "${phpEnMod}" ]] && ${phpEnMod} "${escaped_module_name}/${module_priority_int}"
+
+      if [[ ${?} -ne 0 ]]; then
+        cecho 'red' "Error: unable to enable module '${escaped_module_name}." >&2
+        exit 1
+      fi
+
+      cecho 'green' "Module '${escaped_module_name}' installed successfully.
+Configuration file created: '${module_config_file}'
+Please restart PHP (Apache 2 or PHP-FPM)." >&2
+      exit 0;
     ;;
 
 
