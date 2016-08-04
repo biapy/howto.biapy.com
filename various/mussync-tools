@@ -12,10 +12,13 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.5.0"
+version="1.5.1"
 
 # History
 # -------
+#
+# 1.5.1:
+#  - Update check_binary, realpath and realpath_check functions with better result returning.
 #
 # 1.5.0:
 #  - fix bug #4. application/octect-stream audio files are now accepted.
@@ -134,17 +137,17 @@ function dirname() {
 export -f 'dirname'
 
 
+
 # Get the absolute path for a file or directory.
+# Print its path on &1 if found.
 #
 # @param string $path A relative path.
 #
 # @return ${realpath} A absolute path.
-realpath=''
 function realpath() {
-  # declare -g realpath=''
-  realpath=''
-
   [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
 
   case "$(uname)" in
     'Linux' )
@@ -157,66 +160,70 @@ function realpath() {
       realpath="$(realpath "${1}")"
       ;;
   esac
+
+  echo -n "${realpath}"
+  return 0
 } # realpath
 
 
 
 # Get the absolute path for a file or directory and check the file existance.
 # If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
 #
 # @param string $path A relative path.
 #
-# @return ${realpath} A absolute path or an empty string if file don't exists.
-realpath=''
+# @return Exit with error if the path is missing.
 function realpath_check() {
-  # declare -g realpath=''
-  realpath=''
-
   [[ ${#} -ne 1 ]] && exit 1
 
-  realpath "${1}"
+  local realpath
+  realpath="$(realpath "${1}")"
 
   if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
-    realpath=""
+    realpath=''
   fi
 
   if [[ -z "${realpath}" ]]; then
-    echo "Error: File '${1}' does not exists." >&2
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
     exit 1
   fi
+
+  echo -n "${realpath}"
+  return 0
 } # realpath_check
 
 
 
-# Check if a binary is present
+# Check if a binary is present. Print its path on &1 if found.
 #
 # @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-binary=''
 function check_binary() {
-  # declare -g binary=''
-  binary=''
-
   [[ ${#} -ne 2 ]] && exit 1
 
-  local primary="${1%%;*}"
-  local binaries=""
+  local primary
+  local binaries
+  local binary
 
-  IFS=';' read -a binaries <<< "${1}"
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
 
   # Test the binary presence.
   for binary in "${binaries[@]}"; do
-    if type -f "${binary}" &>'/dev/null'; then
-      binary="$(command -v "${binary}")"
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
       return 0
     fi
   done
 
-  echo "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
   exit 1
-} # check_binary
+} # check_binary()
 
 
 
@@ -571,7 +578,7 @@ function transfert_images() {
     image_mime_type="$(mediainfo --Inform="General;%Cover_Mime%" "${input_file}")"
     image_extension="${image_mime_type#*/}"
 
-    # Create image temporary file. 
+    # Create image temporary file.
     image_path="$(mktemp -t "tmp.XXXXXXXXXX")"
     if [[ -n "${image_extension}" ]]; then
       mv "${image_path}" "${image_path}.${image_extension}" 2>&-
@@ -1875,8 +1882,7 @@ export lock_path="${base_lock_path}/${lock_dir}"
 # @return unlock (rm) error code.
 function lock {
     if [[ -n "${1}" ]]; then
-      realpath_check "${1}"
-      base_lock_path="${realpath}"
+      base_lock_path="$(realpath_check "${1}")"
     fi
 
     lock_path="${base_lock_path}/${lock_dir}"
@@ -2063,24 +2069,24 @@ function getopt()
 #######################################################################################
 
 # Check for binaries presence
-check_binary "basename" "coreutils"
-check_binary "dirname" "coreutils"
-check_binary "mktemp" "mktemp"
-check_binary "sed" "sed"
-check_binary "bc" "bc"
-check_binary "avconv;ffmpeg" "libav-tools"
-check_binary "parallel" "parallel"
-check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3"
-check_binary "mediainfo" "mediainfo"
-check_binary "vorbiscomment" "vorbis-tools"
-check_binary "metaflac" "flac"
-#check_binary "mp3gain;aacgain" "mp3gain"
-#check_binary "vorbisgain" "vorbisgain"
-check_binary "collectiongain" "python-rgain"
-check_binary "AtomicParsley" "atomicparsley"
-check_binary "vbrfix" "vbrfix"
-check_binary "mp3val" "mp3val"
-check_binary "fdkaac;aac-enc" "fdkaac aac-enc"
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "mktemp" "mktemp" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "bc" "bc" > '/dev/null'
+check_binary "avconv;ffmpeg" "libav-tools" > '/dev/null'
+check_binary "parallel" "parallel" > '/dev/null'
+check_binary "eyeD3;eyeD3-2.7;eyeD3-2.6" "eyed3" > '/dev/null'
+check_binary "mediainfo" "mediainfo" > '/dev/null'
+check_binary "vorbiscomment" "vorbis-tools" > '/dev/null'
+check_binary "metaflac" "flac" > '/dev/null'
+#check_binary "mp3gain;aacgain" "mp3gain" > '/dev/null'
+#check_binary "vorbisgain" "vorbisgain" > '/dev/null'
+check_binary "collectiongain" "python-rgain" > '/dev/null'
+check_binary "AtomicParsley" "atomicparsley" > '/dev/null'
+check_binary "vbrfix" "vbrfix" > '/dev/null'
+check_binary "mp3val" "mp3val" > '/dev/null'
+check_binary "fdkaac;aac-enc" "fdkaac aac-enc" > '/dev/null'
 
 # Application defaults
 
@@ -2115,8 +2121,7 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
 
   case "${optopt}" in
     'input-path' | 'in' | 'i' )
-      realpath_check "${optarg}"
-      input_path="${realpath}"
+      input_path="$(realpath_check "${optarg}")"
 
       if [[ -z "${output_path}" ]]; then
         output_path="${input_path}"
@@ -2124,8 +2129,7 @@ while getoptex "help h input-path: in: i: output-path: out: o: input-format: if:
       ;;
 
     'output-path' | 'out' | 'o' )
-      realpath_check "${optarg}"
-      output_path="${realpath}"
+      output_path="$(realpath_check "${optarg}")"
       ;;
 
     'input-format' | 'if' )
