@@ -1,0 +1,525 @@
+#!/bin/bash
+# Authors : Nicolas Coevoet, Pierre-Yves Landuré
+# this script read exifs informations of files and copy them to destination/year/month/yearmonthday_hourminutesecond.ext
+# it also convert crw/.cr2 file to jpg
+# no images will be remove or overwrite.
+# You need to have :
+# exiftool and ufraw 0.15 installed
+
+version="2.0.1"
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}"
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+
+scriptName="$(command basename "${0}")"
+
+
+function usage {
+  echo "Autosort image files and create JPEG version of raw (NEF, DNG, ...) files v${version}
+
+Usage :
+
+  ${scriptName} [ --help ] [ --by-day ] [ --recursive ]
+                 [ --raw-only ] [ --create-jpeg ]
+                 [ --jpeg-folder jpeg-destination/ ]
+                 source destination/
+
+  This script help read exif informations of image files
+  (CRW, CR2, NEF, JPEG and TIFF) in order to copy and sort
+  the files to destination/year/month/yearmonthday_hourminutesecond.ext.
+  It can also convert RAW files to JPEG.
+
+  Available options are:
+
+  -h
+  --help
+    Display this little help.
+
+  -d
+  --by-day
+    By default, this script sort images in year/month folders. If this option
+    is specified, the images are sorted in year/month/day folders.
+
+  -r
+  --recursive
+    By default, this script process only images in the current folder.
+    If recursive option is specified, it also search for images in sub-folders.
+
+  -R
+  --raw-only
+    By default, this tool sort all files in the source folder. If this option is
+    specified, it will only sort RAW files.
+    Supported RAW files are CRW, CR2 and NEF.
+
+  -j
+  --create-jpeg
+    If this option is specified, a jpeg version of RAW files is created.
+    Supported RAW files are CRW, CR2 and NEF.
+
+  -J jpeg-destination/
+  --jpeg-folder jpeg-destination/
+    By default, when the --create-jpeg option is specified, the jpeg files are
+    created in the destination folder. If the jpeg folder is specified, the jpeg
+    files are created in the specified jpeg-destination.
+
+  source
+    The source folder or image file.
+
+  destination
+    The destination folder where the images will be copied and sorted.
+"
+  test -n "${1}" && exit ${1}
+} # usage()
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+
+
+
+# Get the md5sum of a file (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function md5sum() {
+
+  if type -f 'md5sum' &>'/dev/null'; then
+    command md5sum "${@}"
+    return ${?}
+  fi
+
+  if type -f 'md5' &>'/dev/null'; then
+    md5 "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # md5sum()
+export -f 'md5sum'
+
+
+
+#
+# Multi platform exiftool support.
+#
+function exiftool() {
+  if type -f 'exiftool' &>'/dev/null'; then
+    command exiftool "${@}"
+    return ${?}
+  fi
+
+  if type -f 'exiftool-5.18' &>'/dev/null'; then
+    exiftool-5.18 "${@}"
+    return ${?}
+  fi
+
+  if type -f 'exiftool-5.16' &>'/dev/null'; then
+    exiftool-5.16 "${@}"
+    return ${?}
+  fi
+
+  if type -f 'exiftool-5.14' &>'/dev/null'; then
+    exiftool-5.14 "${@}"
+    return ${?}
+  fi
+
+  if type -f 'exiftool-5.12' &>'/dev/null'; then
+    exiftool-5.12 "${@}"
+    return ${?}
+  fi
+
+  if type -f 'exiftool-5.10' &>'/dev/null'; then
+    exiftool-5.10 "${@}"
+    return ${?}
+  fi
+
+  if type -f 'exiftool-5.8' &>'/dev/null'; then
+    exiftool-5.8 "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # exiftool()
+export -f 'exiftool'
+
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+  realpath=''
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+  realpath="$(realpath "${1}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+
+
+
+# Check if a binary is present
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+binary=''
+function check_binary() {
+  # declare -g binary=''
+  binary=''
+
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+
+  primary="$(echo -n "${1}" | cut -d ';' -f 1)"
+  binaries=''
+
+  IFS=';' read -ra binaries <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type -f "${binary}" &>'/dev/null'; then
+      binary="$(command -v "${binary}")"
+      return 0
+    fi
+  done
+
+  echo "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary
+
+
+# Check for binaries presence
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "ufraw-batch" "ufraw" > '/dev/null'
+check_binary "exiftool;exiftool-5.18;exiftool-5.16;exiftool-5.14;exiftool-5.12;exiftool-5.10;exiftool-5.8" "libimage-exiftool-perl" > '/dev/null'
+
+
+# We set default values
+onlyRawFiles=0
+createJpeg=0
+byDay=0
+recursive=0
+jpegFolder=""
+
+source=""
+destinationFolder=""
+
+# Parse the command line
+while [ $# -ge 1 ]; do
+  case "${1}" in
+    -h|--help)
+      usage 0
+    ;;
+   -d|--by-day)
+      byDay=1
+    ;;
+   -r|--recursive)
+      recursive=1
+    ;;
+   -R|--raw-only)
+      onlyRawFiles=1
+    ;;
+   -j|--create-jpeg)
+      createJpeg=1
+    ;;
+   -J|--jpeg-folder)
+      # in this case, $2 should be the conffile !
+      if [[ -n "${2}" ]]; then
+        jpegFolder="$(realpath_check "${2}")"
+      else
+        cecho "red" "The --jpeg-folder option must be followed by a destination path."
+        usage 1
+      fi
+      # we shift here to avoid processing the file path
+      shift
+    ;;
+    *)
+      if [[ -n "${source}" ]]; then
+        cecho "red" "Unknown option ${1}"
+        usage 1
+      fi
+
+      source="$(realpath_check "${1}")"
+      destinationFolder="$(realpath_check "${2}")"
+      # we shift here to avoid processing the file path
+      shift
+    ;;
+  esac
+  shift
+done
+
+if [ ! -n "${jpegFolder}" ]; then
+  jpegFolder="${destinationFolder}"
+fi
+
+findOptions=()
+
+if [ ${recursive} -eq 0 ]; then
+  findOptions=(-maxdepth 0)
+fi
+
+find "${source}" "${findOptions[@]}" -type f | \
+while read -r sourceFile; do
+  # For each file in source folder.
+
+  # We detect its extension, and fetch its exif date time information.
+  sourceExtension="$(echo "${sourceFile##*.}" | tr '[:upper:]' '[:lower:]')"
+  sourceBasename="$(basename "${sourceFile}" ".${sourceFile##*.}")"
+  sourceDatetime="$(command exiftool -DateTimeOriginal -fast -s -s -s -q "${sourceFile}" 2>/dev/null)"
+  datetimeColonCount=$(( $(echo "${sourceDatetime}" | sed 's/[^:]//g' | wc -m) - 1))
+  sourceMd5sum="$(md5sum "${sourceFile}" | cut -d' ' -f1)"
+
+  if [[ ( ${onlyRawFiles} -eq 0 \
+    && ( "${sourceExtension}" = "jpeg" \
+    || "${sourceExtension}" = "jpg" \
+    || "${sourceExtension}" = "tiff" \
+    || "${sourceExtension}" = "tif" ) ) \
+    || "${sourceExtension}" = "crw" \
+    || "${sourceExtension}" = "cr2" \
+    || "${sourceExtension}" = "nef" ]]; then # Test if we process only raw files.
+
+    # We try to find a appropriate destination filename.
+    if [ $datetimeColonCount -eq 0 ]; then # Test if date detection failed.
+      # We are not able to extract a date from file.
+      targetFolder="nodate"
+      targetFileBase="${sourceBasename}"
+    else # Test if date detection failed.
+      # We fetch date time components.
+      date="$(echo "${sourceDatetime}" | cut -d' ' -f1)"
+      time="$(echo "${sourceDatetime}" | cut -d' ' -f2)"
+
+      year="$(echo "${date}" | cut -d':' -f1)"
+      month="$(echo "${date}" | cut -d':' -f2)"
+      day="$(echo "${date}" | cut -d':' -f3)"
+      hour="$(echo "${time}" | cut -d':' -f1)"
+      minute="$(echo "${time}" | cut -d':' -f2)"
+      second="$(echo "${time}" | cut -d':' -f3)"
+
+      targetFolder="${year}/${month}"
+      if [ ${byDay} -ne 0 ]; then
+        targetFolder="${targetFolder}/${day}"
+      fi
+
+      targetFileBase="${year}${month}${day}_${hour}${minute}${second}"
+    fi # Test if date detection failed.
+
+    targetFile="${targetFileBase}.${sourceExtension}"
+    jpgTargetFile="${targetFileBase}.jpg"
+
+    count=0
+    # If destination file already exist.
+    fileFound='false'
+    while [[ -s "${destinationFolder}/${targetFolder}/${targetFile}" ]];do
+      destinationMd5sum="$(md5sum "${destinationFolder}/${targetFolder}/${targetFile}" | cut -d' ' -f1)"
+
+      # If destination file is same as source file, we do nothing.
+      if [[ "${sourceMd5sum}" = "${destinationMd5sum}" ]]; then
+        fileFound='true'
+        break
+      else
+        targetFile="${targetFileBase}_${count}.${sourceExtension}"
+        jpgTargetFile="${targetFileBase}_${count}.jpg"
+      fi
+      ((count++))
+    done
+
+    if [[ "${fileFound}" = 'true' ]]; then
+      cecho "yellow" "  ${sourceFile} --> ${target} Skipped"
+    else
+      # We create destination folder if needed.
+      mkdir -p "${destinationFolder}/${targetFolder}"
+      mkdir -p "${jpegFolder}/${targetFolder}"
+
+      target="${destinationFolder}/${targetFolder}/${targetFile}"
+      jpgTarget="${jpegFolder}/${targetFolder}/${jpgTargetFile}"
+      if [[ -s "${target}" ]]; then
+        cecho "yellow" "  ${sourceFile} --> ${target} Skipped"
+      else
+        # We copy the file.
+        cp -a "${sourceFile}" "${target}"
+        cecho "green" "  ${sourceFile} --> ${target}"
+      fi
+
+      if [[ ${createJpeg} -ne 0 \
+          && ! -s "${jpgTarget}" \
+          && ( "${sourceExtension}" = "crw" \
+          || "${sourceExtension}" = "cr2" \
+          || "${sourceExtension}" = "nef" ) ]]; then
+        echo -n "    Converting to ${jpgTargetFile}..."
+        ufraw-batch --overwrite --silent \
+                  --out-type=jpeg  --wb=camera  --base-curve=camera \
+                   --curve=linear --interpolation=ahd --compression=90 \
+                   --exif --output="${jpgTarget}" "${target}"
+        cecho "green" " Done"
+      fi
+    fi
+  fi # Test if we process only raw files.
+done
+
