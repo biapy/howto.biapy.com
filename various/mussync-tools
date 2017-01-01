@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.5.1"
+version="1.6.0"
 
 # History
 # -------
@@ -586,7 +586,7 @@ function transfert_images() {
     fi
 
     # Detect input file format and audio format.
-    input_file_format="$(mediainfo --Inform="General;%Format%" "${input_file}")"
+    input_file_format="$(mediainfo --Inform="General;%Format%" "${input_file}" | tr '[:lower:]' '[:upper:]')"
     input_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${input_file}")"
 
     cecho 'blue' -n "Extracting... "
@@ -751,7 +751,7 @@ function transfert_images() {
       local output_file_audio_format
 
       # Detect output file format and audio format.
-      output_file_format="$(mediainfo --Inform="General;%Format%" "${output_file}")"
+      output_file_format="$(mediainfo --Inform="General;%Format%" "${output_file}" | tr '[:lower:]' '[:upper:]')"
       output_file_audio_format="$(mediainfo --Inform="Audio;%Format%" "${output_file}")"
 
       case "${output_file_format}" in
@@ -1119,6 +1119,7 @@ function convert_file() {
           esac
 
           local map_metadata=(-map_metadata 0:g)
+          local metadata_json_address='tags'
           local output_options=()
           # Specific needs for some input formats/
           case "${input_file_mimetype}" in
@@ -1166,9 +1167,14 @@ function convert_file() {
                 avprobe \
                         -loglevel "${log_level}" \
                         -show_format \
+                        -show_streams \
                         -of 'json' \
                         "${input_file}" \
                     > "${temporary_json_file}"
+
+                # normalise json file between ogg and others (keep only tags).
+                sed -i -e '0,/"tags"/d' \-e '/}/Q' "${temporary_json_file}"
+                sed -i -e ':a;N;$!ba;s/.*/{ "tags": { & } }/' "${temporary_json_file}"
 
                 # Convert input file to aac.
                 if [[ "${verbose}" = 'True' ]]; then
@@ -1180,7 +1186,7 @@ function convert_file() {
                           --profile 2 \
                           --afterburner 1 \
                           --transport-format 0 \
-                          --tag-from-json="${temporary_json_file}"?format.tags \
+                          --tag-from-json="${temporary_json_file}"?${metadata_json_address} \
                           "${encoding_options[@]}" \
                           - -o "${output_temp_file}"
                 else
@@ -1192,7 +1198,7 @@ function convert_file() {
                           --profile 2 \
                           --afterburner 1 \
                           --transport-format 0 \
-                          --tag-from-json="${temporary_json_file}"?format.tags \
+                          --tag-from-json="${temporary_json_file}"?${metadata_json_address} \
                           "${encoding_options[@]}" \
                           - -o "${output_temp_file}" 2>'/dev/null'
                 fi
