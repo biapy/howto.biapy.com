@@ -4,7 +4,7 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-version=3.2.2
+version=3.2.3
 
 # History
 # -------
@@ -343,7 +343,7 @@ PATH_TEMPLATE="
   # Some options for the root folder.
   # Read Apache 2 documentation to know exactly what is done.
   <Directory TARGET_VALUE>
-    Options Indexes FollowSymLinks MULTI_VIEWS
+    Options +Indexes +FollowSymLinks MULTI_VIEWS
 
     # If you want to enable overrides, you should read:
     # http://httpd.apache.org/docs/2.0/mod/core.html#allowoverride
@@ -818,7 +818,7 @@ SSL_ACME_SH="${HOME}/.acme.sh/acme.sh"
 SSL_BIND_IP="$(eth0_ip)"
 ALLOW_OVERRIDE="None"
 IS_REMOVAL="0"
-MULTI_VIEWS="MultiViews"
+MULTI_VIEWS="+MultiViews"
 
 TYPE_PREFIX=""
 PROTOCOL="http"
