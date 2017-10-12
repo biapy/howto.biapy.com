@@ -12,10 +12,13 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.6.0"
+version="1.6.1"
 
 # History
 # -------
+#
+# 1.6.1:
+#  - Fix null byte warning in basename and dirname.
 #
 # 1.5.1:
 #  - Update check_binary, realpath and realpath_check functions with better result returning.
@@ -41,7 +44,8 @@ function basename() {
 
   case "$(uname)" in
     'Linux' )
-      command basename -z -- "${@}"
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
       ;;
     'Darwin' | * )
       command basename -- "${@}"
@@ -125,7 +129,8 @@ function dirname() {
 
   case "$(uname)" in
     'Linux' )
-      command dirname -z -- "${@}"
+      command dirname -z -- "${@}" \
+        | command tr -d '\0'
       ;;
     'Darwin' | * )
       command dirname -- "${@}"
