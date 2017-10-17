@@ -5,7 +5,15 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-VERSION="2.2.2"
+VERSION="2.3.0"
+
+# History
+# -------
+#
+# 2.3.0:
+#  - Fix null byte warning in basename.
+#  - Add regenerate-crl option for regenerating expired crl files.
+#
 
 # Get the basename of a path (multi-plateform version)
 # Print the result on &1 if found.
@@ -19,7 +27,8 @@ function basename() {
 
   case "$(uname)" in
     'Linux' )
-      command basename -z -- "${@}"
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
       ;;
     'Darwin' | * )
       command basename -- "${@}"
@@ -46,7 +55,8 @@ Usage :
       [ { --create='instance' | -c 'instance' }
           [ --udp | -u ] [ --hostname='hostname' | -h 'hostname' ]
           [ --range='xxx.xxx.xxx' ] ]
-      [ --destroy='instance' | -x 'instance']
+      [ --destroy='instance' | -x 'instance' ]
+      [ --regenerate-crl='instance' ]
       [ --status='instance' | -s 'instance' ]
       [ --list[='instance'] | -l [ 'instance' ] ]
       [ --domain='instance' | -d 'instance' ]
@@ -75,6 +85,7 @@ Usage :
     * --initialize | -i    : Initialize OpenVPN tools environment.
     * --create | -c        : Create a VPN instance.
     * --destroy | -x       : Destroy a VPN instance.
+    * --regenerate-crl     : Regenerate a crl file for a VPN instance.
     * --status | -s        : Summarize a VPN instance configuration.
     * --add | -a           : Add a client to a VPN instance.
     * --remove | -r        : Remove a client from a VPN instance.
@@ -1692,7 +1703,7 @@ UDP=""
 CIPHER="AES-256-CBC"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h initialize init i create: c: destroy: x: list. l. status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind. convert-20-21." "${@}"; do
+while getoptex "help h initialize init i create: c: destroy: x: regenerate-crl: list. l. status. s. domain: d: add: a: remove: r: hostname: port: p: range: export-configs. export-hosts. udp. u c2c. nat. gateway. bind. convert-20-21." "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -1711,6 +1722,14 @@ while getoptex "help h initialize init i create: c: destroy: x: list. l. status.
 
     'destroy' | 'x' )
       ACTION="destroy"
+
+      if [ -n "${optarg}" ]; then
+        DOMAIN="${optarg}"
+      fi
+      ;;
+
+    'regenerate-crl' )
+      ACTION="regenerate-crl"
 
       if [ -n "${optarg}" ]; then
         DOMAIN="${optarg}"
@@ -2239,6 +2258,38 @@ CURRENT_BIND='${BIND}'
     exit 0
     ;;
 
+  ###################################
+  #
+  # Regenerate outdated crl.pem file.
+  #
+  ###################################
+  'regenerate-crl' )
+    ## Generate client certificate.
+    # Load EasyRSA defaults
+    export EASYRSA="${EASYRSA_PATH}"
+    if [ -e "${EASYRSA_PATH}/vars" ]; then
+      pushd "${EASYRSA_PATH}" > '/dev/null'
+      source "${EASYRSA_PATH}/vars" > '/dev/null'
+      popd > '/dev/null'
+    fi
+
+    # load EasyRSA openvpn configuration.
+    source "${EASYRSA_CONFIG_PATH}"
+
+    # set EasyRSA path for instance.
+    #export KEY_DIR="${INSTANCE_CLIENTS_FILES_PATH}"
+    #export KEY_CN="${CLIENT_LONG_NAME}"
+    export EASYRSA_PKI="${INSTANCE_CLIENTS_FILES_PATH}"
+    export EASYRSA_REQ_CN="${CLIENT_LONG_NAME}"
+
+
+    #command sh "${EASYRSA_PATH}/pkitool" "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
+    command sh "${EASYRSA_PATH}/easyrsa" --batch 'gen-crl' > '/dev/null' 2>&1
+
+    command echo "Crl file successfully regenerated in instance '${DOMAIN}'." >&2
+    exit 0
+    ;;
+
 
   #################################
   #
@@ -2414,7 +2465,7 @@ Windows 64bits configuration:
     if [ -z "$(command grep "^${CLIENT_LONG_NAME} " "${INSTANCE_CLIENTS_LIST_PATH}" )" ]; then
       cecho 'redbold' "Error : Client '${CLIENT_NAME}' does not exists in server '${DOMAIN}'." >&2
       exit 1
-    fi  
+    fi
 
     #command sh "${EASYRSA_PATH}/revoke-full" "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
     command sh "${EASYRSA_PATH}/easyrsa" --batch 'revoke' "${CLIENT_LONG_NAME}" > '/dev/null' 2>&1
