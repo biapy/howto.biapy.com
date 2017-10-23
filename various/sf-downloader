@@ -520,7 +520,7 @@ function download_zip {
   download_file="$(download_file "${1}")"
 
   # Untar the downloaded file and place it at its final location.
-  unzip -d "${extract_path}" -qq "${download_file}"
+  unzip -d "${extract_path}" -o -qq "${download_file}"
   rm "${download_file}"
 
   if [[ -z "$(ls -A "${extract_path}")" ]]; then
