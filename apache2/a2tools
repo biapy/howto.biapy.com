@@ -4,11 +4,18 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-version=3.2.3
+version=3.3.0
 
 # History
 # -------
 #
+# 3.3.0:
+#  - Fix most of shellcheck warnings.
+#  - Use new convention for variable names.
+#  - Add X-SendFile support.
+#  - Use _default_ as default SSL ip if possible.
+# 3.2.3:
+#  - Fix null byte warning in basename.
 # 3.2.2:
 #  - add test for version < 2.4 on allow/deny directives.
 # 3.2.1:
@@ -26,12 +33,12 @@ version=3.2.3
 #
 # @return A return code..
 function basename() {
-
   [[ ${#} -eq 0 ]] && exit 1
 
   case "$(uname)" in
     'Linux' )
-      command basename -z -- "${@}"
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
       ;;
     'Darwin' | * )
       command basename -- "${@}"
@@ -42,7 +49,7 @@ function basename() {
 } # basename()
 export -f 'basename'
 
-scriptName="$(basename ${0})"
+scriptName="$(basename "${0}")"
 
 # Print this script help.
 function usage {
@@ -111,9 +118,15 @@ Available options are:
         Set the SSL intermediate certificate (with --ssl only).
   * --bind-ip= | --ip= | -i xx.xx.xx.xx
         Set the bind IP for a SSL virtual host (with --ssl only).
+  * --xsendfile= | --xsf= /var/www/html/path
+        Allow X-SendFile header for given path.
+        This option can be used multiple times.
+  * --custom-options= | --co= '# A additional Apache configuration snippet'
+        Add custom Apache configuration snippets at the end of generated file.
+        This option can be used multiple times.
 "
 
-  [[ -n "${1}" ]] && exit ${1}
+  [[ -n "${1}" ]] && exit "${1}"
 } # usage
 
 
@@ -125,12 +138,12 @@ VHOST_TEMPLATE[0]="<VirtualHost *:80>
   #ServerAdmin webmaster@my-domain.com
 
   # Your actual domain name, on witch this virtual host is available.
-  ServerName SITE_HOSTNAME
+  ServerName %_SITE_HOSTNAME_%
 
   # You may want your site to be available on other domain names, this is
   # what alias are for.
   # You can use the * wildcard caracter to match multiple sub-domains.
-  #ServerAlias SERVER_ALIAS
+  #ServerAlias %_SERVER_ALIAS_%
 
   # Theses lines only apply of the rewrite module is enabled.
   # This is a security enhancement recommanded by the nessus tool.
@@ -159,9 +172,9 @@ LOGS_TEMPLATE="
   # The error log and access log. This can be used by awstats
   # Note : since we keed theses logs in /var/log/apache2, they are
   # automaticaly rotated by logrotate :D.
-  ErrorLog \${APACHE_LOG_DIR}/SITE_HOSTNAME-error.log
+  ErrorLog \${APACHE_LOG_DIR}/%_SITE_HOSTNAME_%-error.log
   LogLevel warn
-  CustomLog \${APACHE_LOG_DIR}/SITE_HOSTNAME-access.log combined
+  CustomLog \${APACHE_LOG_DIR}/%_SITE_HOSTNAME_%-access.log combined
 "
 
 
@@ -190,12 +203,12 @@ SSL_TEMPLATE="
 
     # Server public and private certificate files:
     <IfVersion < 2.4>
-      SSLCertificateFile \"CERTIFICATE_FILE\"
+      SSLCertificateFile \"%_CERTIFICATE_FILE_%\"
     </IfVersion>
     <IfVersion >= 2.4>
-      SSLCertificateFile \"CERTIFICATE_COMPLETE_FILE\"
+      SSLCertificateFile \"%_CERTIFICATE_COMPLETE_FILE_%\"
     </IfVersion>
-    SSLCertificateKeyFile \"KEY_FILE\"
+    SSLCertificateKeyFile \"%_KEY_FILE_%\"
 
     #   Server Certificate Chain:
     #   Point SSLCertificateChainFile at a file containing the
@@ -205,7 +218,7 @@ SSL_TEMPLATE="
     #   when the CA certificates are directly appended to the server
     #   certificate for convinience.
     <IfVersion < 2.4>
-      SSLCertificateChainFile \"CHAIN_FILE\"
+      SSLCertificateChainFile \"%_CHAIN_FILE_%\"
     </IfVersion>
 
     #   Certificate Authority (CA):
@@ -216,7 +229,7 @@ SSL_TEMPLATE="
     #         to point to the certificate files. Use the provided
     #         Makefile to update the hash symlinks after changes.
     # SSLCACertificatePath \"/etc/ssl/certs\"
-    # SSLCACertificateFile \"ROOT_CA_FILE\"
+    # SSLCACertificateFile \"%_ROOT_CA_FILE_%\"
 
     #   Certificate Revocation Lists (CRL):
     #   Set the CA revocation path where to find CA CRLs for client
@@ -320,9 +333,9 @@ SSL_TEMPLATE="
 
 CERTBOT_TEMPLATE="
   # Certbot acme challenge.
-  Alias \"/.well-known/acme-challenge\" \"CERTBOT_PATH\"
+  Alias \"/.well-known/acme-challenge\" \"%_CERTBOT_PATH_%\"
 
-  <Directory \"CERTBOT_PATH\">
+  <Directory \"%_CERTBOT_PATH_%\">
 
     <IfVersion >= 2.4>
       Require all granted
@@ -338,16 +351,16 @@ CERTBOT_TEMPLATE="
 # Apache 2 standard Virtual Host template.
 PATH_TEMPLATE="
   # The root folder of this virtual host.
-  DocumentRoot TARGET_VALUE
+  DocumentRoot %_TARGET_VALUE_%
 
   # Some options for the root folder.
   # Read Apache 2 documentation to know exactly what is done.
-  <Directory TARGET_VALUE>
-    Options +Indexes +FollowSymLinks MULTI_VIEWS
+  <Directory %_TARGET_VALUE_%>
+    Options +Indexes +FollowSymLinks %_MULTI_VIEWS_%
 
     # If you want to enable overrides, you should read:
     # http://httpd.apache.org/docs/2.0/mod/core.html#allowoverride
-    AllowOverride ALLOW_OVERRIDE
+    AllowOverride %_ALLOW_OVERRIDE_%
 
     <IfVersion >= 2.4>
       Require all granted
@@ -390,7 +403,7 @@ REVERSE_PROXY_TEMPLATE="
       # Declare the current request protocol.
       RequestHeader set X-Forwarded-Proto \"http\"
 
-      <Proxy TARGET_VALUE>
+      <Proxy %_TARGET_VALUE_%>
         # Rise timeout values for failsafe on some applications (Horde ActiveSync or Plone, for example).
         ProxySet connectiontimeout=600 timeout=4000
       </Proxy>
@@ -402,9 +415,9 @@ REVERSE_PROXY_TEMPLATE="
       # magic. I was used to use a ProxyPass rule to do this work, but it
       # turned out that sometimes ProxyPass give you a 503 error when under
       # heavy load. The RewriteRule does not have this flaw.
-      ProxyPassReverse  /       TARGET_VALUE
+      ProxyPassReverse  /       %_TARGET_VALUE_%
       RewriteCond %{REQUEST_URI} !^/.well-known/acme-challenge/.*
-      RewriteRule       ^/(.*)  TARGET_VALUE\$1  [P,L]
+      RewriteRule       ^/(.*)  %_TARGET_VALUE_%\$1  [P,L]
 
       # This Location directives allow users to access to the proxyfied contents.
       # Do not remove this if you want your site to work.
@@ -430,7 +443,7 @@ REDIRECT_TEMPLATE="
   # This make sure that all users use secure version of the site.
   # Note the \"permanent\" : It is good for search engine optimization :D.
   <LocationMatch ^(?!/.well-known/acme-challenge)/>
-    Redirect permanent / TARGET_VALUE
+    Redirect permanent / %_TARGET_VALUE_%
   </LocationMatch>
 
   # This Location directives allow users to access the redirection.
@@ -446,7 +459,14 @@ REDIRECT_TEMPLATE="
     </IfVersion>
   </Location>"
 
+XSENDFILE_TEMPLATE="
+  # Enable X-SendFile header support for path.
+  <IfModule mod_xsendfile.c>
+    XSendFile on
+%_XSENDFILE_OPTIONS_%
+  </IfModule>"
 
+XSENDFILE_PATH_TEMPLATE="    XSendFilePath \"%_XSENDFILE_PATH_%\""
 
 # Echo text in color.
 #
@@ -549,75 +569,107 @@ export -f 'cecho'
 
 
 
-
 # Get the absolute path for a file or directory.
+# Does not resolve symbolic links.
+# Print the result on &1 if found.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path.
+# @return A code.
+function absolutepath() {
+    if [ -d "${1}" ]; then
+        # Path point to a directory.
+        echo "$(cd "${1}"; pwd)"
+    elif [ -f "${1}" ]; then
+        # Path point to a file.
+        if [[ "${1}" = '/'* ]]; then
+            echo "${1}"
+        elif [[ "${1}" == *'/'* ]]; then
+            echo "$(cd "${1%/*}"; pwd)/${1##*/}"
+        else
+            echo "$(pwd)/${1}"
+        fi
+    fi
+} # absolutepath
+
+
+
+# Get the absolute real path for a file or directory.
+# Resolve symbolic links.
+# Print the result on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return A code.
 function realpath {
-  declare -g REALPATH=''
 
   command test ${#} -ne 1 && exit 1
-  REALPATH="$(command readlink -f "${1}")"
+
+  command readlink -f "${1}"
+
+  return ${?}
 } # realpath
 
 
 
-# Get the absolute path for a file or directory and check the file existance.
+# Get the absolute real path for a file or directory and check the file existance.
+# Resolve symbolic links.
+# Print the result on &1 if found.
 # If the file does not exists, display an error message and exit the script.
 #
 # @param string $path A relative path.
 #
-# @return ${REALPATH} A absolute path or an empty string if file don't exists.
+# @return A code.
 function realpath_check {
-  declare -g REALPATH=''
-
   command test ${#} -ne 1 && exit 1
 
-  realpath "${1}"
+  realpath="$(realpath "${1}")"
 
-  if [ -n "${REALPATH}" -a ! -e "${REALPATH}" ]; then
-    REALPATH=""
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=""
   fi
 
-  if [ -z "${REALPATH}" ]; then
+  if [[ -z "${realpath}" ]]; then
     cecho "red" "Error : File '${1}' does not exists." >&2
     exit 1
   fi
+
+  echo "${realpath}"
+
+  return 0
 } # realpath_check
 
 
 
-# Check if a binary is present
+# Check if a binary is present. Print its path on &1 if found.
 #
 # @param string $binary The binaries to check, separated by ;.
 # @param string $package The package the binary come from.
 #
 # @return Exit with error if the binary is missing.
-binary=''
 function check_binary() {
-  # declare -g binary=''
-  binary=''
-
   [[ ${#} -ne 2 ]] && exit 1
 
-  local primary="$(echo -n "${1}" | cut -d ';' -f 1)"
-  local binaries="";
+  local primary
+  local binaries
+  local binary
 
-  IFS=';' read -a binaries <<< "${1}"
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
 
   # Test the binary presence.
-  for binary in ${binaries[@]}; do
-    if type -f "${binary}" &>'/dev/null'; then
-      binary="$(command -v "${binary}")"
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
       return 0
     fi
   done
 
-  cecho "red" "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
   exit 1
-} # check_binary
+} # check_binary()
 
 
 
@@ -641,74 +693,75 @@ function eth0_ip {
 function getoptex()
 {
   let $# || return 1
-  local optlist="${1#;}"
-  let OPTIND || OPTIND=1
-  [ $OPTIND -lt $# ] || return 1
-  shift $OPTIND
-  if [ "$1" != "-" ] && [ "$1" != "${1#-}" ]
-  then OPTIND=$[OPTIND+1]; if [ "$1" != "--" ]
-  then
+  local optionList
+  optionList="${1#;}"
+  let optionIndex || optionIndex=1
+  [[ ${optionIndex} -lt $# ]] || return 1
+  shift ${optionIndex}
+  if [[ "${1}" != "-" && "${1}" != "${1#-}" ]]; then
+    optionIndex=$((optionIndex + 1)); if [[ "${1}" != "--" ]]; then
     local o
-    o="-${1#-$OPTOFS}"
-    for opt in ${optlist#;}
+    o="-${1#-${optionOfs}}"
+    for opt in ${optionList#;}
     do
-      OPTOPT="${opt%[;.:]}"
-      unset OPTARG
-      local opttype="${opt##*[^;:.]}"
-      [ -z "$opttype" ] && opttype=";"
-      if [ ${#OPTOPT} -gt 1 ]
-      then # long-named option
-        case $o in
-          "--$OPTOPT")
-            if [ "$opttype" != ":" ]; then return 0; fi
-            OPTARG="$2"
-            if [ -z "$OPTARG" ];
-            then # error: must have an agrument
-              let OPTERR && echo "$0: error: $OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT";
-              OPTOPT="?"
+      optionName="${opt%[;.:]}"
+      unset optionArgument
+      local optionType="${opt##*[^;:.]}"
+      [[ -z "${optionType}" ]] && optionType=";"
+      if [[ ${#optionName} -gt 1 ]]; then
+        # long-named option
+        case "$o" in
+          "--${optionName}")
+            if [[ "${optionType}" != ":" ]]; then
+              return 0
+            fi
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              # error: must have an agrument
+              let optionError && echo "$0: error: ${optionName} must have an argument" >&2
+              optionArgument="${optionName}";
+              optionName="?"
               return 1;
             fi
-            OPTIND=$[OPTIND+1] # skip option's argument
+            optionIndex=$((optionIndex + 1)) # skip option's argument
             return 0
           ;;
-          "--$OPTOPT="*)
-            if [ "$opttype" = ";" ];
+          "--${optionName}="*)
+            if [[ "${optionType}" = ";" ]];
             then  # error: must not have arguments
-              let OPTERR && echo "$0: error: $OPTOPT must not have arguments" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
+              let optionError && echo "$0: error: ${optionName} must not have arguments" >&2
+              optionArgument="${optionName}"
+              optionName="?"
               return 1
             fi
-            OPTARG=${o#"--$OPTOPT="}
+            optionArgument=${o#--${optionName}=}
             return 0
           ;;
         esac
       else # short-named option
         case "$o" in
-          "-$OPTOPT")
-            unset OPTOFS
-            [ "$opttype" != ":" ] && return 0
-            OPTARG="$2"
-            if [ -z "$OPTARG" ]
-            then
-              echo "$0: error: -$OPTOPT must have an argument" >&2
-              OPTARG="$OPTOPT"
-              OPTOPT="?"
+          "-${optionName}")
+            unset optionOfs
+            [[ "${optionType}" != ":" ]] && return 0
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              echo "$0: error: -${optionName} must have an argument" >&2
+              optionArgument="${optionName}"
+              optionName="?"
               return 1
             fi
-            OPTIND=$[OPTIND+1] # skip option's argument
+            optionIndex=$(( optionIndex + 1 )) # skip option's argument
             return 0
           ;;
-          "-$OPTOPT"*)
-            if [ $opttype = ";" ]
+          "-${optionName}"*)
+            if [ ${optionType} = ";" ]
             then # an option with no argument is in a chain of options
-              OPTOFS="$OPTOFS?" # move to the next option in the chain
-              OPTIND=$[OPTIND-1] # the chain still has other options
+              optionOfs="${optionOfs}?" # move to the next option in the chain
+              optionIndex=$(( optionIndex - 1 )) # the chain still has other options
               return 0
             else
-              unset OPTOFS
-              OPTARG="${o#-$OPTOPT}"
+              unset optionOfs
+              optionArgument="${o#-${optionName}}"
               return 0
             fi
           ;;
@@ -718,36 +771,38 @@ function getoptex()
     echo "Error : invalid option : '${o}'." >&2
     usage 1
   fi; fi
-  OPTOPT="?"
-  unset OPTARG
+  optionName="?"
+  unset optionArgument
   return 1
 }
-function optlistex
+function optionListex
 {
-  local l="$1"
+  local l="${1}"
   local m # mask
   local r # to store result
-  while [ ${#m} -lt $[${#l}-1] ]; do m="$m?"; done # create a "???..." mask
-  while [ -n "$l" ]
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]
   do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
     m="${m#?}"  # cut one "?" sign from m
-    if [ -n "${l%%[^:.;]*}" ]
+    if [[ -n "${l%%[^:.;]*}" ]]
     then # a special character (";", ".", or ":") was found
       r="$r${l%$m}" # append it to $r
       l="${l#?}" # cut the special character from l
       m="${m#?}"  # cut one more "?" sign
     fi
   done
-  echo $r
+  echo "${r}"
 }
 function getopt()
 {
-  local optlist=`optlistex "$1"`
+  local optionList
+
+  optionList="$(optionListex "${1}")"
   shift
-  getoptex "$optlist" "$@"
-  return $?
+  getoptex "${optionList}" "${@}"
+  return ${?}
 }
 #######################################################################################
 #######################################################################################
@@ -794,144 +849,155 @@ function apache2_force_reload {
 
 
 # Check for binaries presence
-check_binary "basename" "coreutils"
-check_binary "dirname" "coreutils"
-check_binary "tar" "tar"
-check_binary "mktemp" "mktemp"
-check_binary "sed" "sed"
-check_binary "apache2ctl" "apache2"
-#check_binary "wget" "wget"
-#check_binary "unzip" "unzip"
-#check_binary "apg" "apg"
-#check_binary "mysql" "mysql-client"
+check_binary 'basename' 'coreutils' > '/dev/null'
+check_binary 'dirname' 'coreutils' > '/dev/null'
+check_binary 'tar' 'tar' > '/dev/null'
+check_binary 'mktemp' 'mktemp' > '/dev/null'
+check_binary 'sed' 'sed' > '/dev/null'
+check_binary 'apache2ctl' 'apache2' > '/dev/null'
+#check_binary 'wget' 'wget' > '/dev/null'
+#check_binary 'unzip' 'unzip' > '/dev/null'
+#check_binary 'apg' 'apg' > '/dev/null'
+#check_binary 'mysql' 'mysql-client' > '/dev/null'
 
 
 
 # Setup defaults
-CURRENT_TEMPLATE="${PATH_TEMPLATE}"
-TARGET_VALUE_IS_PATH="1"
-SERVER_ALIAS=""
-SSL_ENABLED="0"
-SSL_CERTBOT="0"
-SSL_CERTBOT_BASE_PATH="/var/lib/a2tools"
-SSL_ACME_SH="${HOME}/.acme.sh/acme.sh"
-SSL_BIND_IP="$(eth0_ip)"
-ALLOW_OVERRIDE="None"
-IS_REMOVAL="0"
-MULTI_VIEWS="+MultiViews"
+mainTemplate="${PATH_TEMPLATE}"
+customOptions=''
+targetValueIsPath='1'
+serverAlias=''
+sslEnabled='0'
+sslCertbot='0'
+sslCertbotBasePath='/var/lib/a2tools'
+sslAcmeSh="${HOME}/.acme.sh/acme.sh"
+sslBindIp=''
+allowOverride='None'
+isRemoval='0'
+multiViews='+MultiViews'
 
-TYPE_PREFIX=""
-PROTOCOL="http"
+declare -a xsendfilePaths
+xsendfilePaths=()
 
-APACHE_MODULES="rewrite"
+typePrefix=""
+protocol="http"
+
+apacheModules="rewrite"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: without-multiviews remove d" "${@}"; do
+while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: without-multiviews remove d xsendfile: xsf: custom-options: co:" "${@}"; do
   # Options debuging.
-  # echo "Option <$OPTOPT> ${OPTARG:+has an arg <$OPTARG>}"
+  # echo "Option <${optionName}> ${optionArgument:+has an arg <${optionArgument}>}"
 
-  case "${OPTOPT}" in
+  case "${optionName}" in
     'template' | 't' )
 
-      case "${OPTARG}" in
+      case "${optionArgument}" in
         vhost | virtual-host )
-          CURRENT_TEMPLATE="${PATH_TEMPLATE}"
-          TARGET_VALUE_IS_PATH="1"
+          mainTemplate="${PATH_TEMPLATE}"
+          targetValueIsPath="1"
           ;;
         rproxy | reverse-proxy )
-          CURRENT_TEMPLATE="${REVERSE_PROXY_TEMPLATE}"
-          TARGET_VALUE_IS_PATH="0"
-          APACHE_MODULES="${APACHE_MODULES} proxy_http headers"
+          mainTemplate="${REVERSE_PROXY_TEMPLATE}"
+          targetValueIsPath="0"
+          apacheModules="${apacheModules} proxy_http headers"
           ;;
         redirect )
-          CURRENT_TEMPLATE="${REDIRECT_TEMPLATE}"
-          TARGET_VALUE_IS_PATH="0"
-          TYPE_PREFIX="redirect-"
+          mainTemplate="${REDIRECT_TEMPLATE}"
+          targetValueIsPath="0"
+          typePrefix="redirect-"
           ;;
         custom )
-          CURRENT_TEMPLATE="CUSTOM"
-          TARGET_VALUE_IS_PATH="0"
+          mainTemplate="CUSTOM"
+          targetValueIsPath="0"
           ;;
       esac
 
       ;;
     'ssl' | 's' )
-      SSL_ENABLED="1"
-      PROTOCOL="https"
-      APACHE_MODULES="${APACHE_MODULES} ssl"
+      sslEnabled="1"
+      protocol="https"
+      apacheModules="${apacheModules} ssl"
 
-      if [ -n "${OPTARG}" ]; then
-        if [ "${OPTARG}" = "auto" -a -e "${SSL_ACME_SH}" ]; then
-          SSL_CERTBOT="1"
+      if [[ -n "${optionArgument}" ]]; then
+        if [[ "${optionArgument}" = "auto" && -e "${sslAcmeSh}" ]]; then
+          sslCertbot="1"
         fi
 
-        if [ -z "${SSL_PRIVATE_KEY}" \
-            -a -e "/etc/ssl/private/${OPTARG}.key" ]; then
-          SSL_PRIVATE_KEY="/etc/ssl/private/${OPTARG}.key"
+        if [[ -z "${sslPrivateKey}" \
+            && -e "/etc/ssl/private/${optionArgument}.key" ]]; then
+          sslPrivateKey="/etc/ssl/private/${optionArgument}.key"
         fi
 
-        if [ -z "${SSL_COMPLETE_PUBLIC_KEY}" \
-            -a -e "/etc/ssl/certificates/${OPTARG}.crt+chain+root" ]; then
-          SSL_COMPLETE_PUBLIC_KEY="/etc/ssl/certificates/${OPTARG}.crt+chain+root"
+        if [[ -z "${sslCompletePublicKey}" \
+            && -e "/etc/ssl/certificates/${optionArgument}.crt+chain+root" ]]; then
+          sslCompletePublicKey="/etc/ssl/certificates/${optionArgument}.crt+chain+root"
         fi
 
-        if [ -z "${SSL_PUBLIC_KEY}" \
-            -a -e "/etc/ssl/certificates/${OPTARG}.crt" ]; then
-          SSL_PUBLIC_KEY="/etc/ssl/certificates/${OPTARG}.crt"
+        if [[ -z "${sslPublicKey}" \
+            && -e "/etc/ssl/certificates/${optionArgument}.crt" ]]; then
+          sslPublicKey="/etc/ssl/certificates/${optionArgument}.crt"
 
-          if [ -z "${SSL_COMPLETE_PUBLIC_KEY}" ]; then
-            SSL_COMPLETE_PUBLIC_KEY="${SSL_PUBLIC_KEY}"
+          if [[ -z "${sslCompletePublicKey}" ]]; then
+            sslCompletePublicKey="${sslPublicKey}"
           fi
         fi
 
-        if [ -z "${SSL_ROOT_CA}" \
-            -a -e "/etc/ssl/roots/${OPTARG}-root.ca" ]; then
-          SSL_ROOT_CA="/etc/ssl/roots/${OPTARG}-root.ca"
+        if [[ -z "${sslRootCa}" \
+            && -e "/etc/ssl/roots/${optionArgument}-root.ca" ]]; then
+          sslRootCa="/etc/ssl/roots/${optionArgument}-root.ca"
         fi
 
-        if [ -z "${SSL_CHAIN_CA}" \
-            -a -e "/etc/ssl/chains/${OPTARG}.ca" ]; then
-          SSL_CHAIN_CA="/etc/ssl/chains/${OPTARG}.ca"
+        if [[ -z "${sslChainCa}" \
+            && -e "/etc/ssl/chains/${optionArgument}.ca" ]]; then
+          sslChainCa="/etc/ssl/chains/${optionArgument}.ca"
         fi
       fi
       ;;
     'alias' | 'a' )
-      if [ -n "${OPTARG}" ]; then
-        SERVER_ALIAS="${SERVER_ALIAS} ${OPTARG}"
+      if [ -n "${optionArgument}" ]; then
+        serverAlias="${serverAlias} ${optionArgument}"
       fi
       ;;
     'private-key' | 'key' | 'k' )
-      realpath_check "${OPTARG}"
-      SSL_PRIVATE_KEY="${REALPATH}"
+      sslPrivateKey="$(realpath_check "${optionArgument}")"
       ;;
     'public-key' | 'crt' | 'p' )
-      realpath_check "${OPTARG}"
-      SSL_PUBLIC_KEY="${REALPATH}"
-      SSL_COMPLETE_PUBLIC_KEY="${SSL_PUBLIC_KEY}"
+      sslPublicKey="$(realpath_check "${optionArgument}")"
+      sslCompletePublicKey="${sslPublicKey}"
       ;;
     'root-ca' | 'root' | 'r' )
-      realpath_check "${OPTARG}"
-      SSL_ROOT_CA="${REALPATH}"
+      sslRootCa="$(realpath_check "${optionArgument}")"
       ;;
     'chain-ca' | 'chain' | 'c' )
-      realpath_check "${OPTARG}"
-      SSL_CHAIN_CA="${REALPATH}"
+      sslChainCa="$(realpath_check "${optionArgument}")"
       ;;
     'bind-ip' | 'ip' | 'i' )
-      if [ -n "${OPTARG}" ]; then
-        SSL_BIND_IP="${OPTARG}"
+      if [ -n "${optionArgument}" ]; then
+        sslBindIp="${optionArgument}"
       fi
       ;;
     'overrides' | 'o' )
-      if [ -n "${OPTARG}" ]; then
-        ALLOW_OVERRIDE="${OPTARG}"
+      if [ -n "${optionArgument}" ]; then
+        allowOverride="${optionArgument}"
       fi
       ;;
     'without-multiviews' )
-      MULTI_VIEWS="-MultiViews"
+      multiViews="-MultiViews"
       ;;
     'remove' | 'd' )
-      IS_REMOVAL="1"
+      isRemoval="1"
+      ;;
+
+    'xsendfile' | 'xsf' )
+      xsendfilePath="$(absolutepath "${optionArgument}")"
+      xsendfilePaths+=("${xsendfilePath}")
+      ;;
+
+    'custom-options' | 'co' )
+      customOptions="${customOptions}
+
+${optionArgument}"
       ;;
 
     'help' | 'h' | '*' )
@@ -941,94 +1007,93 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
 done
 
 # Discard processed options.
-shift $((${OPTIND}-1))
+shift $((optionIndex - 1))
 
 # Fetch script path.
-realpath "${0}"
-SCRIPT_PATH="${REALPATH}"
+scriptPath="$(realpath "${0}")"
 
 # Process retro-compatibility.
 case "${1}" in
   'add-virtual-host' | 'add-vhost' )
-    ${SCRIPT_PATH} --template="virtual-host" \
+    ${scriptPath} --template="virtual-host" \
                     --overrides="${4}" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-reverse-proxy' | 'add-reverse' )
-    ${SCRIPT_PATH} --template="reverse-proxy" \
+    ${scriptPath} --template="reverse-proxy" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-ssl-virtual-host' | 'add-ssl-vhost' )
-    ${SCRIPT_PATH} --template="virtual-host" --ssl \
+    ${scriptPath} --template="virtual-host" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" --overrides="${7}" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-ssl-reverse-proxy' )
-    ${SCRIPT_PATH} --template="reverse-proxy" --ssl \
+    ${scriptPath} --template="reverse-proxy" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-redirect' )
-    ${SCRIPT_PATH} --template="redirect" \
+    ${scriptPath} --template="redirect" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-ssl-redirect' )
-    ${SCRIPT_PATH} --template="redirect" --ssl \
+    ${scriptPath} --template="redirect" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-custom' )
-    ${SCRIPT_PATH} --template="custom" \
+    ${scriptPath} --template="custom" \
                     "${2}" "${3}"
     exit 0
     ;;
   'add-ssl-custom' )
-    ${SCRIPT_PATH} --template="custom" --ssl \
+    ${scriptPath} --template="custom" --ssl \
                     --private-key="${4}" --public-key="${5}" \
                     --bind-ip="${6}" \
                     "${2}" "${3}"
     exit 0
     ;;
   'remove' )
-    ${SCRIPT_PATH} --remove "${2}"
+    ${scriptPath} --remove "${2}"
     exit 0
     ;;
 esac
 
-SITE_HOSTNAME=${1}
+siteHostname=${1}
 
-if [ -z "${SITE_HOSTNAME}" ]; then
+if [ -z "${siteHostname}" ]; then
   cecho "red" "Error : no domain name has been provided." >&2
   usage 1
 fi
 
-if [ "${IS_REMOVAL}" = "1" ]; then
+if [ "${isRemoval}" = "1" ]; then
   # The --remove option has been given.
   # Process the virtualhosts removal.
 
-  declare -a CONFIG_FILES
-  CONFIG_FILES[0]="http-${SITE_HOSTNAME}.conf"
-  CONFIG_FILES[1]="https-${SITE_HOSTNAME}.conf"
-  CONFIG_FILES[2]="redirect-http-${SITE_HOSTNAME}.conf"
-  CONFIG_FILES[3]="redirect-https-${SITE_HOSTNAME}.conf"
-  CONFIG_FILES[4]="http-${SITE_HOSTNAME}"
-  CONFIG_FILES[5]="https-${SITE_HOSTNAME}"
-  CONFIG_FILES[6]="redirect-http-${SITE_HOSTNAME}"
-  CONFIG_FILES[7]="redirect-https-${SITE_HOSTNAME}"
+  declare -a configFiles
+  configFiles[0]="http-${siteHostname}.conf"
+  configFiles[1]="https-${siteHostname}.conf"
+  configFiles[2]="redirect-http-${siteHostname}.conf"
+  configFiles[3]="redirect-https-${siteHostname}.conf"
+  configFiles[4]="http-${siteHostname}"
+  configFiles[5]="https-${siteHostname}"
+  configFiles[6]="redirect-http-${siteHostname}"
+  configFiles[7]="redirect-https-${siteHostname}"
 
-  for FILE in ${CONFIG_FILES[@]}; do
-    if [ -e "/etc/apache2/sites-available/${FILE}" ]; then
-      command a2dissite ${FILE}
-      command rm "/etc/apache2/sites-available/${FILE}"
+  for configFile in "${configFiles[@]}"; do
+    if [ -e "/etc/apache2/sites-available/${configFile}" ]; then
+      command a2dissite "${configFile}"
+      command rm "/etc/apache2/sites-available/${configFile}"
     fi
   done
 
@@ -1038,133 +1103,165 @@ if [ "${IS_REMOVAL}" = "1" ]; then
   fi
 
 else
-  TARGET_VALUE="${2}"
+  targetValue="${2}"
 
   # Compute the VirtualHost filename.
-  VHOST_FILE="${TYPE_PREFIX}${PROTOCOL}-${SITE_HOSTNAME}.conf"
+  vhostFile="${typePrefix}${protocol}-${siteHostname}.conf"
 
   # Setup defaults.
-  SSL_PROXY_ENGINE="Off"
+  sslProxyEngine="Off"
 
   # Setup certbot defaults.
-  SSL_CERTBOT_PATH="${SSL_CERTBOT_BASE_PATH}/${SITE_HOSTNAME}"
-  command mkdir -p "${SSL_CERTBOT_PATH}"
-  if [ "${SSL_CERTBOT}" = "1" ]; then
-    SSL_PRIVATE_KEY="/etc/ssl/private/${SITE_HOSTNAME}.key"
-    SSL_COMPLETE_PUBLIC_KEY="/etc/ssl/certificates/${SITE_HOSTNAME}.crt+chain+root"
-    SSL_PUBLIC_KEY="/etc/ssl/certificates/${SITE_HOSTNAME}.crt"
-    SSL_CHAIN_CA="/etc/ssl/chains/${SITE_HOSTNAME}.ca"
+  sslCertbotPath="${sslCertbotBasePath}/${siteHostname}"
+  command mkdir -p "${sslCertbotPath}"
+  if [ "${sslCertbot}" = "1" ]; then
+    sslPrivateKey="/etc/ssl/private/${siteHostname}.key"
+    sslCompletePublicKey="/etc/ssl/certificates/${siteHostname}.crt+chain+root"
+    sslPublicKey="/etc/ssl/certificates/${siteHostname}.crt"
+    sslChainCa="/etc/ssl/chains/${siteHostname}.ca"
+  fi
+
+  # Process X-SendFile options:
+  if [[ ${#xsendfilePaths[@]} -gt 0 ]]; then
+    xsendfileOptions=''
+
+    for xsendfilePath in "${xsendfilePaths[@]}"; do
+      xsendfileOptions="${xsendfileOptions}
+${XSENDFILE_PATH_TEMPLATE//%_XSENDFILE_PATH_%/${xsendfilePath}}"
+    done
+
+    customOptions="${customOptions}
+
+${XSENDFILE_TEMPLATE//%_XSENDFILE_OPTIONS_%/${xsendfileOptions}}"
+
+    apacheModules="${apacheModules} xsendfile"
   fi
 
   # For custom template, the target value is used as template.
-  if [ "${CURRENT_TEMPLATE}" = "CUSTOM" ]; then
-    CURRENT_TEMPLATE="${TARGET_VALUE}"
-    TARGET_VALUE=""
+  if [ "${mainTemplate}" = "CUSTOM" ]; then
+    mainTemplate="${targetValue}"
+    targetValue=""
   else
     # Check for target value existence if it is supposed to be a path.
-    if [ "${TARGET_VALUE_IS_PATH}" = "1" ]; then
-      realpath_check "${TARGET_VALUE}"
-      TARGET_VALUE="${REALPATH}"
+    if [[ "${targetValueIsPath}" = "1" ]]; then
+      targetValue="$(realpath_check "${targetValue}")"
     else
-      TARGET_VALUE=$(command echo "${TARGET_VALUE}/" \
+      targetValue=$(command echo "${targetValue}/" \
                | command sed -e 's|//$|/|')
-      TARGET_VALUE_URI=$(command echo "${TARGET_VALUE}" \
+      targetValueUri=$(command echo "${targetValue}" \
                | command sed -e 's|[^:]*://[^/]*\(/.*\)/$|\1|')
 
-      if [ -n "$(echo ${TARGET_VALUE_URI} | command grep "^https")" ]; then
-        SSL_PROXY_ENGINE="On"
+      if [[ -n "$(echo "${targetValueUri}" | command grep "^https")" ]]; then
+        sslProxyEngine="On"
       fi
     fi
   fi
 
   # Disable SSL template if not needed
-  if [ "${SSL_ENABLED}" = "0" ]; then
+  if [[ "${sslEnabled}" = "0" ]]; then
     SSL_TEMPLATE=""
-  elif [ "${SSL_CERTBOT}" = "0" -a \( -z "${SSL_PRIVATE_KEY}" -o -z "${SSL_PUBLIC_KEY}" \) ]; then
-    cecho "red" "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
-    usage 1
+  else
+    if [[ "${sslCertbot}" = "0" && ( -z "${sslPrivateKey}" || -z "${sslPublicKey}" ) ]]; then
+      cecho "red" "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
+      usage 1
+    fi
+
+    # Detect IP for SSL vHost, if not provided.
+    if [[ -z "${sslBindIp}" ]]; then
+      # Try to detect existing SSL bind ip.
+      sslBindIp="$(command grep '443' "/etc/apache2/sites-enabled/"* \
+        | command head -n 1 \
+        | command sed -e 's/^.*VirtualHost[\t ]*\([^:]*\):443.*$/\1/')"
+
+      # If no SSL host is found, use "_default_" as bind IP.
+      if [[ -z "${sslBindIp}" ]]; then
+        sslBindIp="_default_"
+      fi
+    fi
   fi
 
-  cecho "green" "Creating /etc/apache2/sites-available/${VHOST_FILE}..."
+  cecho "green" "Creating /etc/apache2/sites-available/${vhostFile}..."
 
-  VHOST_CONTENT="${VHOST_TEMPLATE[0]}
+  vhostContent="${VHOST_TEMPLATE[0]}
 ${LOGS_TEMPLATE}
 ${SSL_TEMPLATE}
 ${CERTBOT_TEMPLATE}
-${CURRENT_TEMPLATE}
+${mainTemplate}
+${customOptions}
 ${VHOST_TEMPLATE[1]}"
 
-  VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
-    | command sed -e "s|SITE_HOSTNAME|${SITE_HOSTNAME}|g" \
-                  -e "s|SERVER_ALIAS|${SERVER_ALIAS}|g" \
-                  -e "s|TARGET_VALUE|${TARGET_VALUE}|g" \
-                  -e "s|MULTI_VIEWS|${MULTI_VIEWS}|g" \
-                  -e "s|ALLOW_OVERRIDE|${ALLOW_OVERRIDE}|g" \
-                  -e "s|SSLProxyEngine.*|SSLProxyEngine ${SSL_PROXY_ENGINE}|" \
-                  -e "s|CERTBOT_PATH|${SSL_CERTBOT_PATH}/.well-known/acme-challenge/|g")"
+  vhostContent="$(echo "${vhostContent}" \
+    | command sed -e "s|%_SITE_HOSTNAME_%|${siteHostname}|g" \
+                  -e "s|%_SERVER_ALIAS_%|${serverAlias}|g" \
+                  -e "s|%_TARGET_VALUE_%|${targetValue}|g" \
+                  -e "s|%_MULTI_VIEWS_%|${multiViews}|g" \
+                  -e "s|%_ALLOW_OVERRIDE_%|${allowOverride}|g" \
+                  -e "s|SSLProxyEngine.*|SSLProxyEngine ${sslProxyEngine}|" \
+                  -e "s|%_CERTBOT_PATH_%|${sslCertbotPath}/.well-known/acme-challenge/|g")"
 
   # Setup sed rules to enable ServerAlias if needed.
-  if [ -n "${SERVER_ALIAS}" ]; then
-    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
+  if [[ -n "${serverAlias}" ]]; then
+    vhostContent="$(echo "${vhostContent}" \
       | command sed -e 's|#ServerAlias|ServerAlias|')"
   fi
 
   # Apply SSL specific transforms.
-  if [ "${SSL_ENABLED}" = "1" ]; then
-    if [ "${SSL_CERTBOT}" = "1" ]; then
+  if [[ "${sslEnabled}" = "1" ]]; then
 
-      # If no existing http configuration exists;
-      if [ -n "http-${SITE_HOSTNAME}.conf" \
-        -a -n "redirect-http-${SITE_HOSTNAME}.conf" ]; then
-        # Create HTTP redirect VirtualHost with Certbot Webroot path included (for certificate validation).
-        command ${scriptName} -t redirect "${SITE_HOSTNAME}" "https://${SITE_HOSTNAME}/"
-      fi
+    # If no existing http configuration exists;
+    if [[ ! ( -e "/etc/apache2/sites-enabled/http-${siteHostname}.conf" \
+      || -e "/etc/apache2/sites-enabled/redirect-http-${siteHostname}.conf" ) ]]; then
+      # Create HTTP redirect VirtualHost with Certbot Webroot path included (for certificate validation).
+      command "${scriptName}" -t redirect "${siteHostname}" "https://${siteHostname}/"
+    fi
+
+    if [[ "${sslCertbot}" = "1" ]]; then
 
       # Use acme.sh to create a Let's Encrypt certificate for the domain.
-      command bash "${SSL_ACME_SH}" --issue  --domain "${SITE_HOSTNAME}"  --webroot "${SSL_CERTBOT_PATH}"
+      command bash "${sslAcmeSh}" --issue  --domain "${siteHostname}"  --webroot "${sslCertbotPath}"
 
       # Install the certificate on the system.
-      command bash "${SSL_ACME_SH}" --installcert -d "${SITE_HOSTNAME}" \
-            --keypath "${SSL_PRIVATE_KEY}" \
-            --certpath "${SSL_PUBLIC_KEY}" \
-            --capath "${SSL_CHAIN_CA}" \
-            --fullchainpath "${SSL_COMPLETE_PUBLIC_KEY}" \
+      command bash "${sslAcmeSh}" --installcert -d "${siteHostname}" \
+            --keypath "${sslPrivateKey}" \
+            --certpath "${sslPublicKey}" \
+            --capath "${sslChainCa}" \
+            --fullchainpath "${sslCompletePublicKey}" \
             --reloadcmd "service apache2 reload"
 
     fi
 
-    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
-      | command sed -e "s|*:80|${SSL_BIND_IP}:443|g" \
-        -e "s|CERTIFICATE_FILE|${SSL_PUBLIC_KEY}|g" \
-        -e "s|CERTIFICATE_COMPLETE_FILE|${SSL_COMPLETE_PUBLIC_KEY}|g" \
-        -e "s|KEY_FILE|${SSL_PRIVATE_KEY}|g" \
-        -e "s|X-Forwarded-Proto \"http|X-Forwarded-Proto \"${PROTOCOL}|")"
+    vhostContent="$(echo "${vhostContent}" \
+      | command sed -e "s|*:80|${sslBindIp}:443|g" \
+        -e "s|%_CERTIFICATE_FILE_%|${sslPublicKey}|g" \
+        -e "s|%_CERTIFICATE_COMPLETE_FILE_%|${sslCompletePublicKey}|g" \
+        -e "s|%_KEY_FILE_%|${sslPrivateKey}|g" \
+        -e "s|X-Forwarded-Proto \"http|X-Forwarded-Proto \"${protocol}|")"
 
-    if [ -n "${SSL_ROOT_CA}" ]; then
-    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
-      | command sed -e "s|ROOT_CA_FILE|${SSL_ROOT_CA}|g" \
+    if [ -n "${sslRootCa}" ]; then
+    vhostContent="$(echo "${vhostContent}" \
+      | command sed -e "s|%_ROOT_CA_FILE_%|${sslRootCa}|g" \
           -e "s|# SSLCACertificateFile|SSLCACertificateFile|g")"
     fi
 
-    if [ -n "${SSL_CHAIN_CA}" ]; then
-    VHOST_CONTENT="$(echo "${VHOST_CONTENT}" \
-      | command sed -e "s|CHAIN_FILE|${SSL_CHAIN_CA}|g" \
+    if [ -n "${sslChainCa}" ]; then
+    vhostContent="$(echo "${vhostContent}" \
+      | command sed -e "s|%_CHAIN_FILE_%|${sslChainCa}|g" \
           -e "s|# SSLCertificateChainFile|SSLCertificateChainFile|g")"
     fi
   fi
 
-  echo "${VHOST_CONTENT}" > "/etc/apache2/sites-available/${VHOST_FILE}"
+  echo "${vhostContent}" > "/etc/apache2/sites-available/${vhostFile}"
 
-  command a2enmod "${APACHE_MODULES}" > /dev/null
+  command a2enmod "${apacheModules}" > /dev/null
 
-  command a2ensite "${VHOST_FILE}"
+  command a2ensite "${vhostFile}"
 
   # Disable the site if there is a configuration error.
   if command apache2ctl -t; then
     apache2_reload
     exit 0
   else
-    command a2dissite "${VHOST_FILE}"
+    command a2dissite "${vhostFile}"
   fi
 fi
 
