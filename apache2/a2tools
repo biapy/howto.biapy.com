@@ -4,11 +4,13 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-version=3.3.0
+version=3.4.0
 
 # History
 # -------
 #
+# 3.4.0:
+#  - Enable custom reverse proxy settings with --proxy-settings= argument.
 # 3.3.0:
 #  - Fix most of shellcheck warnings.
 #  - Use new convention for variable names.
@@ -63,6 +65,7 @@ Usage :
         Setup a named virtualhost using domain.name as ServerName
         and /path/to/www as DocumentRoot.
   ${scriptName} --template={ rproxy | reverse-proxy } [ options ]
+        [ --proxy-settings='connectiontimeout=600 timeout=4000 Keepalive=On' ]
                   domain.name http://server.local/
         Setup a reverse proxy using domain.name as ServerName
         and http://server.local/ proxied server.
@@ -121,6 +124,8 @@ Available options are:
   * --xsendfile= | --xsf= /var/www/html/path
         Allow X-SendFile header for given path.
         This option can be used multiple times.
+  * --proxy-settings= | --ps= 'connectiontimeout=600 timeout=4000 Keepalive=On'
+        Replace default reverse proxy settings.
   * --custom-options= | --co= '# A additional Apache configuration snippet'
         Add custom Apache configuration snippets at the end of generated file.
         This option can be used multiple times.
@@ -405,7 +410,7 @@ REVERSE_PROXY_TEMPLATE="
 
       <Proxy %_TARGET_VALUE_%>
         # Rise timeout values for failsafe on some applications (Horde ActiveSync or Plone, for example).
-        ProxySet connectiontimeout=600 timeout=4000
+        #ProxySet %_PROXY_SETTINGS_%
       </Proxy>
 
       # Here is the magic that proxyfy the LAN server.
@@ -875,6 +880,7 @@ sslBindIp=''
 allowOverride='None'
 isRemoval='0'
 multiViews='+MultiViews'
+proxySettings='connectiontimeout=600 timeout=4000 Keepalive=On'
 
 declare -a xsendfilePaths
 xsendfilePaths=()
@@ -885,7 +891,7 @@ protocol="http"
 apacheModules="rewrite"
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: without-multiviews remove d xsendfile: xsf: custom-options: co:" "${@}"; do
+while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: without-multiviews remove d xsendfile: xsf: custom-options: co: proxy-settings: ps:" "${@}"; do
   # Options debuging.
   # echo "Option <${optionName}> ${optionArgument:+has an arg <${optionArgument}>}"
 
@@ -992,6 +998,10 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
     'xsendfile' | 'xsf' )
       xsendfilePath="$(absolutepath "${optionArgument}")"
       xsendfilePaths+=("${xsendfilePath}")
+      ;;
+
+    'proxy-settings' | 'ps' )
+      proxySettings="${optionArgument}"
       ;;
 
     'custom-options' | 'co' )
@@ -1196,8 +1206,15 @@ ${VHOST_TEMPLATE[1]}"
                   -e "s|%_TARGET_VALUE_%|${targetValue}|g" \
                   -e "s|%_MULTI_VIEWS_%|${multiViews}|g" \
                   -e "s|%_ALLOW_OVERRIDE_%|${allowOverride}|g" \
+                  -e "s|%_PROXY_SETTINGS_%|${proxySettings}|g" \
                   -e "s|SSLProxyEngine.*|SSLProxyEngine ${sslProxyEngine}|" \
                   -e "s|%_CERTBOT_PATH_%|${sslCertbotPath}/.well-known/acme-challenge/|g")"
+
+  # Setup sed rules to enable ProxySet if needed.
+  if [[ -n "${proxySettings}" ]]; then
+    vhostContent="$(echo "${vhostContent}" \
+      | command sed -e 's|#ProxySet|ProxySet|')"
+  fi
 
   # Setup sed rules to enable ServerAlias if needed.
   if [[ -n "${serverAlias}" ]]; then
