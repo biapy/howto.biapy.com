@@ -5,11 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.3.1"
+version="1.4.0"
 
 # History
 # -------
 #
+# 1.4.0:
+#  - Add compatibility for Ubuntu 17.10 Artful Aardvark PHP 7.1
 # 1.3.1:
 #  - Fix null byte warning in basename.
 #
@@ -50,6 +52,7 @@ function basename() {
 
   return ${?}
 } # basename()
+export -f 'basename'
 
 
 
@@ -487,10 +490,13 @@ module_settings=""
 
 php_base='/etc/php5'
 php_config_d="${php_base}/conf.d"
+
+php_version="$(realpath '/usr/bin/php' | cut -c 13-)"
+
 test -d "${php_base}/mods-available" \
   && php_config_d="${php_base}/mods-available"
-if [[ -d '/etc/php/7.0/mods-available' ]]; then
-  php_base='/etc/php/7.0'
+if [[ -d "/etc/php/${php_version}/mods-available" ]]; then
+  php_base="/etc/php/${php_version}"
   php_config_d="${php_base}/mods-available"
 fi
 
@@ -600,7 +606,7 @@ case "${action}" in
       | grep -v "${php_config_d}" \
       | sort \
       | xargs -iconfigFile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "configFile" \
-      | while read line; do
+      | while read -r line; do
       if [ ${first} -eq 1 ]; then
         echo "Base PHP ini files
 -------------------------------------------------------------"
@@ -615,7 +621,7 @@ case "${action}" in
     find "${php_config_d}" -name "*.ini" \
       | sort \
       | xargs -iconfigFile egrep --with-filename "^[\t ]*${ini_rule}[\t ]*=" "configFile" \
-      | while read line; do
+      | while read -r line; do
       if [ ${first} -eq 1 ]; then
         echo "
 conf.d ini files
@@ -667,7 +673,7 @@ conf.d ini files
     if [ "${parsed_value}" -gt "${parsed_current_value}" ]; then
       # Update the current value to use the new value.
       set_done="false"
-      if egrep -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
+      if grep -E -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
         sed -i -e "s;^[\t ]*${ini_rule}[\t ]*=.*$;${ini_rule} = ${value};" \
             "${php_config_file}"
         set_done="true"
@@ -683,7 +689,7 @@ ${ini_rule} = ${value}" \
       fi
     else
       # Set current value in ini file if it does not exists yet.
-      if ! egrep -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
+      if ! grep -E -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
         echo "
 ; === ${ini_rule} ===
 ${ini_rule} = ${current_value}" \
@@ -692,7 +698,7 @@ ${ini_rule} = ${current_value}" \
     fi
 
     # Add the "for" information as comment.
-    if [ "${for_software}" != "false" -a -n "${for_software}" ]; then
+    if [[ "${for_software}" != "false" && -n "${for_software}" ]]; then
       for_text="; - for '${for_software}' : ${value}"
       if ! grep "${for_text}" <<< "$(sed -e "0,/; === ${ini_rule} ===/d" \
                   -e "/^[\t ]*${ini_rule}[\t ]*/,10000d" \
@@ -727,7 +733,7 @@ ${for_text}" \
     fi
 
     # update existing setting if possible.
-    if egrep -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
+    if grep -E -q "^[\t ]*${ini_rule}[\t ]*=" "${php_config_file}"; then
       sed -i -e "s;^[\t ]*${ini_rule}[\t ]*=.*$;${ini_rule} = ${value};" \
           "${php_config_file}"
       set_done="true"
@@ -743,7 +749,7 @@ ${ini_rule} = ${value}" \
     fi
 
     # Add the "for" information as comment.
-    if [ "${for_software}" != "false" -a -n "${for_software}" ]; then
+    if [[ "${for_software}" != "false" && -n "${for_software}" ]]; then
       for_text="; - for '${for_software}' : ${value}"
       if ! grep "${for_text}" <<< "$(sed -e "0,/; === ${ini_rule} ===/d" \
                   -e "/^[\t ]*${ini_rule}[\t ]*/,10000d" \
@@ -817,9 +823,9 @@ Please restart PHP (Apache 2 or PHP-FPM)." >&2
   # reload : Reload PHP config : restart php-fpm or Apache 2.
   #######################################################################################
   'reload' )
-      if [[ -x '/etc/init.d/php7.0-fpm' ]]; then
-        echo -n "Restarting php7.0-fpm..."
-        service php7.0-fpm restart
+      if [[ -x "/etc/init.d/php${php_version}-fpm" ]]; then
+        echo -n "Restarting php${php_version}-fpm..."
+        service "php${php_version}-fpm" restart
 
         if [[ ${?} -ne 0 ]]; then
           cecho 'red' 'failed.'
