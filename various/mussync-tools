@@ -12,10 +12,20 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.6.1"
+version="1.6.2"
 
+# Known bugs
+# ----------
+# 
+#  - M4A to MP3 conversion does not preserve album art.
+#  - M4A to MP3 conversion does not preserver MusicBrainz tags.
+#
 # History
 # -------
+#
+# 1.6.2:
+#  - Fix JSON tag info bad cleanup for FLAC to m4a conversion.
+#  - Fix FLAC or OGG to m4a MusicBrainz tag preservation.
 #
 # 1.6.1:
 #  - Fix null byte warning in basename and dirname.
@@ -481,6 +491,73 @@ export -f 'cecho'
 
 
 
+# Translage MusicBrainz tag code to tag name for m4a file.
+# @see https://picard.musicbrainz.org/docs/mappings/
+#
+# @param string $tagCode Original MusicBrainz tag code.
+function translate_musicbrainz_for_m4a() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local tagCode="${1}"
+
+  declare -a tagCodeIndex 
+  declare -a tagNames
+
+  local index=0
+  tagCodeIndex=()
+  tagNames=()
+
+  tagCodeIndex+=('MEDIA');                          tagNames+=('MEDIA')
+  tagCodeIndex+=('SCRIPT');                         tagNames+=('SCRIPT')
+  tagCodeIndex+=('ARTISTS');                        tagNames+=('ARTISTS')
+  tagCodeIndex+=('LYRICIST');                       tagNames+=('LYRICIST')
+  tagCodeIndex+=('CONDUCTOR');                      tagNames+=('CONDUCTOR')
+  tagCodeIndex+=('REMIXER ');                       tagNames+=('REMIXER ')
+  tagCodeIndex+=('ENGINEER');                       tagNames+=('ENGINEER')
+  tagCodeIndex+=('PRODUCER');                       tagNames+=('PRODUCER')
+  tagCodeIndex+=('DJMIXER ');                       tagNames+=('DJMIXER ')
+  tagCodeIndex+=('MIXER');                          tagNames+=('MIXER')
+  tagCodeIndex+=('LABEL');                          tagNames+=('LABEL')
+  tagCodeIndex+=('SUBTITLE ');                      tagNames+=('SUBTITLE ')
+  tagCodeIndex+=('DISCSUBTITLE');                   tagNames+=('DISCSUBTITLE')
+  tagCodeIndex+=('MOOD');                           tagNames+=('MOOD')
+  tagCodeIndex+=('MEDIA');                          tagNames+=('MEDIA')
+  tagCodeIndex+=('CATALOGNUMBER');                  tagNames+=('CATALOGNUMBER')
+  tagCodeIndex+=('RELEASESTATUS');                  tagNames+=('MusicBrainz Album Status')
+  tagCodeIndex+=('RELEASETYPE');                    tagNames+=('MusicBrainz Album Type')
+  tagCodeIndex+=('RELEASECOUNTRY');                 tagNames+=('MusicBrainz Album Release Country')
+  tagCodeIndex+=('SCRIPT');                         tagNames+=('SCRIPT')
+  tagCodeIndex+=('LANGUAGE');                       tagNames+=('LANGUAGE')
+  tagCodeIndex+=('LICENSE');                        tagNames+=('LICENSE')
+  tagCodeIndex+=('BARCODE');                        tagNames+=('BARCODE')
+  tagCodeIndex+=('ISRC');                           tagNames+=('ISRC')
+  tagCodeIndex+=('ASIN');                           tagNames+=('ASIN')
+  tagCodeIndex+=('MUSICBRAINZ_TRACKID');            tagNames+=('MusicBrainz Track Id')
+  tagCodeIndex+=('MUSICBRAINZ_RELEASETRACKID');     tagNames+=('MusicBrainz Release Track Id')
+  tagCodeIndex+=('MUSICBRAINZ_ALBUMID');            tagNames+=('MusicBrainz Album Id')
+  tagCodeIndex+=('MUSICBRAINZ_ARTISTID');           tagNames+=('MusicBrainz Artist Id')
+  tagCodeIndex+=('MUSICBRAINZ_ALBUMARTISTID');      tagNames+=('MusicBrainz Album Artist Id')
+  tagCodeIndex+=('MUSICBRAINZ_RELEASEGROUPID');     tagNames+=('MusicBrainz Release Group Id')
+  tagCodeIndex+=('MUSICBRAINZ_WORKID');             tagNames+=('MusicBrainz Work Id')
+  tagCodeIndex+=('MUSICBRAINZ_DISCID');             tagNames+=('MusicBrainz Disc Id')
+  tagCodeIndex+=('ACOUSTID_ID');                    tagNames+=('Acoustid Id')
+  tagCodeIndex+=('ACOUSTID_FINGERPRINT');           tagNames+=('Acoustid Fingerprint')
+  tagCodeIndex+=('MUSICIP_PUID');                   tagNames+=('MusicIP PUID')
+  tagCodeIndex+=('FINGERPRINT=MusicMagic Fingerprint');   tagNames+=('fingerprint')
+
+
+  for key in "${!tagCodeIndex[@]}"; do
+    if [[ "${tagCode}" = *"${tagCodeIndex[${key}]}"* ]]; then
+      echo -n "${tagNames[${key}]}"
+      break;
+    fi
+  done
+
+  return 0
+} # translate_musicbrainz_for_m4a()
+export -f 'translate_musicbrainz_for_m4a'
+
+
 # Transfert cover art from input file to output file.
 # Reset all cover art in output file.
 #
@@ -511,9 +588,10 @@ function transfert_images() {
   comments_path=""
   mp3_images_path=""
 
+
   #------------------------
   # Trap handling function
-  # use with: trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  # use with: trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGTERM
   #
   # @param string $output_file The converted/copied output file.
   # @param string $image_path The extracted image temporary file.
@@ -577,7 +655,7 @@ function transfert_images() {
     echo -n "... "
 
     # Setup trap since there is processing needed.
-    trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+    trap 'exit_transfert_images_on_signal "${output_file}" "${image_path}" "${image_with_headers_path}" "${comments_path}" "${mp3_images_path}"' SIGHUP SIGINT SIGQUIT SIGTERM
 
     # Detect Cover MIME type.
     image_mime_type="$(mediainfo --Inform="General;%Cover_Mime%" "${input_file}")"
@@ -962,7 +1040,7 @@ function convert_file() {
 
   #------------------------
   # Trap handling function
-  # use with: trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}" "${vbrfix_temp_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  # use with: trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}" "${vbrfix_temp_path}"' SIGHUP SIGINT SIGQUIT SIGTERM
   #
   # @param string $output_file The converted/copied output file.
   function exit_convert_file_on_signal() {
@@ -1035,7 +1113,7 @@ function convert_file() {
     fi
 
     if [[ "${copy_needed}" = 'True' ]]; then
-      trap 'exit_convert_file_on_signal "${output_file}" "${vbrfix_temp_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}" "${vbrfix_temp_path}"' SIGHUP SIGINT SIGQUIT SIGTERM
 
       cp -a "${input_file}" "${output_file}"
       return $?
@@ -1073,7 +1151,7 @@ function convert_file() {
 
   if [[ "${conversion_needed}" = 'True' ]]; then
     if [[ -e "${input_file}" ]]; then
-      trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+      trap 'exit_convert_file_on_signal "${output_file}" "${output_temp_file}"' SIGHUP SIGINT SIGQUIT SIGTERM
 
       mkdir -p "${output_file_path}"
 
@@ -1178,7 +1256,31 @@ function convert_file() {
                     > "${temporary_json_file}"
 
                 # normalise json file between ogg and others (keep only tags).
-                sed -i -e '0,/"tags"/d' \-e '/}/Q' "${temporary_json_file}"
+                # 1. Remove lines after brakets containing "TITLE" keyword:
+                #    trash trailing "tags" contents.
+                sed -i -e '/"TITLE"/I,/\}/{/\}/Q}' "${temporary_json_file}"
+
+                # 2. Remove everything up to the last line matching "tags":
+                #    Keep only metadata content.
+                while grep -q '"tags"' "${temporary_json_file}"; do
+                  sed -i -e '0,/"tags"/d'  "${temporary_json_file}"
+                done
+
+                # 3. Extract muscbrainz tags for specific inclusion as long tags.
+                while IFS='' read -r tag || [[ -n "${tag}" ]]; do
+                  tag_name="$(echo "${tag}" | sed -e 's/^.*"\([^"]*\)"[ ]*:.*$/\1/')"
+                  tag_value="$(echo "${tag}" | sed -e 's/^.*"[^"]*"[ ]*:[ ]*"\([^"]*\)"*.*$/\1/')"
+
+                  # Translate MusicBrainz tags for M4A.
+                  translated_tag="$(translate_musicbrainz_for_m4a "${tag_name}")"
+
+                  if [[ -n "${translated_tag}" ]]; then
+                    encoding_options+=('--long-tag' "${translated_tag}:${tag_value}")
+                  fi
+                done < "${temporary_json_file}"
+
+                # 4. Add a new "tags": {} containing the metadata content.
+                #    Normalise the json file.
                 sed -i -e ':a;N;$!ba;s/.*/{ "tags": { & } }/' "${temporary_json_file}"
 
                 # Convert input file to aac.
@@ -1267,7 +1369,7 @@ function convert_file() {
               case "${output_format}" in
                 'flac' )
                   # No encoding options needed.
-                  encoding_options=""
+                  encoding_options=()
                   output_options=(${output_options[@]}  -f "${output_format}")
                   ;;
 
@@ -1750,7 +1852,7 @@ function convert_album() {
     cecho 'boldred' "Convertion of album '${album_name}' interrupted." >&2
 
     running_jobs=($(jobs -p))
-    if [[ -n "${running_jobs[@]}" ]]; then
+    if [[ ${#running_jobs[@]} -ne 0 ]]; then
       # cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
       kill "${running_jobs[@]}" 2>&-
     fi
@@ -1766,7 +1868,7 @@ function convert_album() {
   } # exitconvert_album__on_signal()
   #------------------------
 
-  trap 'exit_convert_album_on_signal "${input_album_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+  trap 'exit_convert_album_on_signal "${input_album_path}"' SIGHUP SIGINT SIGQUIT SIGTERM
 
   # Find folder files and put them in a array.
   # See: http://mywiki.wooledge.org/BashFAQ/020
@@ -1844,7 +1946,7 @@ export -f 'convert_album'
 #######################################################################################
 #######################################################################################
 # Function called by trap. Perform exit cleanup
-# use to enable trap "exit_on_signal '${lock_path}'" SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+# use to enable trap "exit_on_signal '${lock_path}'" SIGHUP SIGINT SIGQUIT SIGTERM
 #
 # @param string $lock_path The path to lock file.
 function exit_on_signal() {
@@ -1854,7 +1956,7 @@ function exit_on_signal() {
   cecho 'boldred' "${script_name} is stopping at your request." >&2
 
   local running_jobs=($(jobs -p))
-  if [[ -n "${running_jobs[@]}" ]]; then
+  if [[  ${#running_jobs[@]} -ne 0 ]]; then
     #cecho 'yellow' " -> Stopping conversion jobs (${running_jobs[@]})." >&2
     kill "${running_jobs[@]}" 2>&-
   fi
@@ -1906,7 +2008,7 @@ function lock {
         # the following handler will exit the script on receiving these signals
         # the trap on "0" (EXIT) from above will be triggered by this trap's
         # "exit" command!
-        trap 'exit_on_signal "${lock_path}"' SIGHUP SIGINT SIGQUIT SIGKILL SIGTERM
+        trap 'exit_on_signal "${lock_path}"' SIGHUP SIGINT SIGQUIT SIGTERM
 
         return ${ENO_SUCCESS}
     else
@@ -1919,18 +2021,18 @@ function lock {
         # http://wiki.grzegorz.wierzowiecki.pl/code:mutex-in-bash
         if [[ ${?} != 0 ]]; then
             # Pid file does not exists - probably directory is beeing deleted
-            exit ${ENO_LOCKFAIL}
+            exit "${ENO_LOCKFAIL}"
         fi
 
         if ! kill -0 "${other_pid}" &>'/dev/null'; then
             # lock is stale, remove it and restart
             unlock
             lock "${base_lock_path}"
-            return $?
+            return ${?}
         else
             # lock is valid and OTHERPID is active - exit, we're locked!
             cecho 'redbold' "lock failed, PID ${other_pid} is active" >&2
-            exit ${ENO_LOCKFAIL}
+            exit "${ENO_LOCKFAIL}"
         fi
     fi
     return 0
