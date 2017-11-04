@@ -1,0 +1,700 @@
+#!/bin/bash
+#
+# PGL (Peer Gardian Linux) allow.p2p managing tool.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+version="0.1.0"
+
+# History
+# -------
+#
+# 0.1.0:
+#  - Initial release.
+#
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+
+
+script_name="$(basename "${0}")"
+
+
+
+# Print this script help.
+function usage {
+  echo "PGL Tools v${version}
+This tool manage Peer Guardian Linux allow.p2p database.
+
+Usage :
+
+  ${script_name} [ --help ] [ --quiet ] [ --verbose ]
+      [ --allowp2p-path='/etc/pgl/allow.p2p' ]
+      [ --update ] [ --add=hostname ] [ --remove=hostname ]
+
+  Available options are :
+    * --help | -h                   : Display this message.
+    * --allowp2p-path               : Set the path to the allow.p2p file.
+                                      Default: /etc/pgl/allow.p2p
+    * --update  | -u                : Update existing allowed hosts IPs.
+    * --add | -a                    : Add given hostname to allow.p2p.
+    * --remove | -r                 : Remove given hostname from allow.p2p.
+    * --quiet | -q                  : Disable almost all outputs.
+    * --verbose | -v                : Enable debug outputs.
+"
+
+  [[ -n "${1}" ]] && exit "${1}"
+} # usage
+
+
+
+# Get the dirname of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function dirname() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command dirname -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command dirname -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # dirname()
+export -f 'dirname'
+
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+  realpath="$(realpath "${1}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+
+
+
+# Check if a binary is present. Print its path on &1 if found.
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  local index=0
+  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
+  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
+  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
+  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
+  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
+  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
+  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
+  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+
+  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
+  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
+  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
+  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
+  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
+  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
+  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
+  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+
+  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
+  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
+  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
+  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
+  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
+
+
+# Remove host to allow.p2p.
+#
+# @param boolean $outputAllowed 1 to disable output.
+# @param boolean $verbose 1 to enable debug messages.
+# @param string $allowp2pPath Path to allow.p2p path.
+# @param string $processedHost Hostname added to allow.p2p.
+function remove_from_allowp2p() {
+  [[ ${#} -ne 4 ]] && exit 1
+
+  local outputAllowed
+  local verbose
+  local allowp2pPath
+  local processedHost
+
+  outputAllowed="${1}"
+  verbose="${2}"
+  allowp2pPath="${3}"
+  processedHost="${4}"
+
+  removedLineCount=0
+
+  [[ "$((outputAllowed + verbose))" -ne 0 ]] && echo -n "Removing '${processedHost}'..."
+
+  removedLineCount="$(grep -c "^${processedHost}:" "${allowp2pPath}")"
+  if sed -i -e "/^${processedHost}:/d" "${allowp2pPath}"; then
+    [[ "$((outputAllowed + verbose))" -ne 0 ]] && cecho "green" " ${removedLineCount} entries deleted."
+  else
+    [[ "$((outputAllowed + verbose))" -ne 0 ]] && cecho "red" " Failed."
+    return 1
+  fi
+
+  return 0
+} # reomve_from_allowp2p()
+
+
+
+# Add host to allow.p2p.
+#
+# @param boolean $outputAllowed 1 to disable output.
+# @param boolean $verbose 1 to enable debug messages.
+# @param string $allowp2pPath Path to allow.p2p path.
+# @param string $processedHost Hostname added to allow.p2p.
+function add_to_allowp2p() {
+  [[ ${#} -ne 4 ]] && exit 1
+
+  local outputAllowed
+  local verbose
+  local allowp2pPath
+  local processedHost
+
+  outputAllowed="${1}"
+  verbose="${2}"
+  allowp2pPath="${3}"
+  processedHost="${4}"
+
+  hostNotFoundTotalCount=0
+
+  hostFoundCount=0
+  ignoreCount=0
+  updateCount=0
+
+  updatedContent=''
+
+  [[ "${outputAllowed}" -ne 0 ]] && echo -n "Adding '${processedHost}'..."
+  [[ "${verbose}" -ne 0 ]] && echo "Adding '${processedHost}'..."
+
+  # For each existing allowed host.
+  while IFS='' read -r allowedHostIpv4; do
+    # For each IPv4 found for the allowed host.
+    if [[ -n "${allowedHostIpv4}" ]]; then
+      ((hostFoundCount++))
+      addedLine="${processedHost}:${allowedHostIpv4}-255.255.255.255"
+
+      if grep -q -e "^${addedLine}\$" "${allowp2pPath}"; then
+        ((ignoreCount++))
+
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "   - IP address '${allowedHostIpv4}' exists. Nothing to do."
+      else
+        ((updateCount++))
+        [[ -n "${updatedContent}" ]] && updatedContent+=$'\n'
+        updatedContent+="${addedLine}"
+
+        [[ "${verbose}" -ne 0 ]] && cecho 'green' "   - Adding New IP address '${allowedHostIpv4}'."
+      fi
+
+    fi
+  done <<< "$(getent 'ahostsv4' "${processedHost}" \
+    | cut --delimiter=' ' --field=1 \
+    | sort | uniq)"
+
+  if [[  "${hostFoundCount}" -gt 0 ]]; then
+    # IP found for host.
+
+    if [[ "${updateCount}" -gt 0 ]]; then
+      echo "${updatedContent}" >> "${allowp2pPath}"
+    fi
+
+    if [[ "${outputAllowed}" -ne 0 ]]; then
+      [[ "${updateCount}" -gt 0 ]] && cecho 'green' -n " ${updateCount} added."
+      [[ "${ignoreCount}" -gt 0 ]] && cecho 'yellow' -n " ${ignoreCount} existing."
+      # Adding new line."
+      echo ""
+    fi
+
+    [[ "${verbose}" -ne 0 ]] && cecho 'green' " * ${hostFoundCount} IP address found. ${updateCount} added. ${ignoreCount} unchanged."
+  else
+    ((hostNotFoundTotalCount++))
+
+    [[ "${outputAllowed}" -ne 0 ]] && cecho 'red' "Not found."
+    [[ "${verbose}" -ne 0 ]] && cecho 'red' " * No IP found."
+
+    return 1
+  fi
+
+  return 0
+} # add_to_allowp2p()
+
+
+
+# Update existing allow.p2p hosts IP.
+#
+# @param boolean $outputAllowed 1 to disable output.
+# @param boolean $verbose 1 to enable debug messages.
+# @param string $allowp2pPath Path to allow.p2p path.
+function update_allowp2p() {
+  [[ ${#} -ne 3 ]] && exit 1
+
+  local outputAllowed
+  local verbose
+  local allowp2pPath
+
+  outputAllowed="${1}"
+  verbose="${2}"
+  allowp2pPath="${3}"
+
+  hostCount=0
+  ignoreTotalCount=0
+  updateTotalCount=0
+  hostFoundTotalCount=0
+  hostNotFoundTotalCount=0
+
+  updatedContent="# Updated IPs at $(date --rfc-3339=seconds)"
+
+  while IFS='' read -r allowedHost; do
+    ((hostCount++))
+    hostFoundCount=0
+    ignoreCount=0
+    updateCount=0
+
+    [[ "${verbose}" -ne 0 ]] && cecho "Processing '${allowedHost}'..."
+
+    # For each existing allowed host.
+    while IFS='' read -r allowedHostIpv4; do
+      # For each IPv4 found for the allowed host.
+      if [[ -n "${allowedHostIpv4}" ]]; then
+        ((hostFoundCount++))
+        addedLine="${allowedHost}:${allowedHostIpv4}-255.255.255.255"
+
+        if grep -q -e "^${addedLine}\$" "${allowp2pPath}"; then
+          ((ignoreCount++))
+
+          [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "   - IP address '${allowedHostIpv4}' exists. Nothing to do."
+        else
+          ((updateCount++))
+          updatedContent+="
+${addedLine}"
+
+          [[ "${verbose}" -ne 0 ]] && cecho 'green' "   - Adding New IP address '${allowedHostIpv4}'."
+        fi
+
+      fi
+    done <<< "$(getent 'ahostsv4' "${allowedHost}" \
+      | cut --delimiter=' ' --field=1 \
+      | sort | uniq)"
+
+    if [[  "${hostFoundCount}" -gt 0 ]]; then
+      # IP found for host.
+      ((hostFoundTotalCount++))
+      ignoreTotalCount="$((ignoreTotalCount+ignoreCount))"
+      updateTotalCount="$((updateTotalCount+updateCount))"
+
+      [[ "${verbose}" -ne 0 ]] && cecho 'green' " * ${hostFoundCount} IP address found. ${updateCount} added. ${ignoreCount} unchanged."
+    else
+      ((hostNotFoundTotalCount++))
+
+      [[ "${verbose}" -ne 0 ]] && cecho 'red' " * No IP found."
+    fi
+  done <<< "$(grep -v -e '^#' -e '^[[:blank:]]*$' "${allowp2pPath}" \
+    | cut --delimiter=':' --fields=1 \
+    | sort | uniq)"
+
+  if [[ "${updateTotalCount}" -gt 0 ]]; then
+    echo "${updatedContent}" >> "${allowp2pPath}"
+  fi
+
+  [[ "$((outputAllowed + verbose))" -ne 0 ]] && cecho 'green' "${hostCount} processed: ${hostFoundTotalCount} resolved, ${hostNotFoundTotalCount} not found."
+
+} # update_allowp2p()
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let optind || optind=1
+  [[ $optind -lt $# ]] || return 1
+  shift $optind
+  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
+    optind=$((optind+1));
+    if [[ "$1" != "--" ]]; then
+      local o
+      o="-${1#-$optofs}"
+      for opt in ${optlist#;}
+      do
+        optopt="${opt%[;.:]}"
+        unset optarg
+        local opttype="${opt##*[^;:.]}"
+        [[ -z "$opttype" ]] && opttype=";"
+        if [[ ${#optopt} -gt 1 ]]; then # long-named option
+          case $o in
+            "--$optopt")
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: $optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
+              fi
+              return 0
+            ;;
+            "--$optopt="*)
+              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
+                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optarg=${o#"--$optopt="}
+              return 0
+            ;;
+          esac
+        else # short-named option
+          case "$o" in
+            "-$optopt")
+              unset optofs
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: -$optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
+              fi
+              return 0
+            ;;
+            "-$optopt"*)
+              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
+                optofs="$optofs?" # move to the next option in the chain
+                optind=$((optind-1)) # the chain still has other options
+                return 0
+              else
+                unset optofs
+                optarg="${o#-$optopt}"
+                return 0
+              fi
+            ;;
+          esac
+        fi
+      done
+      cecho 'redbold' "Error : invalid option : '${o}'." >&2
+      usage
+      exit 1
+    fi
+  fi
+  optopt="?"
+  unset optarg
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]; do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo "$r"
+}
+function getopt()
+{
+  local optlist
+
+  optlist=$(optlistex "$1")
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Defaults
+verbose=0
+outputAllowed=1
+
+updateAsked=0
+allowp2pPath='/etc/pgl/allow.p2p'
+addedHosts=()
+removedHosts=()
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h allowp2p-path update u add: a: remove: r: quiet q verbose v" "${@}"; do
+  # Options debuging.
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
+
+  case "${optopt}" in
+    'allowp2p-path' )
+      allowp2pPath="$(realpath_check "${optarg}")"
+      ;;
+
+    'update' | 'u' )
+      updateAsked=1
+      ;;
+
+    'add' | 'a' )
+      addedHosts+=("${optarg}")
+      ;;
+
+    'remove' | 'r' )
+      removedHosts+=("${optarg}")
+      ;;
+
+    'quiet' | 'q' )
+      outputAllowed=1
+      ;;
+
+    'verbose' | 'v' )
+      verbose=1
+      ;;
+
+    'help' | 'h' | * )
+      usage 0
+      ;;
+  esac
+done
+
+shift $((optind-1))
+
+if [[ -z "${allowp2pPath}" ]]; then
+  cecho 'redbold' 'Error: no allow.p2p file provided.' >&2
+  usage 1
+fi
+
+realpath_check "${allowp2pPath}" > '/dev/null'
+
+if [[ ${verbose} -ne 0 ]]; then
+  # Verbose output replace standard output
+  outputAllowed=0
+fi
+
+# Processing update if asked or nothing added or removed.
+if [[ "${updateAsked}" -ne 0 || "$((${#addedHosts[@]} + ${#removedHosts[@]}))" -eq 0 ]]; then
+  update_allowp2p "${outputAllowed}" "${verbose}" "${allowp2pPath}"
+fi
+
+# Processing removal.
+for processedHost in "${removedHosts[@]}"; do
+  remove_from_allowp2p "${outputAllowed}" "${verbose}" "${allowp2pPath}" "${processedHost}"
+done
+
+# Processing addition.
+for processedHost in "${addedHosts[@]}"; do
+  add_to_allowp2p "${outputAllowed}" "${verbose}" "${allowp2pPath}" "${processedHost}"
+done
+
+exit 0
