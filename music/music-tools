@@ -1,0 +1,846 @@
+#!/bin/bash
+#
+# Music files management tools.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+version="0.1.0"
+
+# History
+# -------
+#
+# 0.1.0:
+#  - Initial release.
+#
+
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+
+
+scriptName="$(basename "${0}")"
+
+
+
+# Print this script help.
+function usage {
+  echo "Music management tools v${version}
+This script offer some automatisms to manage and enhance a music library.
+
+Usage :
+
+  ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
+      [ --output-path='/path/to/output' ]
+      [ --split-cue='/path/to/cue-file-or-folder' ]
+
+  Available options are :
+    * --help | -h                   : Display this message.
+    * --split-cue                   : Find all cue files in given path, and
+        split the associated music file to create a complete album for a
+        standard music library.
+        Afterwards, use MusicBrainz Picard to add missing metadatas.
+        By default, files are created in a folder in the original cue file one.
+        Use --output-path option to change output path.
+    * --check                       : Check music files for errors.
+    * --gain                        : Add album replay gain to files.
+    * --quiet | -q                  : Disable almost all outputs.
+    * --verbose | -v                : Enable debug outputs.
+"
+
+  [[ -n "${1}" ]] && exit "${1}"
+} # usage
+
+
+
+# Get the dirname of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function dirname() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command dirname -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command dirname -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # dirname()
+export -f 'dirname'
+
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
+} # realpath
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+  realpath="$(realpath "${1}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+
+
+
+# Check if a binary is present. Print its path on &1 if found.
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  fontIndex=()
+  fontValue=()
+
+  fontIndex+=( 'black' );     fontValue+=( "$(tput 'setaf' 0)" )
+  fontIndex+=( 'red' );       fontValue+=( "$(tput 'setaf' 1)" )
+  fontIndex+=( 'green' );     fontValue+=( "$(tput 'setaf' 2)" )
+  fontIndex+=( 'yellow' );    fontValue+=( "$(tput 'setaf' 3)" )
+  fontIndex+=( 'blue' );      fontValue+=( "$(tput 'setaf' 4)" )
+  fontIndex+=( 'magenta' );   fontValue+=( "$(tput 'setaf' 5)" )
+  fontIndex+=( 'cyan' );      fontValue+=( "$(tput 'setaf' 6)" )
+  fontIndex+=( 'white' );     fontValue+=( "$(tput 'setaf' 7)" )
+
+  fontIndex+=( 'bgBlack' );   fontValue+=( "$(tput 'setab' 0)" )
+  fontIndex+=( 'bgRed' );     fontValue+=( "$(tput 'setab' 1)" )
+  fontIndex+=( 'bgGreen' );   fontValue+=( "$(tput 'setab' 2)" )
+  fontIndex+=( 'bgYellow' );  fontValue+=( "$(tput 'setab' 3)" )
+  fontIndex+=( 'bgBlue' );    fontValue+=( "$(tput 'setab' 4)" )
+  fontIndex+=( 'bgMagenta' ); fontValue+=( "$(tput 'setab' 5)" )
+  fontIndex+=( 'bgCyan' );    fontValue+=( "$(tput 'setab' 6)" )
+  fontIndex+=( 'bgWhite' );   fontValue+=( "$(tput 'setab' 7)" )
+
+  fontIndex+=( 'bold' );      fontValue+=( "$(tput 'bold')" )
+  fontIndex+=( 'stout' );     fontValue+=( "$(tput 'smso')" ) # Standout.
+  fontIndex+=( 'under' );     fontValue+=( "$(tput 'smul')" ) # Underline.
+  fontIndex+=( 'blink' );     fontValue+=( "$(tput 'blink')" ) # Blinking.
+  fontIndex+=( 'italic' );    fontValue+=( "$(tput 'sitm')" )
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
+
+
+#
+# Multi platform avprobe support.
+#
+function avprobe() {
+  if type -f 'avprobe' &>'/dev/null'; then
+    command avprobe "${@}"
+    return ${?}
+  fi
+
+  if type -f 'ffprobe' &>'/dev/null'; then
+    command ffprobe "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # avprobe()
+export -f 'avprobe'
+
+
+
+# Convert an audio file from source library to target library.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to cue files.
+# @param string $ouputPath path for splitted files output.
+#
+# @return Exit with error if conversion failed.
+function spit_clue() {
+ [[ ${#} -ne 4 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+  local outputPath="${4}"
+
+  musicExtensions=( 'flac' 'ape' 'alac' 'aiff' 'wav' )
+
+  find "${processedPath}" -type f -name '*.cue' -print0 | \
+  while IFS='' read -r -d $'\0' cueFile; do
+    cueMusicBase="${cueFile%\.*}"
+
+    musicOutputPath="${cueMusicBase}"
+    if [[ -n "${outputPath}" ]]; then
+      musicOutputPath="${outputPath}/$(basename "${cueMusicBase}")"
+    fi
+
+    if [[ "${quiet}" -eq 0 ]]; then
+      echo -n "Processing "
+      cecho 'cyan' -n "${cueFile}"
+      echo "."
+    fi
+
+    for musicExtension in "${musicExtensions[@]}"; do
+      musicFile="${cueMusicBase}.${musicExtension}"
+      if [[ -e "${musicFile}" ]]; then
+        mkdir -p "${musicOutputPath}"
+
+        shntool split -t "%n %t" \
+            -d "${musicOutputPath}" \
+            -f "${cueFile}" \
+            -o flac "${musicFile}"
+      fi
+    done
+  done
+} # split_cue()
+
+
+
+# Apply gain to music album.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to music albums.
+#
+# @return Exit with error if conversion failed.
+function compute_replay_gain() {
+ [[ ${#} -ne 3 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+
+  # Find folders in path
+  find "${processedPath}" -type d -print0 | \
+  while IFS='' read -r -d $'\0' processedFolder; do
+    audioFiles=()
+    flacFilesVarnames=()
+
+    if [[ "${verbose}" -ne 0 ]]; then
+      echo -n "Processing "
+      cecho 'cyan' -n "${processedFolder}"
+      echo -n ":"
+    fi
+
+    filesFound=0
+    # Find files directly in folder:
+    while IFS='' read -r foundFile; do
+      if [[ -n "${foundFile}" ]]; then
+        foundFileMime="$(file --brief --mime-type "${foundFile}")"
+
+        if [[ "${foundFileMime%/*}" = 'audio' ]]; then
+          [[ "${filesFound}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+
+          ((filesFound++))
+
+          [[ "${verbose}" -ne 0 ]] && cecho 'yellow' " - Audio file '${foundFile##*/}' (${foundFileMime})"
+
+          case "${foundFileMime##*/}" in
+            'x-flac' )
+              # Metaflac can only compute replay gain on similar files.
+              # Group files by same encoding info.
+              channels="$(metaflac --show-channels "${foundFile}")"
+              sampleRate="$(metaflac --show-sample-rate "${foundFile}")"
+              bps="$(metaflac --show-bps "${foundFile}")"
+
+              [[ "${verbose}" -ne 0 ]] && cecho 'magenta' "   + Flac with ${channels} channels, ${bps} bps, ${sampleRate} Hz."
+
+              filesVarname="flacFiles_${channels}_${sampleRate}_${bps}"
+              filesVarnameContents="${filesVarname}[@]"
+
+              if [[ -z "${!filesVarname+isset}" ]]; then
+                # First file found with given settings.
+                eval "${filesVarname}=( \"\${foundFile}\" )"
+                flacFilesVarnames+=( "$filesVarname" )
+              else
+                # Already found files with given settings.
+                eval "${filesVarname}+=( \"\${foundFile}\" )"
+              fi
+              ;;
+
+            * )
+              # Add Non Flac audio files to list.
+              audioFiles+=( "${foundFile}" )
+          esac
+        fi
+      fi
+    done <<< "$(find "${processedFolder}" -maxdepth 1 -type f)"
+
+    if [[ "${quiet}" -eq 0 \
+        && "${verbose}" -eq 0 \
+        && ( ${#audioFiles[@]} -ne 0 \
+          || "${#flacFilesVarnames[@]}" -ne 0 ) ]]; then
+      echo -n "Processing "
+      cecho 'cyan' -n "${processedFolder}"
+      echo -n ":"
+    fi
+
+    # Apply replay gain to found Non Flac audio files.
+    if [[ ${#audioFiles[@]} -ne 0 ]]; then
+      if [[ "${quiet}" -eq 0 ]]; then
+        cecho 'green' -n " ${#audioFiles[@]} audio files found."
+        cecho 'yellow' -n " Computing."
+      fi
+
+      if collectiongain --regain "${processedFolder}"; then
+        [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
+      else
+        [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+      fi
+    fi
+
+    # Process flac files.
+    if [[ "${quiet}" -eq 0 && "${#flacFilesVarnames[@]}" -gt 0 ]]; then
+      cecho 'green' -n " ${#flacFilesVarnames[@]} flac sets."
+      cecho 'yellow' -n " Computing."
+    fi
+
+    for filesVarname in "${flacFilesVarnames[@]}"; do
+      filesVarnameContents="${filesVarname}[@]"
+
+      #cecho 'green' "Found ${#!filesVarnameContents} flac files with given set of settings."
+      if metaflac --add-replay-gain "${!filesVarnameContents}"; then
+        [[ "${quiet}" -eq 0 ]] && cecho 'green' -n ' Done.'
+      else
+        [[ "${quiet}" -eq 0 ]] && cecho 'red' -n ' Failed.'
+      fi
+
+      # Unset generated variable for next loop.
+      unset "${filesVarname}"
+    done # end for
+
+    if [[ "${quiet}" -eq 0 && "${#flacFilesVarnames[@]}" -gt 0 ]]; then
+      echo ""
+    fi
+
+    if [[ "${verbose}" -ne 0 \
+        && ${#audioFiles[@]} -eq 0 \
+        && "${#flacFilesVarnames[@]}" -eq 0 ]]; then
+      cecho 'yellow' ' No audio found.'
+    fi
+
+  done # end while
+} # compute_replay_gain()
+
+
+
+
+
+# Check music files for errors.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to music albums.
+#
+# @return Exit with error if checking failed.
+function check_music_files() {
+ [[ ${#} -ne 3 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+
+  local filesCount
+  local flacFiles
+  local m4aFiles
+  local mp3Files
+  local audioFiles
+  local errorCount
+
+  filesCount=0
+  flacFiles=0
+  m4aFiles=0
+  mp3Files=0
+  audioFiles=0
+  errorCount=0
+
+  # Find files in path
+  while IFS='' read -r foundFile; do
+    if [[ -n "${foundFile}" ]]; then
+      foundFileMime="$(file --brief --mime-type "${foundFile}")"
+
+      if [[ "${foundFileMime%/*}" = 'audio' ]]; then
+        [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+
+        ((filesCount++))
+
+        if [[ "${verbose}" -ne 0 ]]; then
+          echo -n "Checking "
+          cecho 'cyan' -n "${foundFile}"
+          echo -n ":"
+        fi
+
+        errorMessage=''
+        case "${foundFileMime##*/}" in
+          'x-flac' )
+            # Process FLAC files.
+            ((flacFiles++))
+            errorMessage="$(flac -s -t "${foundFile}" 2>&1)"
+            ;;
+          'mpeg' )
+            # Process MP3 files.
+            ((mp3Files++))
+            errorMessage="$(mp3val -si "${foundFile}" \
+                            | grep '^ERROR:' | sed -e 's/^.*: //g')"
+            ;;
+          'x-m4a' )
+            # Process M4A files.
+            ((m4aFiles++))
+            errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
+                            | grep '^string=' | cut -c '8-')"
+            ;;
+          * )
+            # Process other audio files.
+            ((audioFiles++))
+            errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
+                            | grep '^string=' | cut -c '8-')"
+        esac
+
+        if [[ -n "${errorMessage}" ]]; then
+          # Error found.
+
+          ((errorCount++))
+
+          if [[ "${quiet}" -eq 0 \
+              && "${verbose}" -eq 0 ]]; then
+            echo -n "Checking "
+            cecho 'cyan' -n "${foundFile}"
+            echo -n ":"
+          fi
+
+          if [[ "${quiet}" -ne 0 ]]; then
+            cecho 'red' -n 'ERROR : '
+            echo "${foundFile}"
+          else
+            cecho 'red' ' Failed.'
+          fi
+
+          [[ "${verbose}" -ne 0 ]] && cecho 'yellow' "${errorMessage}"
+        else
+          [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Ok.'
+        fi
+      fi
+    fi
+  done <<< "$(find "${processedPath}" -type f)"
+
+  if [[ "${quiet}" -eq 0 ]]; then
+    cecho 'green' -n "${filesCount} files processed."
+    cecho 'yellow' -n " Flac: ${flacFiles}."
+    cecho 'yellow' -n " MP3: ${mp3Files}."
+    cecho 'yellow' -n " M4A: ${m4aFiles}."
+    cecho 'yellow' -n " Others: ${audioFiles}."
+    cecho 'red' " ${errorCount} errors found."
+  fi
+
+} # check_music_files()
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  let $# || return 1
+  local optlist="${1#;}"
+  let optind || optind=1
+  [[ $optind -lt $# ]] || return 1
+  shift $optind
+  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
+    optind=$((optind+1));
+    if [[ "$1" != "--" ]]; then
+      local o
+      o="-${1#-$optofs}"
+      for opt in ${optlist#;}
+      do
+        optopt="${opt%[;.:]}"
+        unset optarg
+        local opttype="${opt##*[^;:.]}"
+        [[ -z "$opttype" ]] && opttype=";"
+        if [[ ${#optopt} -gt 1 ]]; then # long-named option
+          case $o in
+            "--$optopt")
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: $optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
+              fi
+              return 0
+            ;;
+            "--$optopt="*)
+              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
+                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
+                optarg="$optopt"
+                optopt="?"
+                return 1
+              fi
+              optarg=${o#"--$optopt="}
+              return 0
+            ;;
+          esac
+        else # short-named option
+          case "$o" in
+            "-$optopt")
+              unset optofs
+              if [[ "${opttype}" = ':' ]]; then
+                optarg="${2}"
+                if [[ -z "$optarg" ]]; then
+                  cecho 'redbold' "$0: error: -$optopt must have an argument" >&2
+                  optarg="${optopt}"
+                  optopt="?"
+                  return 1
+                fi
+
+                optind=$((optind+1)) # skip option's argument
+              elif [[ "${opttype}" = '.' ]]; then
+                if [[ "${2}" != -* ]]; then
+                  optarg="${2}"
+
+                  optind=$((optind+1)) # skip option's argument
+                fi
+              fi
+              return 0
+            ;;
+            "-$optopt"*)
+              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
+                optofs="$optofs?" # move to the next option in the chain
+                optind=$((optind-1)) # the chain still has other options
+                return 0
+              else
+                unset optofs
+                optarg="${o#-$optopt}"
+                return 0
+              fi
+            ;;
+          esac
+        fi
+      done
+      cecho 'redbold' "Error : invalid option : '${o}'." >&2
+      usage
+      exit 1
+    fi
+  fi
+  optopt="?"
+  unset optarg
+  return 1
+}
+function optlistex
+{
+  local l="$1"
+  local m # mask
+  local r # to store result
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]; do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo "$r"
+}
+function getopt()
+{
+  local optlist
+
+  optlist=$(optlistex "$1")
+  shift
+  getoptex "$optlist" "$@"
+  return $?
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Check for binaries presence
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "mktemp" "mktemp" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "mediainfo" "mediainfo" > '/dev/null'
+check_binary "shntool" "shntool" > '/dev/null'
+check_binary "sox" "sox" > '/dev/null'
+check_binary "avconv;ffmpeg" "libav-tools" > '/dev/null'
+check_binary "metaflac" "flac" > '/dev/null'
+check_binary "collectiongain" "python-rgain" > '/dev/null'
+check_binary "replaygain" "python-rgain" > '/dev/null'
+check_binary "mp3val" "mp3val" > '/dev/null'
+
+# For monkeys-audio package:
+# @see http://www.deb-multimedia.org/dists/stable/main/binary-amd64/package/monkeys-audio
+check_binary "mac" "monkeys-audio (from www.deb-multimedia.org)" > '/dev/null'
+
+
+
+# Application defaults
+outputPath=""
+
+inputPaths=()
+
+actions=()
+
+quiet=0
+verbose=0
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h output-path: out: o: split-cue check gain quiet q verbose v" "${@}"; do
+  # Options debuging.
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
+
+  case "${optopt}" in
+    'output-path' )
+      outputPath="$(realpath_check "${optarg}")"
+      ;;
+
+    'split-cue' )
+      actions+=( 'spit-cue' )
+      ;;
+
+    'check' )
+      actions+=( 'check' )
+      ;;
+
+    'gain' )
+      actions+=( 'gain' )
+      ;;
+
+    'quiet' | 'q' )
+      quiet=1
+      ;;
+
+    'verbose' | 'v' )
+      verbose=1
+      ;;
+
+    'help' | 'h' | * )
+      usage 0
+      ;;
+  esac
+done
+
+shift $((optind-1))
+
+if [[ "${#actions[@]}" -eq 0 ]]; then
+  cecho 'red' 'Error: no action specified.' >&2
+  usage 1
+fi
+
+for givenPath in "$@"; do
+  inputPaths+=( "$(realpath_check "${givenPath}")" )
+done
+
+# Test if path given as argument.
+if [[ "${#inputPaths[@]}" -eq 0 ]]; then
+  # If no path given, use current path.
+  inputPaths+=( "$(pwd)" )
+fi
+
+if [[ "${verbose}" -ne 0 ]]; then
+  quiet=0
+fi
+
+for processedPath in "${inputPaths[@]}"; do
+  for action in "${actions[@]}"; do
+
+    case "${action}" in
+      'split-cue' )
+        split_cue "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
+        ;;
+
+      'gain' )
+        compute_replay_gain "${quiet}" "${verbose}" "${processedPath}"
+        ;;
+
+      'check' )
+        check_music_files "${quiet}" "${verbose}" "${processedPath}"
+        ;;
+
+      * )
+        usage 1
+    esac
+  done
+done
