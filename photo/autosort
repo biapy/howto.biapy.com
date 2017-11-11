@@ -6,7 +6,14 @@
 # You need to have :
 # exiftool and ufraw 0.15 installed
 
-version="2.0.1"
+version="2.0.2"
+
+# History
+# -------
+#
+# 2.0.2:
+#  - Fix null byte warning in basename and dirname.
+#
 
 # Get the basename of a path (multi-plateform version)
 # Print the result on &1 if found.
@@ -20,7 +27,8 @@ function basename() {
 
   case "$(uname)" in
     'Linux' )
-      command basename -z -- "${@}"
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
       ;;
     'Darwin' | * )
       command basename -- "${@}"
