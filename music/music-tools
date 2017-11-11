@@ -5,10 +5,14 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.1.0"
+version="0.1.1"
 
 # History
 # -------
+#
+# 0.1.1:
+#  - Fix usage information.
+#  - Hide collectiongain output.
 #
 # 0.1.0:
 #  - Initial release.
@@ -54,7 +58,8 @@ Usage :
 
   ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
       [ --output-path='/path/to/output' ]
-      [ --split-cue='/path/to/cue-file-or-folder' ]
+      [ --split-cue ] [ --check ] [ --gain ]
+      [ '/path/to/music-1' ] [ '/path/to/music-2' ] ...
 
   Available options are :
     * --help | -h                   : Display this message.
@@ -68,6 +73,9 @@ Usage :
     * --gain                        : Add album replay gain to files.
     * --quiet | -q                  : Disable almost all outputs.
     * --verbose | -v                : Enable debug outputs.
+
+  By default, apply choosen actions to local path, but allow to specify a list
+  of path to search for music as arguments.
 "
 
   [[ -n "${1}" ]] && exit "${1}"
@@ -448,7 +456,13 @@ function compute_replay_gain() {
         cecho 'yellow' -n " Computing."
       fi
 
-      if collectiongain --regain "${processedFolder}"; then
+      if [[ "${verbose}" -ne 0 ]]; then
+        collectiongain --regain "${processedFolder}"
+      else
+        collectiongain --regain "${processedFolder}" > '/dev/null'
+      fi
+
+      if [[ "${?}" -eq 0 ]]; then
         [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
       else
         [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
