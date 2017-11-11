@@ -4,11 +4,13 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-version=3.4.0
+version=3.4.1
 
 # History
 # -------
 #
+# 3.4.1:
+#  - Fix acme.sh path detection bug and missing certificate paths.
 # 3.4.0:
 #  - Enable custom reverse proxy settings with --proxy-settings= argument.
 # 3.3.0:
@@ -875,12 +877,16 @@ serverAlias=''
 sslEnabled='0'
 sslCertbot='0'
 sslCertbotBasePath='/var/lib/a2tools'
-sslAcmeSh="${HOME}/.acme.sh/acme.sh"
 sslBindIp=''
 allowOverride='None'
 isRemoval='0'
 multiViews='+MultiViews'
 proxySettings='connectiontimeout=600 timeout=4000 Keepalive=On'
+
+sslAcmeSh="${HOME}/.acme.sh/acme.sh"
+if [[ ! -e "${sslAcmeSh}" ]]; then
+  sslAcmeSh="$(eval 'echo  ~root')/.acme.sh/acme.sh"
+fi
 
 declare -a xsendfilePaths
 xsendfilePaths=()
@@ -1233,6 +1239,12 @@ ${VHOST_TEMPLATE[1]}"
     fi
 
     if [[ "${sslCertbot}" = "1" ]]; then
+
+      # Create directories for keys.
+      command mkdir -p "$(dirname "${sslPrivateKey}")"
+      command mkdir -p "$(dirname "${sslPublicKey}")"
+      command mkdir -p "$(dirname "${sslChainCa}")"
+      command mkdir -p "$(dirname "${sslCompletePublicKey}")"
 
       # Use acme.sh to create a Let's Encrypt certificate for the domain.
       command bash "${sslAcmeSh}" --issue  --domain "${siteHostname}"  --webroot "${sslCertbotPath}"
