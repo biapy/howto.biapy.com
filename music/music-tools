@@ -5,10 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.1.1"
+version="0.2.0"
 
 # History
 # -------
+#
+# 0.2.0
+#  - Use aacgain for m4a files.
 #
 # 0.1.1:
 #  - Fix usage information.
@@ -388,6 +391,7 @@ function compute_replay_gain() {
   find "${processedPath}" -type d -print0 | \
   while IFS='' read -r -d $'\0' processedFolder; do
     audioFiles=()
+    m4aFiles=()
     flacFilesVarnames=()
 
     if [[ "${verbose}" -ne 0 ]]; then
@@ -432,6 +436,10 @@ function compute_replay_gain() {
               fi
               ;;
 
+            'x-m4a' )
+              m4aFiles+=( "${foundFile}" )
+              ;;
+
             * )
               # Add Non Flac audio files to list.
               audioFiles+=( "${foundFile}" )
@@ -443,6 +451,7 @@ function compute_replay_gain() {
     if [[ "${quiet}" -eq 0 \
         && "${verbose}" -eq 0 \
         && ( ${#audioFiles[@]} -ne 0 \
+          || ${#m4aFiles[@]} -ne 0 \
           || "${#flacFilesVarnames[@]}" -ne 0 ) ]]; then
       echo -n "Processing "
       cecho 'cyan' -n "${processedFolder}"
@@ -460,6 +469,26 @@ function compute_replay_gain() {
         collectiongain --regain "${processedFolder}"
       else
         collectiongain --regain "${processedFolder}" > '/dev/null'
+      fi
+
+      if [[ "${?}" -eq 0 ]]; then
+        [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
+      else
+        [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+      fi
+    fi
+
+    # Apply replay gain to found Non Flac audio files.
+    if [[ ${#m4aFiles[@]} -ne 0 ]]; then
+      if [[ "${quiet}" -eq 0 ]]; then
+        cecho 'green' -n " ${#m4aFiles[@]} m4a files found."
+        cecho 'yellow' -n " Computing."
+      fi
+
+      if [[ "${verbose}" -ne 0 ]]; then
+        aacgain -a -t -p -s r -k -f "${m4aFiles[@]}"
+      else
+        aacgain -q -a -t -p -s r -k -f "${m4aFiles[@]}" > '/dev/null'
       fi
 
       if [[ "${?}" -eq 0 ]]; then
@@ -495,6 +524,7 @@ function compute_replay_gain() {
 
     if [[ "${verbose}" -ne 0 \
         && ${#audioFiles[@]} -eq 0 \
+        && ${#m4aFiles[@]} -eq 0 \
         && "${#flacFilesVarnames[@]}" -eq 0 ]]; then
       cecho 'yellow' ' No audio found.'
     fi
@@ -762,6 +792,7 @@ check_binary "avconv;ffmpeg" "libav-tools" > '/dev/null'
 check_binary "metaflac" "flac" > '/dev/null'
 check_binary "collectiongain" "python-rgain" > '/dev/null'
 check_binary "replaygain" "python-rgain" > '/dev/null'
+check_binary "aacgain" "aacgain (ppa:flexiondotorg/audio)" > '/dev/null'
 check_binary "mp3val" "mp3val" > '/dev/null'
 
 # For monkeys-audio package:
