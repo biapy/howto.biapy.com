@@ -5,10 +5,17 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.2.0"
+version="0.2.2"
 
 # History
 # -------
+#
+# 0.2.2
+#  - Fix audio file detection (use mediainfo instead of
+#    file --brief --mime-type).
+#
+# 0.2.1
+#  - Fix split-cue action.
 #
 # 0.2.0
 #  - Use aacgain for m4a files.
@@ -332,7 +339,7 @@ export -f 'avprobe'
 # @param string $ouputPath path for splitted files output.
 #
 # @return Exit with error if conversion failed.
-function spit_clue() {
+function split_cue() {
  [[ ${#} -ne 4 ]] && exit 1
 
   local quiet="${1}"
@@ -404,17 +411,18 @@ function compute_replay_gain() {
     # Find files directly in folder:
     while IFS='' read -r foundFile; do
       if [[ -n "${foundFile}" ]]; then
-        foundFileMime="$(file --brief --mime-type "${foundFile}")"
+        foundFileFormat="$(mediainfo --Inform="General;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
 
-        if [[ "${foundFileMime%/*}" = 'audio' ]]; then
+        # Test if file is audio
+        if [[ -n "${foundFileFormat}" ]]; then
           [[ "${filesFound}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
 
           ((filesFound++))
 
           [[ "${verbose}" -ne 0 ]] && cecho 'yellow' " - Audio file '${foundFile##*/}' (${foundFileMime})"
 
-          case "${foundFileMime##*/}" in
-            'x-flac' )
+          case "${foundFileFormat}" in
+            'FLAC' )
               # Metaflac can only compute replay gain on similar files.
               # Group files by same encoding info.
               channels="$(metaflac --show-channels "${foundFile}")"
@@ -436,7 +444,7 @@ function compute_replay_gain() {
               fi
               ;;
 
-            'x-m4a' )
+            'MPEG-4' )
               m4aFiles+=( "${foundFile}" )
               ;;
 
@@ -567,9 +575,10 @@ function check_music_files() {
   # Find files in path
   while IFS='' read -r foundFile; do
     if [[ -n "${foundFile}" ]]; then
-      foundFileMime="$(file --brief --mime-type "${foundFile}")"
+      foundFileFormat="$(mediainfo --Inform="General;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
 
-      if [[ "${foundFileMime%/*}" = 'audio' ]]; then
+      # Test if file is audio.
+      if [[ -n "${foundFileFormat}" ]]; then
         [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
 
         ((filesCount++))
@@ -581,19 +590,19 @@ function check_music_files() {
         fi
 
         errorMessage=''
-        case "${foundFileMime##*/}" in
-          'x-flac' )
+        case "${foundFileFormat}" in
+          'FLAC' )
             # Process FLAC files.
             ((flacFiles++))
             errorMessage="$(flac -s -t "${foundFile}" 2>&1)"
             ;;
-          'mpeg' )
+          'MPEG AUDIO' )
             # Process MP3 files.
             ((mp3Files++))
             errorMessage="$(mp3val -si "${foundFile}" \
                             | grep '^ERROR:' | sed -e 's/^.*: //g')"
             ;;
-          'x-m4a' )
+          'MPEG-4' )
             # Process M4A files.
             ((m4aFiles++))
             errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
@@ -822,7 +831,7 @@ while getoptex "help h output-path: out: o: split-cue check gain quiet q verbose
       ;;
 
     'split-cue' )
-      actions+=( 'spit-cue' )
+      actions+=( 'split-cue' )
       ;;
 
     'check' )

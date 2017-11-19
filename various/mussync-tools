@@ -19,9 +19,13 @@ version="1.7.0"
 #
 #  - M4A to MP3 conversion does not preserve album art.
 #  - M4A to MP3 conversion does not preserver MusicBrainz tags.
+#  - input format detection for copy of same format input to output is broken.
 #
 # History
 # -------
+#
+# 1.7.1:
+#  - Fix FLAC to m4a transcoding when FLAC is HD (192k).
 #
 # 1.7.0:
 #  - Use aacgain instead of collection gain for m4a files.
@@ -887,7 +891,7 @@ function transfert_images() {
             --export-picture-to="${image_path}" "${input_file}"
         ;;
 
-      'MPEG Audio' | 'MPEG AUDIO' )
+      'MPEG AUDIO' )
         # File is MP3
         mp3_images_path="$(mktemp -d -t "tmp.XXXXXXXXXX")"
 
@@ -1362,6 +1366,7 @@ function convert_file() {
           rm "${output_file}"
         fi
 
+        # TODO ! input_format is not defined here !!
         if [[ "${input_format}" = "${output_format}" ]]; then
           # Copy input to output (format is the same).
           # Convert input to output
@@ -1427,6 +1432,7 @@ function convert_file() {
               # avconv has an experimental aac encoder but aac-enc from libfdk-aac is better.
               # create the m4a aac file with aac-enc.
 
+              decoding_options=()
 
               if type -f "fdkaac" &>'/dev/null'; then
                 # Use fdkaac, the best command line for aac transcoding.
@@ -1443,6 +1449,14 @@ function convert_file() {
                     encoding_options=(--bitrate-mode "${encoding_quality}")
                     ;;
                 esac
+
+                # Downsample > 96k sample rate FLAC files (192k).
+                if [[ "${input_file_mimetype}" = 'audio/x-flac' ]]; then
+                  sample_rate="$(metaflac --show-sample-rate "${input_file}")"
+                  if [[ "${sample_rate}" -gt 96000 ]]; then
+                    decoding_options+=( '-ar' "$((sample_rate/2))" )
+                  fi
+                fi
 
                 # Create temporary files.
                 temporary_json_file="$(mktemp -t "tmp.XXXXXXXXXX.json")"
@@ -1489,7 +1503,7 @@ function convert_file() {
                 # Convert input file to aac.
                 if [[ "${verbose}" = 'True' ]]; then
                   avconv -i "${input_file}" \
-                          -vn -sn \
+                          -vn -sn "${decoding_options[@]}" \
                           -loglevel "${log_level}" \
                           -f caf pipe:1 \
                     | fdkaac \
@@ -1501,7 +1515,7 @@ function convert_file() {
                           - -o "${output_temp_file}"
                 else
                   avconv -i "${input_file}" \
-                          -vn -sn \
+                          -vn -sn "${decoding_options[@]}" \
                           -loglevel "${log_level}" \
                           -f caf pipe:1 \
                     | fdkaac \
