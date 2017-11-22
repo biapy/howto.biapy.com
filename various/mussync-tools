@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.7.0"
+version="1.7.2"
 
 # Known bugs
 # ----------
@@ -21,8 +21,11 @@ version="1.7.0"
 #  - M4A to MP3 conversion does not preserver MusicBrainz tags.
 #  - input format detection for copy of same format input to output is broken.
 #
-# History
+# History.
 # -------
+#
+# 1.7.2:
+#  - Allow conversion of WMA files.
 #
 # 1.7.1:
 #  - Fix FLAC to m4a transcoding when FLAC is HD (192k).
@@ -1222,7 +1225,7 @@ function convert_file() {
   output_filename="$(echo -n "${input_filename}" \
         | sed -e "s/\.[^\.]*$/\.${output_extension}/")"
   input_file_mimetype="$(file --brief --mime-type "${input_file}")"
-  input_file_brief="$(file --brief "${input_file}")"
+  input_file_format="$(mediainfo --Inform="Audio;%Format%" "${input_file}" | tr '[:lower:]' '[:upper:]')"
 
   # Detect input extension
   input_file_extension="$(echo -n "${input_filename}" \
@@ -1284,9 +1287,7 @@ function convert_file() {
   #------------------------
 
   # Test if input file is an audio file.
-  if [[ "${input_file_mimetype}" != 'application/ogg' \
-      && "${input_file_mimetype%/*}" != 'audio' \
-      && "${input_file_brief,,}" != *audio* ]]; then
+  if [[ -z "${input_file_format}" ]]; then
     # Input file is not an audio file.
     echo -n '   - '
     cecho 'magenta' -n "${short_input_file}"
@@ -1411,7 +1412,7 @@ function convert_file() {
           local metadata_json_address='tags'
           local output_options=()
           # Specific needs for some input formats/
-          case "${input_file_mimetype}" in
+          case "${input_file_format}" in
             'application/ogg' )
               # Get input metadata from first audio stream and direct it to global.
               # See https://bugs.kde.org/show_bug.cgi?id=306895
@@ -1428,7 +1429,7 @@ function convert_file() {
 
           # Specific needs for some output formats
           case "${output_format}" in
-            'm4a' | 'aac' )
+            'MPEG-4' )
               # avconv has an experimental aac encoder but aac-enc from libfdk-aac is better.
               # create the m4a aac file with aac-enc.
 

@@ -5,10 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.2.2"
+version="0.2.3"
 
 # History
 # -------
+#
+# 0.2.3
+#  - Fix audio file detection.
 #
 # 0.2.2
 #  - Fix audio file detection (use mediainfo instead of
@@ -411,7 +414,7 @@ function compute_replay_gain() {
     # Find files directly in folder:
     while IFS='' read -r foundFile; do
       if [[ -n "${foundFile}" ]]; then
-        foundFileFormat="$(mediainfo --Inform="General;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
+        foundFileFormat="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
 
         # Test if file is audio
         if [[ -n "${foundFileFormat}" ]]; then
@@ -575,7 +578,7 @@ function check_music_files() {
   # Find files in path
   while IFS='' read -r foundFile; do
     if [[ -n "${foundFile}" ]]; then
-      foundFileFormat="$(mediainfo --Inform="General;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
+      foundFileFormat="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
 
       # Test if file is audio.
       if [[ -n "${foundFileFormat}" ]]; then
