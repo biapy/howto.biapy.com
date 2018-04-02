@@ -12,7 +12,7 @@
 #  O. Tange (2011): GNU Parallel - The Command-Line Power Tool,
 #  ;login: The USENIX Magazine, February 2011:42-47.
 #
-version="1.7.2"
+version="1.7.3"
 
 # Known bugs
 # ----------
@@ -23,6 +23,9 @@ version="1.7.2"
 #
 # History.
 # -------
+#
+# 1.7.3:
+#  - Fix OGG to M4A MusicBrainz tags support.
 #
 # 1.7.2:
 #  - Allow conversion of WMA files.
@@ -533,7 +536,7 @@ function translate_short_tags() {
     local targetTag=''
 
     case "${inputFileMimetype}" in
-      'audio/x-flac' )
+      'audio/x-flac' | 'audio/ogg' )
         sourceTag="${flacTagNames[${key}]}"
         ;;
       'audio/mpeg' )
@@ -545,13 +548,13 @@ function translate_short_tags() {
     esac
 
     case "${outputFormat}" in
-      'flac' )
+      'flac' | 'ogg' | 'vorbis' )
         targetTag="${flacTagNames[${key}]}"
         ;;
       'mp3' )
         targetTag="${mp3TagNames[${key}]}"
         ;;
-      'm4a' )
+      'm4a' | 'aac' )
         targetTag="${m4aTagNames[${key}]}"
         ;;
     esac
@@ -724,7 +727,7 @@ function translate_musicbrainz_for_m4a() {
 
   foundKey='null'
   case "${inputFileMimetype}" in
-    'audio/x-flac' )
+    'audio/x-flac' | 'audio/ogg' )
       for key in "${!flacTagNames[@]}"; do
         if [[ "${tagCode}" = *"${flacTagNames[${key}]}"* ]]; then
           foundKey="${key}"
@@ -1426,10 +1429,11 @@ function convert_file() {
               # map_metadata=(-map_metadata 0:g)
               ;;
           esac
-
+  
           # Specific needs for some output formats
           case "${output_format}" in
-            'MPEG-4' )
+            'm4a' | 'aac' )
+
               # avconv has an experimental aac encoder but aac-enc from libfdk-aac is better.
               # create the m4a aac file with aac-enc.
 
