@@ -5,10 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.2.3"
+version="0.2.4"
 
 # History
 # -------
+#
+# 0.2.4
+#  - Fix split-cue music file detection.
 #
 # 0.2.3
 #  - Fix audio file detection.
@@ -354,12 +357,6 @@ function split_cue() {
 
   find "${processedPath}" -type f -name '*.cue' -print0 | \
   while IFS='' read -r -d $'\0' cueFile; do
-    cueMusicBase="${cueFile%\.*}"
-
-    musicOutputPath="${cueMusicBase}"
-    if [[ -n "${outputPath}" ]]; then
-      musicOutputPath="${outputPath}/$(basename "${cueMusicBase}")"
-    fi
 
     if [[ "${quiet}" -eq 0 ]]; then
       echo -n "Processing "
@@ -367,17 +364,42 @@ function split_cue() {
       echo "."
     fi
 
-    for musicExtension in "${musicExtensions[@]}"; do
-      musicFile="${cueMusicBase}.${musicExtension}"
-      if [[ -e "${musicFile}" ]]; then
-        mkdir -p "${musicOutputPath}"
+    # Try to fetch music file name from cue file contents.
+    cueMusicFilename="$(grep 'FILE' "${cueFile}" \
+        | sed -e 's|FILE "\(.*\)" [^ ]*|\1|')"
 
-        shntool split -t "%n %t" \
-            -d "${musicOutputPath}" \
-            -f "${cueFile}" \
-            -o flac "${musicFile}"
+    cueMusicPath="$(dirname "${cueFile}")"
+
+    musicFile="${cueMusicPath}/${cueMusicFilename}"
+
+    if [[ ! -f "${musicFile}" ]]; then
+      cueMusicBase="${cueFile%\.*}"
+
+      if [[ -f "${cueMusicBase}" ]]; then
+        musicFile="${cueMusicBase}"
+      else
+        for musicExtension in "${musicExtensions[@]}"; do
+          musicFile="${cueMusicBase}.${musicExtension}"
+          if [[ -f "${musicFile}" ]]; then
+            break;
+          fi
+        done
       fi
-    done
+    fi
+
+    musicOutputPath="${musicFile%\.*}"
+    if [[ -n "${outputPath}" ]]; then
+      musicOutputPath="${outputPath}/$(basename "${cueMusicBase}")"
+    fi
+
+    if [[ -f "${musicFile}" ]]; then
+      mkdir -p "${musicOutputPath}"
+
+      shntool split -t "%n %t" \
+          -d "${musicOutputPath}" \
+          -f "${cueFile}" \
+          -o flac "${musicFile}"
+    fi
   done
 } # split_cue()
 
