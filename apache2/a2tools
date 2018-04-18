@@ -4,11 +4,15 @@
 #
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
-version=3.4.1
+version=3.5.1
 
 # History
 # -------
 #
+# 3.5.1:
+#  - Add fix for 503 error in HTTP/1.1 to HTTP/2.0 reverse proxy.
+# 3.5.0:
+#  - Enable HTTP 2 in hosts when mod_http2.c is available.
 # 3.4.1:
 #  - Fix acme.sh path detection bug and missing certificate paths.
 # 3.4.0:
@@ -400,7 +404,7 @@ REVERSE_PROXY_TEMPLATE="
 
       <IfModule mod_ssl.c>
         # Turn this on if the site behind the reverse proxy is on HTTPS.
-        SSLProxyEngine Off
+        SSLProxyEngine %_SSL_PROXY_ENGINE_%
         # SSLProxyVerify none
         # SSLProxyCheckPeerCN off
         # SSLProxyCheckPeerName off
@@ -408,7 +412,7 @@ REVERSE_PROXY_TEMPLATE="
       </IfModule>
 
       # Declare the current request protocol.
-      RequestHeader set X-Forwarded-Proto \"http\"
+      RequestHeader set X-Forwarded-Proto \"%_FORWARDED_PROTOCOL_%\"
 
       <Proxy %_TARGET_VALUE_%>
         # Rise timeout values for failsafe on some applications (Horde ActiveSync or Plone, for example).
@@ -423,6 +427,12 @@ REVERSE_PROXY_TEMPLATE="
       # turned out that sometimes ProxyPass give you a 503 error when under
       # heavy load. The RewriteRule does not have this flaw.
       ProxyPassReverse  /       %_TARGET_VALUE_%
+
+      # For HTTP2 Only: # Limit Proxy to h2 or h2c protocol when current protocol is HTTP/2.0.
+      # For HTTP2 Only: RewriteCond %{THE_REQUEST} ^.*HTTP/2\.0$
+      # For HTTP2 Only: RewriteCond %{REQUEST_URI} !^/.well-known/acme-challenge/.*
+      # For HTTP2 Only: RewriteRule       ^/(.*)  %_HTTP2_TARGET_VALUE_%\$1  [P,L]
+      # For HTTP2 Only: 
       RewriteCond %{REQUEST_URI} !^/.well-known/acme-challenge/.*
       RewriteRule       ^/(.*)  %_TARGET_VALUE_%\$1  [P,L]
 
@@ -474,6 +484,20 @@ XSENDFILE_TEMPLATE="
   </IfModule>"
 
 XSENDFILE_PATH_TEMPLATE="    XSendFilePath \"%_XSENDFILE_PATH_%\""
+
+# h2 protocol needs https certificates.
+H2_SSL_TEMPLATE="
+  # Enable HTTP/2.0
+  <IfModule mod_http2.c>
+    Protocols h2 http/1.1
+  </IfModule>"
+
+# h2c stands for clear text h2. To use with http only VirtualHosts.
+H2_TEMPLATE="
+  # Enable HTTP/2.0
+  <IfModule mod_http2.c>
+    Protocols h2c http/1.1
+  </IfModule>"
 
 # Echo text in color.
 #
@@ -894,7 +918,7 @@ xsendfilePaths=()
 typePrefix=""
 protocol="http"
 
-apacheModules="rewrite"
+apacheModules=( "rewrite" "http2" )
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
 while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: root-ca: root: r: chain-ca: chain: c: bind-ip: ip: i: overrides: o: without-multiviews remove d xsendfile: xsf: custom-options: co: proxy-settings: ps:" "${@}"; do
@@ -912,7 +936,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
         rproxy | reverse-proxy )
           mainTemplate="${REVERSE_PROXY_TEMPLATE}"
           targetValueIsPath="0"
-          apacheModules="${apacheModules} proxy_http headers"
+          apacheModules+=( "proxy_http" "proxy_http2" "headers" )
           ;;
         redirect )
           mainTemplate="${REDIRECT_TEMPLATE}"
@@ -929,7 +953,7 @@ while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: publi
     'ssl' | 's' )
       sslEnabled="1"
       protocol="https"
-      apacheModules="${apacheModules} ssl"
+      apacheModules+=( "ssl" )
 
       if [[ -n "${optionArgument}" ]]; then
         if [[ "${optionArgument}" = "auto" && -e "${sslAcmeSh}" ]]; then
@@ -1150,7 +1174,7 @@ ${XSENDFILE_PATH_TEMPLATE//%_XSENDFILE_PATH_%/${xsendfilePath}}"
 
 ${XSENDFILE_TEMPLATE//%_XSENDFILE_OPTIONS_%/${xsendfileOptions}}"
 
-    apacheModules="${apacheModules} xsendfile"
+    apacheModules+=( "xsendfile" )
   fi
 
   # For custom template, the target value is used as template.
@@ -1164,18 +1188,19 @@ ${XSENDFILE_TEMPLATE//%_XSENDFILE_OPTIONS_%/${xsendfileOptions}}"
     else
       targetValue=$(command echo "${targetValue}/" \
                | command sed -e 's|//$|/|')
-      targetValueUri=$(command echo "${targetValue}" \
-               | command sed -e 's|[^:]*://[^/]*\(/.*\)/$|\1|')
 
-      if [[ -n "$(echo "${targetValueUri}" | command grep "^https")" ]]; then
+      if [[ "${targetValue}" == "https:"* || "${targetValue}" == "h2:"* ]]; then
         sslProxyEngine="On"
       fi
     fi
   fi
 
+  http2Template="${H2_SSL_TEMPLATE}"
+
   # Disable SSL template if not needed
   if [[ "${sslEnabled}" = "0" ]]; then
     SSL_TEMPLATE=""
+    http2Template="${H2_TEMPLATE}"
   else
     if [[ "${sslCertbot}" = "0" && ( -z "${sslPrivateKey}" || -z "${sslPublicKey}" ) ]]; then
       cecho "red" "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
@@ -1200,20 +1225,46 @@ ${XSENDFILE_TEMPLATE//%_XSENDFILE_OPTIONS_%/${xsendfileOptions}}"
 
   vhostContent="${VHOST_TEMPLATE[0]}
 ${LOGS_TEMPLATE}
+${http2Template}
 ${SSL_TEMPLATE}
 ${CERTBOT_TEMPLATE}
 ${mainTemplate}
 ${customOptions}
 ${VHOST_TEMPLATE[1]}"
 
+
+
+  # HTTP/2.0 preprocessing.
+  if [[ "${targetValue}" == "h2c:"* || "${targetValue}" == "h2:"* ]]; then
+  	# Preverse HTTP2 proxy Url.
+  	http2TargetValue="${targetValue}"
+
+  	# Create a safe HTTP(S) Url for HTTP/1.1 connexions.
+  	targetValue="${targetValue//h2:/https:}"
+  	targetValue="${targetValue//h2c:/http:}"
+
+  	# Activate HTTP2 proxy rules lines, since target protocol is HTTP 2.0.
+  	vhostContent="$(echo "${vhostContent}" \
+    	| command sed -e 's|# For HTTP2 Only: ||g')"
+
+  else
+  	# Delete HTTP2 proxy rules lines, since target protocol is not HTTP 2.0.
+  	vhostContent="$(echo "${vhostContent}" \
+    	| command sed -e '/# For HTTP2 Only: /d')"
+  fi
+
+
+
   vhostContent="$(echo "${vhostContent}" \
     | command sed -e "s|%_SITE_HOSTNAME_%|${siteHostname}|g" \
                   -e "s|%_SERVER_ALIAS_%|${serverAlias}|g" \
                   -e "s|%_TARGET_VALUE_%|${targetValue}|g" \
+                  -e "s|%_HTTP2_TARGET_VALUE_%|${http2TargetValue}|g" \
                   -e "s|%_MULTI_VIEWS_%|${multiViews}|g" \
                   -e "s|%_ALLOW_OVERRIDE_%|${allowOverride}|g" \
                   -e "s|%_PROXY_SETTINGS_%|${proxySettings}|g" \
-                  -e "s|SSLProxyEngine.*|SSLProxyEngine ${sslProxyEngine}|" \
+                  -e "s|%_SSL_PROXY_ENGINE_%|${sslProxyEngine}|" \
+		          -e "s|%_FORWARDED_PROTOCOL_%|${protocol}|" \
                   -e "s|%_CERTBOT_PATH_%|${sslCertbotPath}/.well-known/acme-challenge/|g")"
 
   # Setup sed rules to enable ProxySet if needed.
@@ -1263,8 +1314,7 @@ ${VHOST_TEMPLATE[1]}"
       | command sed -e "s|*:80|${sslBindIp}:443|g" \
         -e "s|%_CERTIFICATE_FILE_%|${sslPublicKey}|g" \
         -e "s|%_CERTIFICATE_COMPLETE_FILE_%|${sslCompletePublicKey}|g" \
-        -e "s|%_KEY_FILE_%|${sslPrivateKey}|g" \
-        -e "s|X-Forwarded-Proto \"http|X-Forwarded-Proto \"${protocol}|")"
+        -e "s|%_KEY_FILE_%|${sslPrivateKey}|g")"
 
     if [ -n "${sslRootCa}" ]; then
     vhostContent="$(echo "${vhostContent}" \
@@ -1281,7 +1331,7 @@ ${VHOST_TEMPLATE[1]}"
 
   echo "${vhostContent}" > "/etc/apache2/sites-available/${vhostFile}"
 
-  command a2enmod "${apacheModules}" > /dev/null
+  command a2enmod "${apacheModules[@]}" > /dev/null
 
   command a2ensite "${vhostFile}"
 
