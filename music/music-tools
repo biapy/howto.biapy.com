@@ -5,10 +5,21 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.2.4"
+version="0.5.0"
 
 # History
 # -------
+#
+# 0.5.0
+#  - Add action to convert 6 channels FLAC to stereo.
+#
+# 0.4.0
+#  - Add action to rebuild MD5 in FLAC STREAMINFO.
+#
+# 0.3.0
+#  - Add wavpack support to split-cue.
+#  - Fix bug in split-cue output path naming process.
+#  - Add SACD support with split-iso option.
 #
 # 0.2.4
 #  - Fix split-cue music file detection.
@@ -74,7 +85,7 @@ Usage :
 
   ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
       [ --output-path='/path/to/output' ]
-      [ --split-cue ] [ --check ] [ --gain ]
+      [ --split-cue ] [ --split-iso ] [ --check ] [ --gain ]
       [ '/path/to/music-1' ] [ '/path/to/music-2' ] ...
 
   Available options are :
@@ -85,6 +96,12 @@ Usage :
         Afterwards, use MusicBrainz Picard to add missing metadatas.
         By default, files are created in a folder in the original cue file one.
         Use --output-path option to change output path.
+    * --split-iso                   : Find all iso (SACD) files in given path,
+        and split the associated music file to create a complete album for a
+        standard music library.
+    * --rebuild-flac                : Rebuild FLAC files with missing MD5 in
+        stream info.
+    * --6-to-2                      : Convert 6 channels FLAC to stereo.
     * --check                       : Check music files for errors.
     * --gain                        : Add album replay gain to files.
     * --quiet | -q                  : Disable almost all outputs.
@@ -337,7 +354,27 @@ export -f 'avprobe'
 
 
 
-# Convert an audio file from source library to target library.
+#
+# Multi platform avconv support.
+#
+function avconv() {
+  if type -f 'avconv' &>'/dev/null'; then
+    command avconv "${@}"
+    return ${?}
+  fi
+
+  if type -f 'ffmpeg' &>'/dev/null'; then
+    command ffmpeg "${@}"
+    return ${?}
+  fi
+
+  exit 1
+} # avconv()
+export -f 'avconv'
+
+
+
+# Split a cue file using shntool.
 #
 # @param integer $quiet 1 to disable output.
 # @param integer $verbose 1 to enable debug output.
@@ -353,7 +390,7 @@ function split_cue() {
   local processedPath="${3}"
   local outputPath="${4}"
 
-  musicExtensions=( 'flac' 'ape' 'alac' 'aiff' 'wav' )
+  musicExtensions=( 'flac' 'ape' 'alac' 'aiff' 'wav' 'wv' )
 
   find "${processedPath}" -type f -name '*.cue' -print0 | \
   while IFS='' read -r -d $'\0' cueFile; do
@@ -364,6 +401,8 @@ function split_cue() {
       echo "."
     fi
 
+    cueMusicBase="${cueFile%\.*}"
+
     # Try to fetch music file name from cue file contents.
     cueMusicFilename="$(grep 'FILE' "${cueFile}" \
         | sed -e 's|FILE "\(.*\)" [^ ]*|\1|')"
@@ -373,7 +412,6 @@ function split_cue() {
     musicFile="${cueMusicPath}/${cueMusicFilename}"
 
     if [[ ! -f "${musicFile}" ]]; then
-      cueMusicBase="${cueFile%\.*}"
 
       if [[ -f "${cueMusicBase}" ]]; then
         musicFile="${cueMusicBase}"
@@ -403,6 +441,68 @@ function split_cue() {
   done
 } # split_cue()
 
+
+
+# Split an iso file using sacd.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to cue files.
+# @param string $ouputPath path for splitted files output.
+#
+# @return Exit with error if conversion failed.
+function split_iso() {
+ [[ ${#} -ne 4 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+  local outputPath="${4}"
+
+  musicExtensions=( 'flac' 'ape' 'alac' 'aiff' 'wav' 'wv' )
+
+  find "${processedPath}" -type f -name '*.iso' -print0 | \
+  while IFS='' read -r -d $'\0' isoFile; do
+
+    if [[ "${quiet}" -eq 0 ]]; then
+      echo -n "Processing "
+      cecho 'cyan' -n "${isoFile}"
+      echo "."
+    fi
+
+    isoFileBase="${isoFile%\.*}"
+
+    musicOutputPath="${isoFile%\.*}"
+    if [[ -n "${outputPath}" ]]; then
+      musicOutputPath="${outputPath}/$(basename "${isoFileBase}")"
+    fi
+
+    if [[ -f "${isoFile}" ]]; then
+      mkdir -p "${musicOutputPath}"
+
+      sacd --infile "${isoFile}" \
+          --outdir "${musicOutputPath}" \
+          --rate 192000
+
+      # One sacd is done, convert created wav files to flac.
+      find "${musicOutputPath}" -type f -name '*.iso' -print0 | \
+      while IFS='' read -r -d $'\0' wavFile; do
+        if [[ "${quiet}" -eq 0 ]]; then
+          echo -n " - Encoding "
+          cecho 'cyan' -n "${wavFile}"
+          echo -n " to FLAC."
+        fi
+        if flac --silent --best "${wavFile}"; then
+          # Flac conversion done.
+          rm "${wavFile}"
+          cecho 'green' "Done."
+        else
+          cecho 'red' "Failed."
+        fi
+      done
+    fi
+  done
+} # split_iso()
 
 
 # Apply gain to music album.
@@ -444,7 +544,7 @@ function compute_replay_gain() {
 
           ((filesFound++))
 
-          [[ "${verbose}" -ne 0 ]] && cecho 'yellow' " - Audio file '${foundFile##*/}' (${foundFileMime})"
+          [[ "${verbose}" -ne 0 ]] && cecho 'yellow' " - Audio file '${foundFile##*/}' (${foundFileFormat})"
 
           case "${foundFileFormat}" in
             'FLAC' )
@@ -567,8 +667,6 @@ function compute_replay_gain() {
 
 
 
-
-
 # Check music files for errors.
 #
 # @param integer $quiet 1 to disable output.
@@ -654,7 +752,7 @@ function check_music_files() {
 
           if [[ "${quiet}" -ne 0 ]]; then
             cecho 'red' -n 'ERROR : '
-            echo "${foundFile}"
+            echo "${errorMessage}"
           else
             cecho 'red' ' Failed.'
           fi
@@ -678,6 +776,228 @@ function check_music_files() {
 
 } # check_music_files()
 
+
+
+# Rebuild flac files with missing MD5 in STREAMINFO.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to music albums.
+#
+# @return Exit with error if rebuilding failed.
+function rebuild_flac() {
+ [[ ${#} -ne 4 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+
+  local filesCount
+  local rebuildCount
+  local errorCount
+
+  local fileRebuilt
+
+  filesCount=0
+  rebuildCount=0
+  errorCount=0
+
+
+  while IFS='' read -r flacFile; do
+
+    if [[ -n "${flacFile}" ]]; then
+      flacFileFormat="$(mediainfo --Inform="Audio;%Format%" "${flacFile}" | tr '[:lower:]' '[:upper:]')"
+
+      # Test if file is audio.
+      if [[ -n "${flacFileFormat}" ]]; then
+        [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+
+        ((filesCount++))
+
+        if [[ "${verbose}" -ne 0 ]]; then
+          echo -n "Rebuilding "
+          cecho 'cyan' -n "${flacFile}"
+          echo -n ":"
+        fi
+
+        fileRebuilt=0
+
+        # Test flac file for error.
+        errorMessage="$(flac -s -t "${flacFile}" 2>&1)"
+
+        if [[ "${errorMessage}" == *"WARNING, cannot check MD5 signature since it was unset in the STREAMINFO" ]]; then
+          # FLAC file has no MD5. Checking by decoding.
+          errorMessage="$(avprobe -v quiet -show_error "${flacFile}" \
+                            | grep '^string=' | cut -c '8-')"
+
+          if [[ -z "${errorMessage}" ]]; then
+            # File OK. Rebuilding stream.
+            errorMessage="$(flac --silent --best "${flacFile}" --output-name="${flacFile}.rebuilt" 2>&1)";
+            if [[ "${errorMessage}" != *"ERROR"* && -e "${flacFile}.rebuilt" ]]; then
+              [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Rebuilt.'
+
+              ((rebuildCount++))
+              fileRebuilt=1
+
+              # Replace original flac by rebuilt one.
+              mv "${flacFile}" "${flacFile}.orig"
+              mv "${flacFile}.rebuilt" "${flacFile}"
+
+              errorMessage=''
+            fi
+          fi
+        fi
+
+        # If an error message appeared:
+        if [[ -n "${errorMessage}" ]]; then
+          # Error found, FLAC file invalid.
+          ((errorCount++))
+
+          if [[ "${quiet}" -eq 0 \
+              && "${verbose}" -eq 0 ]]; then
+            echo -n "Rebuilding "
+            cecho 'cyan' -n "${flacFile}"
+            echo -n ":"
+          fi
+
+          if [[ "${quiet}" -ne 0 ]]; then
+            cecho 'red' -n 'ERROR : '
+            echo "${errorMessage}"
+          else
+            cecho 'red' " Failed ${errorMessage}."
+          fi
+        else
+          if [[ "${fileRebuilt}" -ne 0 ]]; then
+            [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Rebuilt.'
+          else
+            [[ "${verbose}" -ne 0 ]] && cecho 'blue' ' Ignored.'
+          fi
+        fi
+      fi
+    fi
+  done <<< "$(find "${processedPath}" -type f -name '*.flac')"
+
+  if [[ "${quiet}" -eq 0 ]]; then
+    cecho 'cyan' -n "${filesCount} FLAC files processed."
+    cecho 'green' -n " ${rebuildCount} FLAC files rebuilt."
+    cecho 'red' " ${errorCount} errors found."
+  fi
+
+} # rebuild_flac()
+
+
+
+# Convert 6 channels flac to stereo.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to music albums.
+#
+# @return Exit with error if rebuilding failed.
+function to_stereo() {
+ [[ ${#} -ne 4 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+
+  local filesCount
+  local rebuildCount
+  local errorCount
+
+  local fileRebuilt
+
+  local logLevel
+
+  logLevel='quiet'
+
+  if [[ "${verbose}" -ne 0 ]]; then
+    logLevel='debug'
+  fi
+
+  filesCount=0
+  rebuildCount=0
+  errorCount=0
+
+
+  while IFS='' read -r flacFile; do
+
+    if [[ -n "${flacFile}" ]]; then
+      flacFileFormat="$(mediainfo --Inform="Audio;%Format%" "${flacFile}" | tr '[:lower:]' '[:upper:]')"
+
+      # Test if file is audio.
+      if [[ -n "${flacFileFormat}" ]]; then
+        [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+
+        ((filesCount++))
+
+        if [[ "${verbose}" -ne 0 ]]; then
+          echo -n "Converting to stereo "
+          cecho 'cyan' -n "${flacFile}"
+          echo -n ":"
+        fi
+
+        fileRebuilt=0
+
+        # Test flac file for error.
+        errorMessage=""
+
+        channels="$(metaflac --show-channels "${flacFile}")"
+
+        [[ "${verbose}" -ne 0 ]] && cecho 'green' -n " ${channels} found."
+
+        if [[ "${channels}" -gt 2 ]]; then
+          # File has more than to channels. Converting to stereo.
+          if errorMessage="$(avconv -loglevel "${logLevel}" -i "${flacFile}" -ac 2 "${flacFile}.rebuilt.flac" 2>&1)"; then
+            [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Converted.'
+
+            ((rebuildCount++))
+            fileRebuilt=1
+
+            # Replace original flac by rebuilt one.
+            mv "${flacFile}" "${flacFile}.orig"
+            mv "${flacFile}.rebuilt.flac" "${flacFile}"
+
+            errorMessage=''
+          fi
+        fi
+
+        # If an error message appeared:
+        if [[ -n "${errorMessage}" ]]; then
+          # Error found, FLAC file invalid.
+          ((errorCount++))
+
+          if [[ "${quiet}" -eq 0 \
+              && "${verbose}" -eq 0 ]]; then
+            echo -n "Converting to stereo "
+            cecho 'cyan' -n "${flacFile}"
+            echo -n ":"
+          fi
+
+          if [[ "${quiet}" -ne 0 ]]; then
+            cecho 'red' -n 'ERROR : '
+            echo "${errorMessage}"
+          else
+            cecho 'red' " Failed ${errorMessage}."
+          fi
+        else
+          if [[ "${fileRebuilt}" -ne 0 ]]; then
+            [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Rebuilt.'
+          else
+            [[ "${verbose}" -ne 0 ]] && cecho 'blue' ' Ignored.'
+          fi
+        fi
+      fi
+    fi
+  done <<< "$(find "${processedPath}" -type f -name '*.flac')"
+
+  if [[ "${quiet}" -eq 0 ]]; then
+    cecho 'cyan' -n "${filesCount} FLAC files processed."
+    cecho 'green' -n " ${rebuildCount} FLAC files rebuilt."
+    cecho 'red' " ${errorCount} errors found."
+  fi
+
+} # to_stereo()
 
 #######################################################################################
 #######################################################################################
@@ -826,8 +1146,10 @@ check_binary "avconv;ffmpeg" "libav-tools" > '/dev/null'
 check_binary "metaflac" "flac" > '/dev/null'
 check_binary "collectiongain" "python-rgain" > '/dev/null'
 check_binary "replaygain" "python-rgain" > '/dev/null'
-check_binary "aacgain" "aacgain (ppa:flexiondotorg/audio)" > '/dev/null'
 check_binary "mp3val" "mp3val" > '/dev/null'
+check_binary "wvunpack" "wavpack" > '/dev/null'
+check_binary "aacgain" "aacgain (ppa:flexiondotorg/audio)" > '/dev/null'
+check_binary "sacd" "sacd (ppa:robert-tari/main)" > '/dev/null'
 
 # For monkeys-audio package:
 # @see http://www.deb-multimedia.org/dists/stable/main/binary-amd64/package/monkeys-audio
@@ -846,7 +1168,7 @@ quiet=0
 verbose=0
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h output-path: out: o: split-cue check gain quiet q verbose v" "${@}"; do
+while getoptex "help h output-path: out: o: split-cue split-iso rebuild-flac 6-to-2 check gain quiet q verbose v" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -857,6 +1179,18 @@ while getoptex "help h output-path: out: o: split-cue check gain quiet q verbose
 
     'split-cue' )
       actions+=( 'split-cue' )
+      ;;
+
+    'split-iso' )
+      actions+=( 'split-iso' )
+      ;;
+
+    'rebuild-flac' )
+      actions+=( 'rebuild-flac' )
+      ;;
+
+    '6-to-2' )
+      actions+=( '6-to-2' )
       ;;
 
     'check' )
@@ -908,6 +1242,18 @@ for processedPath in "${inputPaths[@]}"; do
     case "${action}" in
       'split-cue' )
         split_cue "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
+        ;;
+
+      'split-iso' )
+        split_iso "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
+        ;;
+
+      'rebuild-flac' )
+        rebuild_flac "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
+        ;;
+
+      '6-to-2' )
+        to_stereo "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
         ;;
 
       'gain' )
