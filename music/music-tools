@@ -5,10 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.5.0"
+version="0.5.1"
 
 # History
 # -------
+#
+# 0.5.1
+#  - Look for mediainfo error messages in check action.
 #
 # 0.5.0
 #  - Add action to convert 6 channels FLAC to stereo.
@@ -698,69 +701,97 @@ function check_music_files() {
   # Find files in path
   while IFS='' read -r foundFile; do
     if [[ -n "${foundFile}" ]]; then
-      foundFileFormat="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" | tr '[:lower:]' '[:upper:]')"
+      # Check for IO Errors (represented by 'E: File read error')
+      errorMessage="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" 2>&1 1>'/dev/null')"
 
       # Test if file is audio.
-      if [[ -n "${foundFileFormat}" ]]; then
-        [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+      if [[ -z "${errorMessage}" ]]; then
+        foundFileFormat="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" 2>'/dev/null' | tr '[:lower:]' '[:upper:]')"
 
-        ((filesCount++))
+        if [[ -n "${foundFileFormat}" ]]; then
+          [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
 
-        if [[ "${verbose}" -ne 0 ]]; then
-          echo -n "Checking "
-          cecho 'cyan' -n "${foundFile}"
-          echo -n ":"
-        fi
+          ((filesCount++))
 
-        errorMessage=''
-        case "${foundFileFormat}" in
-          'FLAC' )
-            # Process FLAC files.
-            ((flacFiles++))
-            errorMessage="$(flac -s -t "${foundFile}" 2>&1)"
-            ;;
-          'MPEG AUDIO' )
-            # Process MP3 files.
-            ((mp3Files++))
-            errorMessage="$(mp3val -si "${foundFile}" \
-                            | grep '^ERROR:' | sed -e 's/^.*: //g')"
-            ;;
-          'MPEG-4' )
-            # Process M4A files.
-            ((m4aFiles++))
-            errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
-                            | grep '^string=' | cut -c '8-')"
-            ;;
-          * )
-            # Process other audio files.
-            ((audioFiles++))
-            errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
-                            | grep '^string=' | cut -c '8-')"
-        esac
-
-        if [[ -n "${errorMessage}" ]]; then
-          # Error found.
-
-          ((errorCount++))
-
-          if [[ "${quiet}" -eq 0 \
-              && "${verbose}" -eq 0 ]]; then
+          if [[ "${verbose}" -ne 0 ]]; then
             echo -n "Checking "
             cecho 'cyan' -n "${foundFile}"
             echo -n ":"
           fi
 
-          if [[ "${quiet}" -ne 0 ]]; then
-            cecho 'red' -n 'ERROR : '
-            echo "${errorMessage}"
-          else
-            cecho 'red' ' Failed.'
-          fi
+          errorMessage=''
+          case "${foundFileFormat}" in
+            'FLAC' )
+              # Process FLAC files.
+              ((flacFiles++))
+              errorMessage="$(flac -s -t "${foundFile}" 2>&1)"
+              ;;
+            'MPEG AUDIO' )
+              # Process MP3 files.
+              ((mp3Files++))
+              errorMessage="$(mp3val -si "${foundFile}" \
+                              | grep '^ERROR:' | sed -e 's/^.*: //g')"
+              ;;
+            'MPEG-4' )
+              # Process M4A files.
+              ((m4aFiles++))
+              errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
+                              | grep '^string=' | cut -c '8-')"
+              ;;
+            * )
+              # Process other audio files.
+              ((audioFiles++))
+              errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
+                              | grep '^string=' | cut -c '8-')"
+          esac
 
-          [[ "${verbose}" -ne 0 ]] && cecho 'yellow' "${errorMessage}"
-        else
-          [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Ok.'
+          if [[ -n "${errorMessage}" ]]; then
+            # Error found.
+
+            ((errorCount++))
+
+            if [[ "${quiet}" -eq 0 \
+                && "${verbose}" -eq 0 ]]; then
+              echo -n "Checking "
+              cecho 'cyan' -n "${foundFile}"
+              echo -n ":"
+            fi
+
+            if [[ "${quiet}" -ne 0 ]]; then
+              cecho 'red' -n 'ERROR : '
+              echo "${foundFile}"
+            else
+              cecho 'red' ' Failed.'
+            fi
+
+            [[ "${verbose}" -ne 0 ]] && cecho 'yellow' "${errorMessage}"
+          else
+            [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Ok.'
+          fi
         fi
+      else
+        # Error while using mediainfo.
+        # Generaly mean there is a IO error.
+        [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+        ((filesCount++))
+
+        # Error found.
+        ((errorCount++))
+
+        if [[ "${quiet}" -eq 0 ]]; then
+          echo -n "Checking "
+          cecho 'cyan' -n "${foundFile}"
+          echo -n ":"
+        fi
+
+        if [[ "${quiet}" -ne 0 ]]; then
+          cecho 'red' -n 'ERROR : '
+          echo "${foundFile}"
+        else
+          cecho 'red' ' Failed.'
+        fi
+
+        [[ "${verbose}" -ne 0 ]] && cecho 'yellow' "${errorMessage}"
       fi
     fi
   done <<< "$(find "${processedPath}" -type f)"
