@@ -5,10 +5,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.5.1"
+version="0.6.0"
 
 # History
 # -------
+#
+# 0.6.0
+#  - Add --to-flac action.
 #
 # 0.5.1
 #  - Look for mediainfo error messages in check action.
@@ -88,7 +91,8 @@ Usage :
 
   ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
       [ --output-path='/path/to/output' ]
-      [ --split-cue ] [ --split-iso ] [ --check ] [ --gain ]
+      [ --split-cue ] [ --split-iso ] [ --rebuild-flac ]
+      [ --6-to-2 ] [ --to-flac ] [ --check ] [ --gain ]
       [ '/path/to/music-1' ] [ '/path/to/music-2' ] ...
 
   Available options are :
@@ -105,6 +109,8 @@ Usage :
     * --rebuild-flac                : Rebuild FLAC files with missing MD5 in
         stream info.
     * --6-to-2                      : Convert 6 channels FLAC to stereo.
+    * --to-flac                     : Convert lossless formats (ALAC, WAV,
+        Monkeys Audio) to FLAC.
     * --check                       : Check music files for errors.
     * --gain                        : Add album replay gain to files.
     * --quiet | -q                  : Disable almost all outputs.
@@ -1030,6 +1036,189 @@ function to_stereo() {
 
 } # to_stereo()
 
+
+
+# Convert lossless audio files to flac.
+#
+# @param integer $quiet 1 to disable output.
+# @param integer $verbose 1 to enable debug output.
+# @param string $processedPath path to music albums.
+#
+# @return Exit with error if checking failed.
+function to_flac() {
+ [[ ${#} -ne 4 ]] && exit 1
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local processedPath="${3}"
+
+  local filesCount
+
+  local convertedCount
+
+  local flacFiles
+  local apeFiles
+  local alacFiles
+  local wavFiles
+
+  local audioFiles
+  local errorCount
+
+  local logLevel
+
+  # Avconv loglevel must be quiet. Alac reading with verbose eat stdinput file list.
+  logLevel='quiet'
+
+  if [[ "${verbose}" -ne 0 ]]; then
+    logLevel='debug'
+  fi
+
+  filesCount=0
+
+  convertedCount=0
+
+  flacFiles=0
+  apeFiles=0
+  alacFiles=0
+  wavFiles=0
+
+  audioFiles=0
+  errorCount=0
+
+  # Find files in path
+  while IFS='' read -r foundFile; do
+    if [[ -n "${foundFile}" ]]; then
+
+      # Check for IO Errors (represented by 'E: File read error')
+      errorMessage="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" 2>&1 1>'/dev/null')"
+
+      # Test if file is audio.
+      if [[ -z "${errorMessage}" ]]; then
+        foundFileFormat="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" 2>'/dev/null' | tr '[:lower:]' '[:upper:]')"
+
+        if [[ -n "${foundFileFormat}" ]]; then
+          [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+
+          ((filesCount++))
+
+          if [[ "${verbose}" -ne 0 ]]; then
+            echo -n "Processing "
+            cecho 'cyan' -n "${foundFile}"
+            echo -n ":"
+          fi
+
+          errorMessage=''
+          convertFile=0
+          case "${foundFileFormat}" in
+            'FLAC' )
+              # Ignore FLAC files.
+              ((flacFiles++))
+              convertFile=0
+              [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Ignored.'
+              ;;
+
+            'ALAC' )
+              # Process ALAC m4a files.
+              ((alacFiles++))
+              convertFile=1
+              ;;
+
+            "MONKEY'S AUDIO" )
+              # Process Monkey's Audio ape files.
+              ((apeFiles++))
+              convertFile=1
+              ;;
+
+            'PCM' )
+              ((wavFiles++))
+              convertFile=1
+              ;;
+
+            * )
+              # Ignore other audio files.
+              ((audioFiles++))
+              [[ "${verbose}" -ne 0 ]] && cecho 'yellow' ' Lossy.'
+          esac
+
+          if [[ "${convertFile}" -ne 0 ]]; then
+            # File has more than to channels. Converting to stereo.
+            flacFile="${foundFile%.*}.flac"
+            if [[ -e "${flacFile}" ]]; then
+              [[ "${verbose}" -ne 0 ]] && cecho 'yellow' ' Flac exists.'
+            else
+              # Using <<< "" to prevent the eating of stdin.
+              if errorMessage="$(avconv -loglevel "${logLevel}" -i "${foundFile}" -acodec 'flac' "${flacFile%.*}.flac" 2>&1 <<< "")"; then
+                [[ "${verbose}" -ne 0 ]] && cecho 'green' ' Converted.'
+
+                ((convertedCount++))
+
+                errorMessage=''
+              fi
+            fi
+          fi
+
+          if [[ -n "${errorMessage}" ]]; then
+            # Error found.
+
+            ((errorCount++))
+
+            if [[ "${quiet}" -eq 0 \
+                && "${verbose}" -eq 0 ]]; then
+              echo -n "Checking "
+              cecho 'cyan' -n "${foundFile}"
+              echo -n ":"
+            fi
+
+            if [[ "${quiet}" -ne 0 ]]; then
+              cecho 'red' -n 'ERROR : '
+              echo "${foundFile}"
+            else
+              cecho 'red' ' Failed.'
+            fi
+
+            [[ "${verbose}" -ne 0 ]] && cecho 'yellow' "${errorMessage}"
+          fi
+        fi
+      else
+        # Error while using mediainfo.
+        # Generaly mean there is a IO error.
+        [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
+        ((filesCount++))
+
+        # Error found.
+        ((errorCount++))
+
+        if [[ "${quiet}" -eq 0 ]]; then
+          echo -n "Processing "
+          cecho 'cyan' -n "${foundFile}"
+          echo -n ":"
+        fi
+
+        if [[ "${quiet}" -ne 0 ]]; then
+          cecho 'red' -n 'ERROR : '
+          echo "${foundFile}"
+        else
+          cecho 'red' ' Failed.'
+        fi
+
+        [[ "${verbose}" -ne 0 ]] && cecho 'yellow' "${errorMessage}"
+      fi
+    fi
+  done <<< "$(find "${processedPath}" -type f)"
+
+  if [[ "${quiet}" -eq 0 ]]; then
+    cecho 'green' -n "${filesCount} files processed."
+    cecho 'green' -n "${convertedCount} files converted: "
+    cecho 'blue' -n " ALAC: ${alacFiles}."
+    cecho 'blue' -n " Monkey's audio: ${apeFiles}."
+    cecho 'blue' -n " WAV: ${wavFiles}."
+    cecho 'yellow' -n " FLAC (ignored): ${flacFiles}."
+    cecho 'yellow' -n " Ignored lossy files: ${audioFiles}."
+    cecho 'red' " ${errorCount} errors found."
+  fi
+
+} # to_flac()
+
 #######################################################################################
 #######################################################################################
 #######################################################################################
@@ -1199,7 +1388,7 @@ quiet=0
 verbose=0
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h output-path: out: o: split-cue split-iso rebuild-flac 6-to-2 check gain quiet q verbose v" "${@}"; do
+while getoptex "help h output-path: out: o: split-cue split-iso rebuild-flac to-flac 6-to-2 check gain quiet q verbose v" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -1218,6 +1407,10 @@ while getoptex "help h output-path: out: o: split-cue split-iso rebuild-flac 6-t
 
     'rebuild-flac' )
       actions+=( 'rebuild-flac' )
+      ;;
+
+    'to-flac' )
+      actions+=( 'to-flac' )
       ;;
 
     '6-to-2' )
@@ -1281,6 +1474,10 @@ for processedPath in "${inputPaths[@]}"; do
 
       'rebuild-flac' )
         rebuild_flac "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
+        ;;
+
+      'to-flac' )
+        to_flac "${quiet}" "${verbose}" "${processedPath}" "${outputPath}"
         ;;
 
       '6-to-2' )
