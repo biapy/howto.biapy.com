@@ -5,29 +5,34 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.4.0"
+version="1.5.0"
 
 # History
 # -------
 #
+# 1.5.0:
+#  - Add feature to add auto-prepend-file contents.
+#  - Fix --add-mod usage info.
+#
 # 1.4.0:
 #  - Add compatibility for Ubuntu 17.10 Artful Aardvark PHP 7.1
+#
 # 1.3.1:
 #  - Fix null byte warning in basename.
 #
 # 1.3.0:
-#  - add feature to reload php configuration by restarting php-fpm or apache2.
+#  - Add feature to reload php configuration by restarting php-fpm or apache2.
 #
 # 1.2.0:
-#  - add feature to install custom php configurations (modules).
-#  - use shellcheck to sanitize code.
+#  - Add feature to install custom php configurations (modules).
+#  - Use shellcheck to sanitize code.
 #
 # 1.1.1:
-#  - fix bad var name in PHP 7.0 config path detection.
+#  - Fix bad var name in PHP 7.0 config path detection.
 #
 # 1.1.0:
-#  - add compatibility for Ubuntu 16.04 Xenial Xerus PHP 7.0.
-#  - add compatibility for Debian 8.0 Jessie php5enmod
+#  - Add compatibility for Ubuntu 16.04 Xenial Xerus PHP 7.0.
+#  - Add compatibility for Debian 8.0 Jessie php5enmod
 #
 
 # Get the basename of a path (multi-plateform version)
@@ -64,9 +69,9 @@ script_name="$(basename "${0}")"
 function usage {
 
   echo "PHP Tools v${version}
-This tool ease PHP5 ini configuration from line.
+This tool ease PHP ini configuration from line.
 All ini configurations changed by this tool are in
-/etc/php5/conf.d/zzz-php-tools.ini
+zzz-php-tools.ini
 
 Usage :
 
@@ -75,24 +80,33 @@ Usage :
       [ --fix 'init-config-rule' 'value' ]
       [ --get 'init-config-rule' ]
       [ --for='software name' ]
+      [ --add-mod --mod-name='custom-mod-name'
+        --mod-settings='extension=custom-mod.so'
+        [ --mod-priority=50 ] [ --force ] ]
+      [ --add-auto-prepend='function globalFunction() { /* Nothing */ };' ]
 
   Available options are :
     * --for | -f      : Set a comment telling which software the
                         value set is for.
 
   Available actions are :
-    * --help | -h     : Display this message.
-    * --analyse | -a  : List files where the config rule is set,
-                        and display its current value.
-    * --set | -s      : Set config rule value if current value is lower.
-    * --fix | -f      : Set config rule value wathever the current value is.
-    * --get | -g      : Get config rule value.
-    * --reload | -r   : Reload PHP config by restarting PHP-FPM or Apache 2.
-    * --add-mod       : Add a new PHP module and enable it. Useful for custom build modules.
-    * --mod-priority  : Set new module priority (default 50).
-    * --mod-name      : Set new module name (for creating the file).
-    * --mod-settings  : Set new module settings contents.
-    * --force         : Force module creation if file already exists.
+    * --help | -h         : Display this message.
+    * --analyse | -a      : List files where the config rule is set,
+                            and display its current value.
+    * --set | -s          : Set config rule value if current value is lower.
+    * --fix | -f          : Set config rule value wathever the current value
+                            is.
+    * --get | -g          : Get config rule value.
+    * --reload | -r       : Reload PHP config by restarting PHP-FPM or
+                            Apache 2.
+    * --add-auto-prepend  : Add a auto-prepend PHP code (allow to append
+                            multiple codes in one file).
+    * --add-mod           : Add a new PHP module and enable it. Useful for
+                            custom build modules.
+    * --mod-priority      : Set new module priority (default 50).
+    * --mod-name          : Set new module name (for creating the file).
+    * --mod-settings      : Set new module settings contents.
+    * --force             : Force module creation if file already exists.
 "
 
   [[ -n "${1}" ]] && exit "${1}"
@@ -478,6 +492,7 @@ check_binary "php" "php5-cli" > '/dev/null'
 
 
 # Application defaults
+php_tools="${0}"
 for_software="false"
 action="false"
 ini_rule="false"
@@ -487,6 +502,8 @@ force="false"
 module_priority="50"
 module_name=""
 module_settings=""
+# Add auto-prepend only options:
+auto_prepend=""
 
 php_base='/etc/php5'
 php_config_d="${php_base}/conf.d"
@@ -512,7 +529,7 @@ php_config_file_template="; Settings managed by php-tools command line utility.
 "
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: reload r add-mod mod-priority: mod-name: mod-settings: force" "${@}"; do
+while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: reload r add-mod mod-priority: mod-name: mod-settings: force add-auto-prepend:" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
@@ -563,6 +580,11 @@ while getoptex "help h for: f: analyze: a: set: s: fix: f: get: g: reload r add-
 
     'force' )
       force='true'
+      ;;
+
+    'add-auto-prepend' )
+      action='add-auto-prepend'
+      auto_prepend="${optarg}"
       ;;
 
     'help' | 'h' | * )
@@ -818,6 +840,39 @@ Please restart PHP (Apache 2 or PHP-FPM)." >&2
     ;;
 
 
+  #######################################################################################
+  # add-auto-prepend : Add a PHP code to auto_prepend_file (created if needed).
+  #######################################################################################
+  'add-auto-prepend' )
+
+    # Try to detect existing auto_prepend_file.
+    auto_prepend_file="$(grep -r -e '^auto_prepend_file' "${php_config_d}" \
+      | grep '=' | tail -n 1 | cut --delimiter='=' --fields=2 \
+      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+    if [[ -z "${auto_prepend_file}" || ! -f "${auto_prepend_file}" ]]; then
+        # Auto prepend file does not exist
+        # Creating a empty file and setting needed PHP configuration.
+
+      auto_prepend_file="${php_base}/auto-prepend.php"
+      echo '<?php
+// This file is prepended at each PHP script.' \
+        > "${auto_prepend_file}"
+
+      ${php_tools} --add-mod --mod-priority=50 --mod-name='auto-prepend' \
+    --mod-settings="; Load PHP code at startup.
+auto_prepend_file=${auto_prepend_file}"
+
+    fi
+
+    if [[ -e "${auto_prepend_file}" ]]; then
+      echo "
+${auto_prepend}" >> "${auto_prepend_file}"
+
+      cecho 'green' "PHP code added to auto prepend file '${auto_prepend_file}'.
+Please restart PHP (Apache 2 or PHP-FPM)." >&2
+    fi
+    ;;
 
   #######################################################################################
   # reload : Reload PHP config : restart php-fpm or Apache 2.
