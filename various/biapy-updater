@@ -7,10 +7,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.2.1"
+version="1.2.2"
 
 # History
 # -------
+#
+# 1.2.2
+#  - Add missing check on update target argument.
 #
 # 1.2.1
 #  - Fix missing $ in verbose information.
@@ -504,6 +507,12 @@ fi
 
 # Store the updated script path and get its basename.
 updatedScriptPath="${1}"
+
+if [[ -z "${updatedScriptPath}" ]]; then
+	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: no update target specified.'."
+	usage 1
+fi
+
 updatedScriptName="$(basename "${updatedScriptPath}")"
 
 # Use $defaultInstallPath as default updated script path, if needed.
