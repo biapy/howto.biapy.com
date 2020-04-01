@@ -7,10 +7,14 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.0.1"
+version="1.1.0"
 
 # History
 # -------
+#
+# 1.1.0
+#  - Fix self upgrade process to prevent crash.
+#  - Correct usage examples.
 #
 # 1.0.1
 #  - Fix version number detection by removing quotes from result.
@@ -98,9 +102,9 @@ Usage :
   Example, for this script:
     	${scriptName} '${scriptName}'
     or:
-  		${scriptName} --source='various/${scriptName}' '${scriptPath}'*
+  		${scriptName} --source='various/${scriptName}' '${scriptName}'
   	or:
-  		${scriptName} --source='various/${scriptName}' '${scriptPath}'*
+  		${scriptName} '${scriptPath}'
 
   Available options are :
     * --help | -h                   : Display this message.
@@ -534,11 +538,22 @@ if wget --output-document="${downloadTempPath}" --quiet "${updatedScriptUrl}"; t
 	if dpkg --compare-versions "${currentVersion}" 'lt' "${upstreamVersion}"; then
 		[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Update needed: {updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
 
-		if cp "${downloadTempPath}" "${updatedScriptPath}"; then
-			[[ "${quiet}" -eq 0 ]] && cecho 'green' "Update successfull: {updatedScriptName} ${currentVersion} updated to ${upstreamVersion}."
+		if [[ "${updatedScriptPath}" = "${scriptPath}" ]]; then
+			# Self-update: run the update in a separated process.
+			bash -c "
+				if cp '${downloadTempPath}' '${updatedScriptPath}'; then
+					[[ '${quiet}' -eq 0 ]] && echo 'Update successfull: {updatedScriptName} ${currentVersion} updated to ${upstreamVersion}.'
+				else
+					[[ '${quiet}' -eq 0 ]] && echo 'Error: unable to update \"${updatedScriptPath}\".'
+					exit 1
+				fi"
 		else
-			[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to update '${updatedScriptPath}'."
-			exit 1
+			if cp "${downloadTempPath}" "${updatedScriptPath}"; then
+				[[ "${quiet}" -eq 0 ]] && cecho 'green' "Update successfull: {updatedScriptName} ${currentVersion} updated to ${upstreamVersion}."
+			else
+				[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to update '${updatedScriptPath}'."
+				exit 1
+			fi
 		fi
 
 		# Removing temporary file.
