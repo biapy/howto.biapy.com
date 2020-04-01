@@ -7,10 +7,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.1.0"
+version="1.2.0"
 
 # History
 # -------
+#
+# 1.2.0
+#  - Add octal mode preservation for updated script.
 #
 # 1.1.0
 #  - Fix self upgrade process to prevent crash.
@@ -536,28 +539,51 @@ if wget --output-document="${downloadTempPath}" --quiet "${updatedScriptUrl}"; t
 	currentVersion="$(grep '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
 
 	if dpkg --compare-versions "${currentVersion}" 'lt' "${upstreamVersion}"; then
-		[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Update needed: {updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
+		[[ "${verbose}" -ne 0 ]] && cecho 'yellow' "Update needed: {updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
+
+  		# Copy over owner and group from old version
+  		currentOwner=$(stat -c '%U:%G' "${updatedScriptPath}")
+  		if ! chown "${currentOwner}" "${downloadTempPath}" ; then
+    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set owner and group to '${currentOwner}' on '${downloadTempPath}'."
+    		exit 1
+    	else
+			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: owner and group set to '${currentOwner}' on '${downloadTempPath}'."
+  		fi
+
+  		# Copy over modes from old version
+  		currentPermissions=$(stat -c '%a' "${updatedScriptPath}")
+  		if ! chmod "${currentPermissions}" "${downloadTempPath}" ; then
+    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set mode to '${currentPermissions}' on '${downloadTempPath}'."
+    		exit 1
+    	else
+			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: permissions set to '${currentPermissions}' on '${downloadTempPath}'."
+  		fi
 
 		if [[ "${updatedScriptPath}" = "${scriptPath}" ]]; then
 			# Self-update: run the update in a separated process.
-			bash -c "
-				if cp '${downloadTempPath}' '${updatedScriptPath}'; then
-					[[ '${quiet}' -eq 0 ]] && echo 'Update successfull: {updatedScriptName} ${currentVersion} updated to ${upstreamVersion}.'
+			exec /bin/bash -c "
+				if mv '${downloadTempPath}' '${updatedScriptPath}'; then
+					[[ '${quiet}' -eq 0 ]] && echo 'Update successfull: ${updatedScriptName} ${currentVersion} updated to ${upstreamVersion}.'
 				else
 					[[ '${quiet}' -eq 0 ]] && echo 'Error: unable to update \"${updatedScriptPath}\".'
+
+					# Removing temporary file.
+					[[ -e '${downloadTempPath}' ]] && rm '${downloadTempPath}'
+
 					exit 1
 				fi"
 		else
-			if cp "${downloadTempPath}" "${updatedScriptPath}"; then
-				[[ "${quiet}" -eq 0 ]] && cecho 'green' "Update successfull: {updatedScriptName} ${currentVersion} updated to ${upstreamVersion}."
+			if mv "${downloadTempPath}" "${updatedScriptPath}"; then
+				[[ "${quiet}" -eq 0 ]] && cecho 'green' "Update successfull: ${updatedScriptName} ${currentVersion} updated to ${upstreamVersion}."
 			else
 				[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to update '${updatedScriptPath}'."
+
+				# Removing temporary file.
+				[[ -e "${downloadTempPath}" ]] && rm "${downloadTempPath}"
+
 				exit 1
 			fi
 		fi
-
-		# Removing temporary file.
-		[[ -e "${downloadTempPath}" ]] && rm "${downloadTempPath}"
 	else
 		[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: ${updatedScriptName} ${currentVersion} is up-to-date. No updated needed (upstream version: ${upstreamVersion})."
 	fi
