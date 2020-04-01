@@ -7,11 +7,14 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.0.1"
+version="1.0.0"
 
 # History
 # -------
 #
+#
+# 1.0.0
+#  - No change but the version number to prevent a warning with dpkg --compare-versions
 #
 # 0.0.1
 #  - Initial release, first proof of concept.
