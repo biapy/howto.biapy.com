@@ -7,10 +7,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.2.2"
+version="1.2.3"
 
 # History
 # -------
+#
+# 1.2.3
+#  - Fix typo.
 #
 # 1.2.2
 #  - Add missing check on update target argument.
@@ -509,7 +512,7 @@ fi
 updatedScriptPath="${1}"
 
 if [[ -z "${updatedScriptPath}" ]]; then
-	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: no update target specified.'."
+	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: no update target specified."
 	usage 1
 fi
 
