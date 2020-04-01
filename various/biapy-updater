@@ -7,10 +7,17 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.2.3"
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/various/biapy-updater"
+
+version="1.3.0"
 
 # History
 # -------
+#
+# 1.3.0
+#  - Add a configurable cron task feature.
+#  - Add option to find upstream version URL in check script (on first line
+#    with (# )upstreamUrl=)
 #
 # 1.2.3
 #  - Fix typo.
@@ -103,27 +110,42 @@ scriptName="$(basename "${0}")"
 # Print this script help.
 function usage {
   echo "Biapy Updater v${version}
-This script automate keeping up-to-date scripts created for https://howto.biapy.com/.
+This script automate keeping up-to-date scripts created for
+https://howto.biapy.com/.
 
 Usage :
 
   ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
-     [ --source='/path/on/biapy/github/updated-script' ]
-     'updated-script'
-
-  Example, for this script:
-    	${scriptName} '${scriptName}'
-    or:
-  		${scriptName} --source='various/${scriptName}' '${scriptName}'
-  	or:
-  		${scriptName} '${scriptPath}'
+     { --cron | -c }
+     { [ --source='/path/on/biapy/github/updated-script' ] 'updated-script' }
 
   Available options are :
-    * --help | -h                   : Display this message.
-    * --quiet | -q                  : Disable almost all outputs.
-    * --verbose | -v                : Enable debug outputs.
-    * --source | -s                 : Set the source path.
-                                      Detected from updated script basename by default.
+    * --help | -h     : Display this message.
+    * --quiet | -q    : Disable almost all outputs.
+    * --verbose | -v  : Enable debug outputs.
+    * --cron | -c     : Run a cron task upgrading all scripts listed
+                        in '/etc/biapy-updater.conf' (on script by line)
+    * --source | -s   : Set the upstream script git path. Detected from updated
+                        script basename by default.
+                        Upstream URL can also be fetch from the script source
+                        (by searching for \"# upstreamUrl=\")
+
+  Example, for this script:
+      ${scriptName} '${scriptName}'
+    or:
+      ${scriptName} --source='various/${scriptName}' '${scriptName}'
+    or:
+      ${scriptName} '${scriptPath}'
+
+  Cron task setup:
+    1.  Create a /etc/biapy-updater.conf file which contain scripts names to be
+        checked daily for upgrades.
+
+    2.  Create a /etc/cron.d/biapy-updater file with this content:
+
+        # Every night at 6 o'clock.
+        0 6 * * *   root    test -x ${scriptPath} && ${scriptPath} --cron
+
 "
 
   [[ -n "${1}" ]] && exit "${1}"
@@ -216,6 +238,8 @@ function cecho() {
     return 0
   fi
 
+  local key
+
   # Bash 4 version with associative array.
   ## Color and weight definitions.
   #declare -A font
@@ -297,11 +321,26 @@ export -f 'cecho'
 
 # Echo script source for given script name.
 #
-# @param string $updatedScript A Biapy script basename.
-function script_source() {
-  [[ ${#} -ne 1 ]] && exit 1
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $updatedScriptPath The script to be updated path.
+# @param string $updatedScriptSource The script source in upstream git (optional).
+function upstream_url() {
+  [[ ${#} -lt 3 && ${#} -gt 4 ]] && exit 1
 
-  local updatedScript="${1}"
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local updatedScriptPath="${3}"
+  local updatedScriptSource="${4}"
+
+  local updatedScriptName=''
+  updatedScriptName="$(basename "${updatedScriptPath}")"
+
+  local baseUpstreamUrl='https://raw.githubusercontent.com/biapy/howto.biapy.com/master/'
+  local upstreamUrl=''
+
+  local key
 
   declare -a sourceIndex
   declare -a sourceValue
@@ -319,17 +358,47 @@ function script_source() {
   sourceIndex+=( 'mysql-defragger' );   sourceValue+=( 'mysql/mysql-defragger' )
   sourceIndex+=( 'mysql-tools' );       sourceValue+=( 'mysql/mysql-tools' )
 
-  for key in "${!sourceIndex[@]}"; do
-    if [[ "${updatedScript}" = *"${sourceIndex[${key}]}"* ]]; then
-    	echo -n "${sourceValue[${key}]}"
-    	return 0
-    fi
-  done
+  # Remove trailing slashes from URL:
+  baseUpstreamUrl="${baseUpstreamUrl%"${baseUpstreamUrl##*[!/]}"}"
 
-  cecho 'red' "Error: script ${updatedScript} is not supported by biapy-updater."
-  return 1
+  # Remove leading slashes from updated script source:
+  updatedScriptSource="${updatedScriptSource#"${updatedScriptSource%%[!/]*}"}"
+
+  if [[ -z "${updatedScriptSource}" \
+        || "${updatedScriptSource}" == "auto" ]]; then
+    # Source unspecified. Trying to detect it from script name.
+    updatedScriptSource=''
+
+    # Try to detect upstream URL from script basename.
+    for key in "${!sourceIndex[@]}"; do
+      if [[ "${updatedScriptName}" == "${sourceIndex[${key}]}" ]]; then
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Upstream URL for '${updatedScriptName}' automatically detected." >&2
+
+    	  echo -n "${baseUpstreamUrl}/${sourceValue[${key}]}"
+    	  return 0
+      fi
+    done
+
+    upstreamUrl="$(grep --max-count=1 '^[# ]*upstreamUrl=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2- | tr --delete "'\"")"
+
+    if [[ -n "${upstreamUrl}" ]]; then
+      [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Upsteam URL for '${updatedScriptName}' extracted from script code." >&2
+
+      echo -n "${upstreamUrl}"
+      return 0
+    fi
+
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: script ${updatedScriptName} is not supported by biapy-updater." >&2
+    return 1
+  fi
+
+  # Compute source script URL from source option.
+  [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Upstream URL for '${updatedScriptName}' computed from --source value." >&2
+
+  echo -n "${baseUpstreamUrl}/${updatedScriptSource}"
+  return 0
 } # cecho()
-export -f 'script_source'
+export -f 'upstream_url'
 
 
 
@@ -470,21 +539,28 @@ check_binary "wget" "wget" > '/dev/null'
 check_binary "dpkg" "dpkg" > '/dev/null'
 
 
-biapyGithubUrl='https://raw.githubusercontent.com/biapy/howto.biapy.com/master/'
 defaultInstallPath='/usr/local/bin'
 updatedScriptSource='auto'
+
+cronTaskConfigPath='/etc/biapy-updater.conf'
+
+action='upgrade'
 
 quiet=0
 verbose=0
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help h quiet q verbose v source: s:" "${@}"; do
+while getoptex "help h quiet q verbose v cron c source: s:" "${@}"; do
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
   case "${optionName}" in
     'source' )
       updatedScriptSource="${optionArgument}"
+      ;;
+
+    'cron' | 'c' )
+      action='crontask'
       ;;
 
     'quiet' | 'q' )
@@ -508,12 +584,49 @@ if [[ "${verbose}" -ne 0 ]]; then
   quiet=0
 fi
 
+# ==============================================================================
+# Run as cron task.
+if [[ "${action}" == 'crontask' ]]; then
+  # Check for configuration file existance.
+  cronTaskConfigPath="$(realpath_check "${cronTaskConfigPath}")" || exit 1
+
+  declare -a commandOptions
+  commandOptions=()
+
+  [[ "${quiet}" -ne 0 ]] && commandOptions+=( "--quiet" )
+  [[ "${verbose}" -ne 0 ]] && commandOptions+=( "--verbose" )
+
+  # For each line of the configuration file, run biapy-updater.
+  while read -r updatedScript; do
+    # Skip empty lines.
+    if [[ -n "${updatedScript}" ]]; then
+      # Run biapy-updater for each line of the configuration file if it does not
+      # start with a '#', and if the updated script is not this tool.
+      [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Found '${updatedScript}' in '${cronTaskConfigPath}'."
+      if [[ "${updatedScript}" != '#'* \
+            && "${updatedScript}" != "${scriptName}" \
+            && "${updatedScript}" != "${scriptPath}" ]]; then
+        # Run biapy-updater with configuration file line as parameter.
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: running ${scriptName} ${commandOptions[*]} '${updatedScript}'."
+        ${scriptName} "${commandOptions[@]}" "${updatedScript}"
+      else
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: ignoring comment line (or ${scriptName} line)."
+      fi
+    fi
+  done < "${cronTaskConfigPath}"
+
+  # Run the update for this script.
+  exec /bin/bash -c "${scriptPath} ${commandOptions[*]} '${scriptName}'"
+  exit 0
+fi
+# ==============================================================================
+
 # Store the updated script path and get its basename.
 updatedScriptPath="${1}"
 
 if [[ -z "${updatedScriptPath}" ]]; then
 	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: no update target specified."
-	usage 1
+	exit 1
 fi
 
 updatedScriptName="$(basename "${updatedScriptPath}")"
@@ -521,90 +634,78 @@ updatedScriptName="$(basename "${updatedScriptPath}")"
 # Use $defaultInstallPath as default updated script path, if needed.
 if [[ "${updatedScriptPath}" = "${updatedScriptName}" ]]; then
 	updatedScriptPath="${defaultInstallPath}/${updatedScriptName}"
-	[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: '${updatedScriptName}' path is set to be '${updatedScriptPath}'."
+	[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: '${updatedScriptName}' path is set to be '${updatedScriptPath}'." >&2
 fi
 
 # Check that the updated script exits and get its real path.
-updatedScriptPath="$(realpath_check "${updatedScriptPath}")"
+updatedScriptPath="$(realpath_check "${updatedScriptPath}")" || exit 1
 
-# Detect the script source automatically.if needed.
-if [[ "${updatedScriptSource}" = 'auto' ]]; then
-	updatedScriptSource="$(script_source "${updatedScriptName}")"
-	[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Source for '${updatedScriptName}' automatically detected: '${updatedScriptSource}'."
-fi
-
-# Remove trailing slashes from URL:
-biapyGithubUrl="${biapyGithubUrl%"${biapyGithubUrl##*[!/]}"}"
-
-# Remove leading slashes from updated script source:
-updatedScriptSource="${updatedScriptSource#"${updatedScriptSource%%[!/]*}"}"
-
-# Compute source script URL.
-updatedScriptUrl="${biapyGithubUrl}/${updatedScriptSource}"
+# Get the script upstream URL.
+upstreamUrl="$(upstream_url "${quiet}" "${verbose}" "${updatedScriptPath}" "${updatedScriptSource}")" || exit 1
 
 # Create a temporary file to download the upstream version of the updated script.
-downloadTempPath="$(mktemp)"
+upstreamScriptTempPath="$(mktemp)"
 
-# Fetch the newest script version:
-[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Downloading upstream version for '${updatedScriptName}' from '${updatedScriptUrl}'."
-if wget --output-document="${downloadTempPath}" --quiet "${updatedScriptUrl}"; then
-	[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: Download successfull."
+# Fetch the newest (upstream) script version:
+[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Downloading upstream version for '${updatedScriptName}' from '${upstreamUrl}'." >&2
+if wget --output-document="${upstreamScriptTempPath}" --quiet "${upstreamUrl}"; then
+	[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: Download successfull." >&2
 
-	upstreamVersion="$(grep '^version=' "${downloadTempPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
-	currentVersion="$(grep '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
+	upstreamVersion="$(grep --max-count=1 '^version=' "${upstreamScriptTempPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
+	currentVersion="$(grep --max-count=1 '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
 
+  # Compare current version number with upstream version number.
 	if dpkg --compare-versions "${currentVersion}" 'lt' "${upstreamVersion}"; then
-		[[ "${verbose}" -ne 0 ]] && cecho 'yellow' "Update needed: ${updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
+		[[ "${verbose}" -ne 0 ]] && cecho 'yellow' "Update needed: ${updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}." >&2
 
   		# Copy over owner and group from old version
   		currentOwner=$(stat -c '%U:%G' "${updatedScriptPath}")
-  		if ! chown "${currentOwner}" "${downloadTempPath}" ; then
-    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set owner and group to '${currentOwner}' on '${downloadTempPath}'."
+  		if ! chown "${currentOwner}" "${upstreamScriptTempPath}" ; then
+    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set owner and group to '${currentOwner}' on '${upstreamScriptTempPath}'." >&2
     		exit 1
     	else
-			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: owner and group set to '${currentOwner}' on '${downloadTempPath}'."
+			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: owner and group set to '${currentOwner}' on '${upstreamScriptTempPath}'." >&2
   		fi
 
   		# Copy over modes from old version
   		currentPermissions=$(stat -c '%a' "${updatedScriptPath}")
-  		if ! chmod "${currentPermissions}" "${downloadTempPath}" ; then
-    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set mode to '${currentPermissions}' on '${downloadTempPath}'."
+  		if ! chmod "${currentPermissions}" "${upstreamScriptTempPath}" ; then
+    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set mode to '${currentPermissions}' on '${upstreamScriptTempPath}'." >&2
     		exit 1
     	else
-			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: permissions set to '${currentPermissions}' on '${downloadTempPath}'."
+			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: permissions set to '${currentPermissions}' on '${upstreamScriptTempPath}'." >&2
   		fi
 
 		if [[ "${updatedScriptPath}" = "${scriptPath}" ]]; then
 			# Self-update: run the update in a separated process.
 			exec /bin/bash -c "
-				if mv '${downloadTempPath}' '${updatedScriptPath}'; then
+				if mv '${upstreamScriptTempPath}' '${updatedScriptPath}'; then
 					[[ '${quiet}' -eq 0 ]] && echo 'Update successfull: ${updatedScriptName} ${currentVersion} updated to ${upstreamVersion}.'
 				else
-					[[ '${quiet}' -eq 0 ]] && echo 'Error: unable to update \"${updatedScriptPath}\".'
+					[[ '${quiet}' -eq 0 ]] && echo 'Error: unable to update \"${updatedScriptPath}\".' >&2
 
 					# Removing temporary file.
-					[[ -e '${downloadTempPath}' ]] && rm '${downloadTempPath}'
+					[[ -e '${upstreamScriptTempPath}' ]] && rm '${upstreamScriptTempPath}'
 
 					exit 1
 				fi"
 		else
-			if mv "${downloadTempPath}" "${updatedScriptPath}"; then
+      # Update of another script.
+			if mv "${upstreamScriptTempPath}" "${updatedScriptPath}"; then
 				[[ "${quiet}" -eq 0 ]] && cecho 'green' "Update successfull: ${updatedScriptName} ${currentVersion} updated to ${upstreamVersion}."
 			else
-				[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to update '${updatedScriptPath}'."
+				[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to update '${updatedScriptPath}'." >&2
 
 				# Removing temporary file.
-				[[ -e "${downloadTempPath}" ]] && rm "${downloadTempPath}"
+				[[ -e "${upstreamScriptTempPath}" ]] && rm "${upstreamScriptTempPath}"
 
 				exit 1
 			fi
 		fi
 	else
-		[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: ${updatedScriptName} ${currentVersion} is up-to-date. No updated needed (upstream version: ${upstreamVersion})."
+		[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: ${updatedScriptName} ${currentVersion} is up-to-date. No updated needed (upstream version: ${upstreamVersion})." >&2
 	fi
 else
-	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to download '${updatedScriptName}' from '${updatedScriptUrl}'."
+	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to download '${updatedScriptName}' from '${upstreamUrl}'." >&2
 	exit 1
 fi
-
-
