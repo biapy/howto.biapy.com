@@ -7,10 +7,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.2.0"
+version="1.2.1"
 
 # History
 # -------
+#
+# 1.2.1
+#  - Fix missing $ in verbose information.
 #
 # 1.2.0
 #  - Add octal mode preservation for updated script.
@@ -539,7 +542,7 @@ if wget --output-document="${downloadTempPath}" --quiet "${updatedScriptUrl}"; t
 	currentVersion="$(grep '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
 
 	if dpkg --compare-versions "${currentVersion}" 'lt' "${upstreamVersion}"; then
-		[[ "${verbose}" -ne 0 ]] && cecho 'yellow' "Update needed: {updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
+		[[ "${verbose}" -ne 0 ]] && cecho 'yellow' "Update needed: ${updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
 
   		# Copy over owner and group from old version
   		currentOwner=$(stat -c '%U:%G' "${updatedScriptPath}")
