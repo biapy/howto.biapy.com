@@ -7,11 +7,13 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="1.0.0"
+version="1.0.1"
 
 # History
 # -------
 #
+# 1.0.1
+#  - Fix version number detection by removing quotes from result.
 #
 # 1.0.0
 #  - No change but the version number to prevent a warning with dpkg --compare-versions
@@ -526,8 +528,8 @@ downloadTempPath="$(mktemp)"
 if wget --output-document="${downloadTempPath}" --quiet "${updatedScriptUrl}"; then
 	[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: Download successfull."
 
-	upstreamVersion="$(grep '^version=' "${downloadTempPath}" | cut --delimiter='=' --fields=2)"
-	currentVersion="$(grep '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2)"
+	upstreamVersion="$(grep '^version=' "${downloadTempPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
+	currentVersion="$(grep '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
 
 	if dpkg --compare-versions "${currentVersion}" 'lt' "${upstreamVersion}"; then
 		[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Update needed: {updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}."
