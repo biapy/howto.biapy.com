@@ -9,10 +9,14 @@
 #
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/various/biapy-updater"
 
-version="1.3.0"
+version="1.3.1"
 
 # History
 # -------
+#
+# 1.3.1
+#  - Replace call using ${scriptName} by ${scriptPath} for environment where
+#    /usr/local/bin is not in path.
 #
 # 1.3.0
 #  - Add a configurable cron task feature.
@@ -608,7 +612,7 @@ if [[ "${action}" == 'crontask' ]]; then
             && "${updatedScript}" != "${scriptPath}" ]]; then
         # Run biapy-updater with configuration file line as parameter.
         [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: running ${scriptName} ${commandOptions[*]} '${updatedScript}'."
-        ${scriptName} "${commandOptions[@]}" "${updatedScript}"
+        ${scriptPath} "${commandOptions[@]}" "${updatedScript}"
       else
         [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: ignoring comment line (or ${scriptName} line)."
       fi
