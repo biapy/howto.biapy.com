@@ -1,0 +1,1352 @@
+#!/bin/bash
+#
+# NGINX Tools.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/nginx/nginx-tools"
+version=0.2.0
+
+# History
+# -------
+#
+# 0.2.0:
+#  - Fix redirect URL creation.
+#  - Block Update header for reverse proxy, to fix curl error when using HTTP2.
+#  - Remove all references to useless options.
+#  - Rewrite of cecho for better code quality.
+#  - Add PHP FPM support.
+#  - Add upstreamUrl for use with biapy-updater.
+#  - Support only systemctl (no use of service or /etc/init.d)
+#
+# 0.1.0:
+#  - Initial version, rewriting of a2tools 3.5.1.
+#
+
+
+# Get the basename of a path (multi-platform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+scriptName="$(basename "${0}")"
+
+# Print this script help.
+function usage {
+  command echo "NGINX Tools v${version}
+This tool ease NGINX HTTP server administration from command line.
+
+Usage :
+
+  ${scriptName} --template={ vhost | virtual-host } [ options ]
+                  domain.name /path/to/www
+        Setup a named virtualhost using domain.name as ServerName
+        and /path/to/www as DocumentRoot.
+  ${scriptName} --template={ rproxy | reverse-proxy } [ options ]
+                  domain.name http://server.local/
+        Setup a reverse proxy using domain.name as ServerName
+        and http://server.local/ proxied server.
+  ${scriptName} --template=redirect [ options ]
+                  domain.name http://domain.com/
+        Setup a permanent redirection from http://domain.name/
+        to http://domain.com/ as target url.
+  ${scriptName} --template=custom [ options ]
+                 domain.name '# Custom Apache 2 configuration chunck.'
+        Setup a customized virtual host using domain.name as ServerName.
+  ${scriptName} --remove domain.name
+        Remove all virtualhosts for the given domain.
+
+Available options are:
+  * --help | -h
+        Display this message.
+  * --template= | -t { virtual-host | reverse-proxy | redirect | custom }
+        Set the template to use to create the Apache 2 configuration.
+        Available templates are:
+          * vhost | virtual-host : A standard VirtualHost with a DocumentRoot.
+          * rproxy | reverse-proxy : A reverse proxy VirtualHost.
+          * redirect : A VirtualHost that performs a permanent redirection.
+          * custom : A customized VirtualHost for specific configurations.
+        If template option is not used, the 'virtual-host' template is
+        used by default.
+  * --remove | -d
+        Remove all virtualhosts for the given domain.
+  * --alias= | -a other-domain.name
+        Set ServerAlias directive. You can provide a list of domain names
+        separated by spaces. This option can be used more than once.
+  * --ssl= | -s { key_name | auto }
+        Create a HTTP virtual host with mod_ssl.
+        Require a key name or --private-key and --public-key
+        If 'auto' is used instead of a key name, a Let's Encrypt certificate
+        is created (require acme.sh installed for root user,
+        see https://github.com/Neilpang/acme.sh ).
+        Using the key_name option set the following defaults:
+         - private-key : /etc/ssl/private/key_name.key
+         - public-key  : /etc/ssl/certificates/key_name.crt+chain+root
+  * --private-key= | --key= | -k /etc/ssl/private/domain.com.key
+        Set the SSL private key (mandatory with --ssl).
+  * --public-key= | --cert= | -p /etc/ssl/certificates/domain.com.crt+chain+root
+        Set the SSL public key (mandatory with --ssl).
+  * --proxy-settings= | --ps= 'connectiontimeout=600 timeout=4000 Keepalive=On'
+        Replace default reverse proxy settings.
+  * --custom-options= | --co= '# A additional Apache configuration snippet'
+        Add custom Apache configuration snippets at the end of generated file.
+        This option can be used multiple times.
+"
+
+  [[ -n "${1}" ]] && exit "${1}"
+} # usage
+
+
+
+# Common NGINX Vhost template
+VHOST_TEMPLATE[0]="server {
+  listen %_LISTEN_PORT_% %_HTTP2_%;
+  listen [::]:%_LISTEN_PORT_% %_HTTP2_%;
+
+  # Your actual domain name, on witch this virtual host is available.
+  server_name %_SITE_HOSTNAME_% %_SERVER_ALIAS_%;
+
+  # Add index.php to the list if you are using PHP
+  index index.php index.html index.htm index.nginx-debian.html;
+
+  # deny access to .htaccess, .git and .svn files
+  location ~ \"/\\.(ht|git|svn)\" {
+    deny all;
+  }
+
+  # Allow big PUT for cloud app like Seafile.
+  # Prevent error \"client intended to send too large body\"
+  # client_max_body_size 20M;
+
+"
+
+VHOST_TEMPLATE[1]="
+}"
+
+
+
+LOGS_TEMPLATE="
+  # The error log and access log. This can be used by awstats
+  # Note : since we keed theses logs in /var/log/nginx, they are
+  # automaticaly rotated by logrotate :D.
+  error_log /var/log/nginx/%_SITE_HOSTNAME_%-error.log;
+  access_log /var/log/nginx/%_SITE_HOSTNAME_%-access.log;
+"
+
+
+
+SSL_TEMPLATE="
+  #
+  # SSL magic
+  #
+  ssl     on;
+
+  # We allow TLSv1.2 only. All other implementations are insecure.
+  # TLSv1 is needed to support SNI (Server Name Indication).
+  # SNI allow to have multiple SSL certificates on one IP address.
+  ssl_protocols TLSv1.2;
+
+  # Server public and private certificate files:
+  ssl_certificate \"%_CERTIFICATE_COMPLETE_FILE_%\";
+  ssl_certificate_key \"%_KEY_FILE_%\";
+
+  # Diffie-Hellman (DH) key.
+  # generated with \"openssl dhparam -out '/etc/nginx/dh.pem' 4096\"
+  ssl_dhparam \"/etc/nginx/dh.pem\";
+
+  # Elliptic curve Diffie–Hellman (ECDH)
+  ssl_ecdh_curve secp384r1;
+
+  # NGINX > 1.11 only:
+  # ssl_ecdh_curve sect571r1:secp521r1:brainpoolP512r1:secp384r1;
+
+"
+
+
+
+CERTBOT_TEMPLATE="
+  # Certbot acme challenge.
+  location ^~ \"/.well-known/acme-challenge/\" {
+      default_type \"text/plain\";
+
+      alias \"%_CERTBOT_PATH_%\";
+      allow all;
+  }
+
+  # Hide /acme-challenge subdirectory and return 404 on all requests.
+  # It is somewhat more secure than letting Nginx return 403.
+  # Ending slash is important!
+  location = \"/.well-known/acme-challenge/\" {
+    return 404;
+  }
+"
+
+
+
+# Apache 2 standard Virtual Host template.
+PATH_TEMPLATE="
+
+  # The root folder of this virtual host.
+  root \"%_TARGET_VALUE_%\";
+
+  # Some options for the root folder.
+  # Read NGINX documentation to know exactly what is done.
+  location \"/\" {
+    # First attempt to serve request as file, then
+    # as directory, then try for index files,
+    # then fall back to displaying a 404.
+
+    try_files \$uri \$uri/ /index.php /index.html  =404;
+
+    # Disable directory listing output (for better security).
+    autoindex off;
+
+    allow all;
+  }
+
+"
+
+
+
+PHP_FPM_DEBIAN_TEMPLATE="
+  # pass PHP scripts to FastCGI server
+  #
+  location ~ \.php$ {
+    include \"snippets/fastcgi-php.conf\";
+
+    # With php-fpm (or other unix sockets):
+    fastcgi_pass \"%_FASTCGI_PASS_%\";
+  }
+"
+
+
+
+PHP_FPM_TEMPLATE="
+  # pass PHP scripts to FastCGI server
+  #
+  location ~ \.php$ {
+    # regex to split \$uri to \$fastcgi_script_name and \$fastcgi_path
+    fastcgi_split_path_info ^(.+\.php)(/.+)$;
+
+    # Check that the PHP script exists before passing it
+    try_files \$fastcgi_script_name =404;
+
+    # Bypass the fact that try_files resets \$fastcgi_path_info
+    # see: http://trac.nginx.org/nginx/ticket/321
+    set \$path_info \$fastcgi_path_info;
+    fastcgi_param PATH_INFO \$path_info;
+
+    fastcgi_index index.php;
+
+    fastcgi_param  SCRIPT_FILENAME    \$document_root\$fastcgi_script_name;
+    fastcgi_param  QUERY_STRING       \$query_string;
+    fastcgi_param  REQUEST_METHOD     \$request_method;
+    fastcgi_param  CONTENT_TYPE       \$content_type;
+    fastcgi_param  CONTENT_LENGTH     \$content_length;
+
+    fastcgi_param  SCRIPT_NAME        \$fastcgi_script_name;
+    fastcgi_param  REQUEST_URI        \$request_uri;
+    fastcgi_param  DOCUMENT_URI       \$document_uri;
+    fastcgi_param  DOCUMENT_ROOT      \$document_root;
+    fastcgi_param  SERVER_PROTOCOL    \$server_protocol;
+    fastcgi_param  REQUEST_SCHEME     \$scheme;
+    fastcgi_param  HTTPS              \$https if_not_empty;
+
+    fastcgi_param  GATEWAY_INTERFACE  CGI/1.1;
+    fastcgi_param  SERVER_SOFTWARE    nginx/\$nginx_version;
+
+    fastcgi_param  REMOTE_ADDR        \$remote_addr;
+    fastcgi_param  REMOTE_PORT        \$remote_port;
+    fastcgi_param  SERVER_ADDR        \$server_addr;
+    fastcgi_param  SERVER_PORT        \$server_port;
+    fastcgi_param  SERVER_NAME        \$server_name;
+
+    # PHP only, required if PHP was built with --enable-force-cgi-redirect
+    fastcgi_param  REDIRECT_STATUS    200;
+
+
+    # With php-fpm (or other unix sockets):
+    fastcgi_pass \"%_FASTCGI_PASS_%\";
+  }
+"
+
+
+
+REVERSE_PROXY_TEMPLATE="
+  # Do not ever never comment this line !
+  # This line prevent your web server to be used
+  # as a proxy server by lurkers and other lamers.
+  proxy_redirect          off;
+
+  # This little option pass the hostname to the proxyfied server.
+  # This allow you to setup virtual hosts on the proxyfied server.
+  # Yay ! This can be a life saver, so trust me, you want this option On.
+  proxy_set_header Host \$host;
+
+  # Provide the visitor IP to proxied server.
+  proxy_set_header X-Real-IP \$remote_addr;
+
+  # Declare the current request protocol.
+  proxy_set_header        X-Forwarded-Proto \$scheme;
+  add_header              Front-End-Https   %_FRONTEND_SSL_ONOFF_%;
+
+  # Hide Upgrade header for proxy, to prevent this curl error:
+  # curl: (92) HTTP/2 stream 0 was not closed cleanly: PROTOCOL_ERROR (err 1)
+  proxy_hide_header      Upgrade;
+
+  location  \"/\" {
+    proxy_pass \"%_TARGET_VALUE_%\";
+  }
+
+"
+
+
+
+REDIRECT_TEMPLATE="
+  # Redirect every body to the given site (for example HTTPS version).
+  # This can make sure that all users use secure version of the site.
+  # Note the \"301\" : It is good for search engine optimization :D.
+  location  \"/\" {
+    return 301 \"%_TARGET_VALUE_%\$request_uri\";
+  }
+"
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  local key
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  fontIndex=()
+  fontValue=()
+
+  fontIndex+=( 'black' );     fontValue+=( "$(tput 'setaf' 0)" )
+  fontIndex+=( 'red' );       fontValue+=( "$(tput 'setaf' 1)" )
+  fontIndex+=( 'green' );     fontValue+=( "$(tput 'setaf' 2)" )
+  fontIndex+=( 'yellow' );    fontValue+=( "$(tput 'setaf' 3)" )
+  fontIndex+=( 'blue' );      fontValue+=( "$(tput 'setaf' 4)" )
+  fontIndex+=( 'magenta' );   fontValue+=( "$(tput 'setaf' 5)" )
+  fontIndex+=( 'cyan' );      fontValue+=( "$(tput 'setaf' 6)" )
+  fontIndex+=( 'white' );     fontValue+=( "$(tput 'setaf' 7)" )
+
+  fontIndex+=( 'bgBlack' );   fontValue+=( "$(tput 'setab' 0)" )
+  fontIndex+=( 'bgRed' );     fontValue+=( "$(tput 'setab' 1)" )
+  fontIndex+=( 'bgGreen' );   fontValue+=( "$(tput 'setab' 2)" )
+  fontIndex+=( 'bgYellow' );  fontValue+=( "$(tput 'setab' 3)" )
+  fontIndex+=( 'bgBlue' );    fontValue+=( "$(tput 'setab' 4)" )
+  fontIndex+=( 'bgMagenta' ); fontValue+=( "$(tput 'setab' 5)" )
+  fontIndex+=( 'bgCyan' );    fontValue+=( "$(tput 'setab' 6)" )
+  fontIndex+=( 'bgWhite' );   fontValue+=( "$(tput 'setab' 7)" )
+
+  fontIndex+=( 'bold' );      fontValue+=( "$(tput 'bold')" )
+  fontIndex+=( 'stout' );     fontValue+=( "$(tput 'smso')" ) # Standout.
+  fontIndex+=( 'under' );     fontValue+=( "$(tput 'smul')" ) # Underline.
+  fontIndex+=( 'blink' );     fontValue+=( "$(tput 'blink')" ) # Blinking.
+  fontIndex+=( 'italic' );    fontValue+=( "$(tput 'sitm')" )
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
+
+
+# Get the absolute path for a file or directory.
+# Does not resolve symbolic links.
+# Print the result on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return A code.
+function absolutepath() {
+    if [ -d "${1}" ]; then
+        # Path point to a directory.
+        echo "$(cd "${1}" 2>'/dev/null' || exit 1; pwd)"
+    elif [ -f "${1}" ]; then
+        # Path point to a file.
+        if [[ "${1}" = '/'* ]]; then
+            echo "${1}"
+        elif [[ "${1}" == *'/'* ]]; then
+            echo "$(cd "${1%/*}" 2>'/dev/null' || exit 1; pwd)/${1##*/}"
+        else
+            echo "$(pwd)/${1}"
+        fi
+    fi
+} # absolutepath
+
+
+
+# Get the absolute real path for a file or directory.
+# Resolve symbolic links.
+# Print the result on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return A code.
+function realpath {
+  command test ${#} -ne 1 && exit 1
+
+  command readlink -f "${1}"
+
+  return ${?}
+} # realpath
+
+
+
+# Get the absolute real path for a file or directory and check the file existance.
+# Resolve symbolic links.
+# Print the result on &1 if found.
+# If the file does not exists, display an error message and exit the script.
+#
+# @param string $path A relative path.
+#
+# @return A code.
+function realpath_check {
+  command test ${#} -ne 1 && exit 1
+
+  local realpath
+
+  realpath="$(realpath "${1}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=""
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    cecho "red" "Error : File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo "${realpath}"
+
+  return 0
+} # realpath_check
+
+
+
+# Check if a binary is present. Print its path on &1 if found.
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
+
+
+
+# Print the value of the local PHP-FPM listen port or socket.
+#
+# @return 1 if php-fpm is missing.
+function php_fpm_listen {
+  # Test if php cli is present.
+  [[ -e '/usr/bin/php' ]] || return 1
+
+  local phpVersion
+  local phpFpmPool
+  local phpFpmListen
+
+  phpVersion="$(realpath '/usr/bin/php' | cut -c 13-)"
+
+  phpFpmPool="/etc/php/${phpVersion}/fpm/pool.d/"
+
+  phpFpmListen="$(grep -r '[\t ]*listen[\t ]*=' "${phpFpmPool}"*'.conf' \
+      | tail -n 1 \
+      | cut --delimiter='=' --fields=2- \
+      | sed -e 's/^[\t ]*//' -e 's/[\t ]$//')"
+
+  [[ -z "${phpFpmListen}" ]] && return 1
+
+  # listen value can have theses formats:
+  # 'ip.add.re.ss:port'    - to listen on a TCP socket to a specific IPv4 address on
+  #                          a specific port;
+  # '[ip:6:addr:ess]:port' - to listen on a TCP socket to a specific IPv6 address on
+  #                          a specific port;
+  # 'port'                 - to listen on a TCP socket to all addresses
+  #                          (IPv6 and IPv4-mapped) on a specific port;
+  # '/path/to/unix/socket' - to listen on a unix socket.
+
+  # if PHP FPM listen is a socket.
+  if [[ "${phpFpmListen}" == '/'* ]]; then
+    phpFpmListen="unix:${phpFpmListen}"
+  fi
+
+  # if PHP FPM listen is a port.
+  if [[ "${phpFpmListen}" =~ ^-?[0-9]+$ ]]; then
+    phpFpmListen="127.0.0.1:${phpFpmListen}"
+  fi
+
+  echo -n "${phpFpmListen}"
+  return 0
+} # php_fpm_listen
+
+
+
+# Reload NGINX configuration only if valid.
+#
+# @return void
+function nginx_reload {
+  if nginx -t > /dev/null 2>&1; then
+    if [ -n "$(command -v 'systemctl')" ]; then
+      systemctl 'reload' 'nginx'
+    fi
+  else
+    cecho "red" "Error in NGINX configuration : reload cancelled." >&2
+    exit 1
+  fi
+} # nginx_reload
+
+
+
+# Force NGINX configuration reload only if valid.
+#
+# @return void
+function nginx_force_reload {
+  if command nginx -t > '/dev/null' 2>&1; then
+    if [ -n "$(command -v 'systemctl')" ]; then
+      systemctl 'force-reload' 'nginx'
+    fi
+  else
+    cecho "red" "Error in NGINX configuration : forced reload cancelled."
+    exit 1
+  fi
+} # nginx_force_reload
+
+
+
+# Compare two version numbers.
+# @see https://stackoverflow.com/questions/4023830/how-to-compare-two-strings-in-dot-separated-version-format-in-bash
+#
+# @param string versionNumber1 a version number (x.x.x)
+# @param string versionNumber2 a version number (x.x.x.x)
+#
+# @return 0 if versions are equal, 1 if versionNumber1 > versionNumber2, 2 if versionNumber1 < versionNumber2.
+compareVersions () {
+    [[ ${#} -ne 2 ]] && exit 1
+
+    local i
+    local versionNumber1
+    local versionNumber2
+
+    # Test for pure equality.
+    if [[ "${1}" == "${2}" ]]; then
+        return 0
+    fi
+
+    # Store version numbers as list splitted on dot '.'.
+    IFS='.' read -r -a versionNumber1 <<< "${1}"
+    IFS='.' read -r -a versionNumber2 <<< "${2}"
+
+    # fill empty fields in versionNumber1 with zeros
+    for ((i=${#versionNumber1[@]}; i<${#versionNumber2[@]}; i++)); do
+        versionNumber1[i]=0
+    done
+
+    # Loop on versionNumber1 elements while there is equality between versionNumber1 and versionNumber2.
+    for ((i=0; i<${#versionNumber1[@]}; i++)); do
+        if [[ -z ${versionNumber2[i]} ]]; then
+            # fill empty fields in versionNumber2 with zeros
+            versionNumber2[i]=0
+        fi
+
+        # End function with 1 if versionNumber1 > versionNumber2.
+        if ((10#${versionNumber1[i]} > 10#${versionNumber2[i]})); then
+          return 1
+        fi
+
+        # End function with 2 if versionNumber1 < versionNumber2.
+        if ((10#${versionNumber1[i]} < 10#${versionNumber2[i]})); then
+            return 2
+        fi
+    done
+
+    return 0
+} # compareVersions()
+
+
+# Test compareVersions function results.
+# @see https://stackoverflow.com/questions/4023830/how-to-compare-two-strings-in-dot-separated-version-format-in-bash
+TestCompareVersions () {
+    compareVersions "${1}" "${2}"
+    case ${?} in
+        0) op='=';;
+        1) op='>';;
+        2) op='<';;
+    esac
+    if [[ "${op}" != "${3}" ]]; then
+        echo "FAIL: Expected '${3}', Actual '${op}', Arg1 '${1}', Arg2 '${2}'"
+    else
+        echo "Pass: '${1} $op ${2}'"
+    fi
+} #TestCompareVersions()
+
+
+
+# Remove configuration files for given hostname.
+#
+# @param string siteHostname a hostname to remove.
+#
+# @return 1 if error.
+function remove_site_hostname() {
+  [[ ${#} -ne 1 ]] && return 1
+
+  local configPaths
+  local configPath
+  local configFiles
+  local configFiles
+  local siteHostname
+
+  siteHostname="${1}"
+
+  declare -a configPaths
+  configPaths+=( "/etc/nginx/sites-enabled" )
+  configPaths+=( "/etc/nginx/sites-available" )
+  configPaths+=( "/etc/nginx/conf.d" )
+
+  declare -a configFiles
+  configFiles+=( "http-${siteHostname}.conf" )
+  configFiles+=( "https-${siteHostname}.conf" )
+  configFiles+=( "redirect-http-${siteHostname}.conf" )
+  configFiles+=( "redirect-https-${siteHostname}.conf" )
+  configFiles+=( "http-${siteHostname}" )
+  configFiles+=( "https-${siteHostname}" )
+  configFiles+=( "redirect-http-${siteHostname}" )
+  configFiles+=( "redirect-https-${siteHostname}" )
+
+  for configFile in "${configFiles[@]}"; do
+    for configPath in "${configPaths[@]}"; do
+      [[ -e "${configPath}/${configFile}" ]] \
+        && rm "${configPath}/${configFile}"
+    done
+  done
+
+  # Reload nginx configuration.
+  nginx_reload
+  return ${?}
+} #remove_site_hostname()
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  (( $# )) || return 1
+  local optionList
+  optionList="${1#;}"
+  (( optionIndex )) || optionIndex=1
+  [[ ${optionIndex} -lt $# ]] || return 1
+  shift ${optionIndex}
+  if [[ "${1}" != "-" && "${1}" != "${1#-}" ]]; then
+    optionIndex=$((optionIndex + 1)); if [[ "${1}" != "--" ]]; then
+    local o
+    o="-${1#-${optionOfs}}"
+    for opt in ${optionList#;}
+    do
+      optionName="${opt%[;.:]}"
+      unset optionArgument
+      local optionType="${opt##*[^;:.]}"
+      [[ -z "${optionType}" ]] && optionType=";"
+      if [[ ${#optionName} -gt 1 ]]; then
+        # long-named option
+        case "$o" in
+          "--${optionName}")
+            if [[ "${optionType}" != ":" ]]; then
+              return 0
+            fi
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              # error: must have an agrument
+              echo "$0: error: ${optionName} must have an argument" >&2
+              optionArgument="${optionName}";
+              optionName="?"
+              return 1;
+            fi
+            optionIndex=$((optionIndex + 1)) # skip option's argument
+            return 0
+          ;;
+          "--${optionName}="*)
+            if [[ "${optionType}" = ";" ]];
+            then  # error: must not have arguments
+              (( OPTERR )) && echo "$0: error: ${optionName} must not have arguments" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionArgument=${o#--${optionName}=}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-${optionName}")
+            unset optionOfs
+            [[ "${optionType}" != ":" ]] && return 0
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              echo "$0: error: -${optionName} must have an argument" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionIndex=$(( optionIndex + 1 )) # skip option's argument
+            return 0
+          ;;
+          "-${optionName}"*)
+            if [ ${optionType} = ";" ]
+            then # an option with no argument is in a chain of options
+              optionOfs="${optionOfs}?" # move to the next option in the chain
+              optionIndex=$(( optionIndex - 1 )) # the chain still has other options
+              return 0
+            else
+              unset optionOfs
+              optionArgument="${o#-${optionName}}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage 1
+  fi; fi
+  optionName="?"
+  unset optionArgument
+  return 1
+}
+function optionListex
+{
+  local l="${1}"
+  local m # mask
+  local r # to store result
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [[ -n "${l%%[^:.;]*}" ]]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo "${r}"
+}
+function getopt()
+{
+  local optionList
+
+  optionList="$(optionListex "${1}")"
+  shift
+  getoptex "${optionList}" "${@}"
+  return ${?}
+}
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Check for binaries presence
+check_binary 'basename' 'coreutils' > '/dev/null'
+check_binary 'dirname' 'coreutils' > '/dev/null'
+check_binary 'tar' 'tar' > '/dev/null'
+check_binary 'mktemp' 'mktemp' > '/dev/null'
+check_binary 'sed' 'sed' > '/dev/null'
+check_binary 'nginx' 'nginx' > '/dev/null'
+
+
+#
+#=== SSL templates are conditionnal on NGINX version. ==========================
+#
+
+# Detect installed NGINX version.
+nginxVersion="$(nginx -v 2>&1 | cut --delimiter='/' --fields=2)"
+http2='http2'
+
+# NGINX < 1.11 (Debian 9.0 Stretch standard)
+compareVersions "${nginxVersion}" '1.11'
+if [[ ${?} -eq 2 ]]; then
+  # NGINX version < 1.11 (default on Debian 9.0 Stretch: v1.10.3)
+
+  # Disable HTTP2 support if installed NGINX < 1.11
+  http2=''
+
+  # Intermediate security SSL_TEMPLATE for NGINX
+  # @see https://ssl-config.mozilla.org/#server=nginx&version=1.10.3&config=intermediate&openssl=1.1.0&guideline=5.4
+  SSL_TEMPLATE="
+    #
+    # SSL magic
+    #
+    ssl     on;
+
+    # We allow TLSv1.2 only. All other implementations are insecure.
+    # TLSv1 is needed to support SNI (Server Name Indication).
+    # SNI allow to have multiple SSL certificates on one IP address.
+    ssl_protocols TLSv1.2;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # Server public and private certificate files:
+    ssl_certificate \"%_CERTIFICATE_COMPLETE_FILE_%\";
+    ssl_certificate_key \"%_KEY_FILE_%\";
+
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:MozSSL:10m;  # about 40000 sessions
+    ssl_session_tickets off;
+
+    # Diffie-Hellman (DH) key.
+    # generated with \"openssl dhparam -out '/etc/nginx/dh.pem' 4096\"
+    ssl_dhparam \"/etc/nginx/dh.pem\";
+
+    # Elliptic curve Diffie–Hellman (ECDH)
+    ssl_ecdh_curve secp384r1;
+
+    # HSTS (ngx_http_headers_module is required) (63072000 seconds)
+    add_header Strict-Transport-Security \"max-age=63072000\" always;
+
+    # OCSP stapling
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # verify chain of trust of OCSP response using Root CA and Intermediate certs
+    ssl_trusted_certificate /path/to/root_CA_cert_plus_intermediates;
+
+    # replace with the IP address of your resolver (DNS server)
+    # resolver 127.0.0.1;
+
+  "
+
+fi # end of NGINX < 1.11 (Debian 9.0 Stretch standard)
+
+# NGINX < 1.14.3 / 1.17 (Debian 10.0 Buster standard)
+compareVersions "${nginxVersion}" '1.17'
+if [[ ${?} -eq 2 ]]; then
+  # NGINX version < 1.14.3 (default on Debian 10.0 Stretch: v1.14.2)
+
+  # Intermediate security SSL_TEMPLATE for NGINX
+  # @see https://ssl-config.mozilla.org/#server=nginx&version=1.14.2&config=intermediate&openssl=1.1.1d&guideline=5.4
+  SSL_TEMPLATE="
+    #
+    # SSL magic
+    #
+
+    # We allow TLSv1.2 and 1.3 only. All other implementations are insecure.
+    # TLSv1 is needed to support SNI (Server Name Indication).
+    # SNI allow to have multiple SSL certificates on one IP address.
+    # intermediate configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # Server public and private certificate files:
+    ssl_certificate \"%_CERTIFICATE_COMPLETE_FILE_%\";
+    ssl_certificate_key \"%_KEY_FILE_%\";
+
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:MozSSL:10m;  # about 40000 sessions
+    ssl_session_tickets off;
+
+    # Diffie-Hellman (DH) key.
+    # generated with \"openssl dhparam -out '/etc/nginx/dh.pem' 4096\"
+    ssl_dhparam \"/etc/nginx/dh.pem\";
+
+    # Elliptic curve Diffie–Hellman (ECDH)
+    ssl_ecdh_curve secp384r1;
+
+    # HSTS (ngx_http_headers_module is required) (63072000 seconds)
+    add_header Strict-Transport-Security \"max-age=63072000\" always;
+
+    # OCSP stapling
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # verify chain of trust of OCSP response using Root CA and Intermediate certs
+    # ssl_trusted_certificate /path/to/root_CA_cert_plus_intermediates;
+
+    # replace with the IP address of your resolver (DNS server)
+    # resolver 127.0.0.1;
+
+  "
+
+fi # End of NGINX < 1.14.3 (Debian 10.0 Buster standard)
+
+# NGINX >1.17 (Newest NGINX release: v1.17.9)
+compareVersions "${nginxVersion}" '1.17'
+if [[ ${?} -eq 1 ]]; then
+  # NGINX version > 1.17 (default on Debian 10.0 Stretch: v1.14.2)
+
+  # Intermediate security SSL_TEMPLATE for NGINX
+  # @see https://ssl-config.mozilla.org/#server=nginx&version=1.17.1&config=intermediate&openssl=1.1.1d&guideline=5.4
+  SSL_TEMPLATE="
+    #
+    # SSL magic
+    #
+
+    # We allow TLSv1.2 and 1.3 only. All other implementations are insecure.
+    # TLSv1 is needed to support SNI (Server Name Indication).
+    # SNI allow to have multiple SSL certificates on one IP address.
+    # intermediate configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # Server public and private certificate files:
+    ssl_certificate \"%_CERTIFICATE_COMPLETE_FILE_%\";
+    ssl_certificate_key \"%_KEY_FILE_%\";
+
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:MozSSL:10m;  # about 40000 sessions
+    ssl_session_tickets off;
+
+    # Diffie-Hellman (DH) key.
+    # generated with \"openssl dhparam -out '/etc/nginx/dh.pem' 4096\"
+    ssl_dhparam \"/etc/nginx/dh.pem\";
+
+    # Elliptic curve Diffie–Hellman (ECDH)
+    ssl_ecdh_curve secp384r1;
+
+    # HSTS (ngx_http_headers_module is required) (63072000 seconds)
+    add_header Strict-Transport-Security \"max-age=63072000\" always;
+
+    # OCSP stapling
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # verify chain of trust of OCSP response using Root CA and Intermediate certs
+    # ssl_trusted_certificate /path/to/root_CA_cert_plus_intermediates;
+
+    # replace with the IP address of your resolver (DNS server)
+    # resolver 127.0.0.1;
+
+  "
+
+fi # End of NGINX >1.17 (Newest NGINX release: v1.17.9)
+
+#
+#=== End of SSL templates are conditionnal on NGINX version. ===================
+#
+
+
+# Setup defaults
+action='virtual-host'
+mainTemplate="${PATH_TEMPLATE}"
+customOptions=''
+listenPort='80'
+sslEnabled='0'
+frontendSslOnOff='off'
+sslCertbot='0'
+sslCertbotBasePath='/var/lib/a2tools'
+
+typePrefix=""
+protocol="http"
+
+declare -a serverAliases
+serverAliases=()
+
+
+# Look for acme.sh Let's Encrypt certbot.
+sslAcmeSh="${HOME}/.acme.sh/acme.sh"
+if [[ ! -e "${sslAcmeSh}" ]]; then
+  # Assume acme.sh is in root HOME.
+  sslAcmeSh="$(getent 'passwd' 'root' | cut -d':' -f6)/.acme.sh/acme.sh"
+fi
+
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h template: t: ssl. s. alias: a: private-key: key: k: public-key: crt: p: remove d custom-options: co:" "${@}"; do
+  # Options debuging.
+  # echo "Option <${optionName}> ${optionArgument:+has an arg <${optionArgument}>}"
+
+  case "${optionName}" in
+    'template' | 't' )
+      case "${optionArgument}" in
+        'vhost' | 'virtual-host' )
+          action='virtual-host'
+          mainTemplate="${PATH_TEMPLATE}"
+          ;;
+        'rproxy' | 'reverse-proxy' )
+          action='reverse-proxy'
+          mainTemplate="${REVERSE_PROXY_TEMPLATE}"
+
+          # Disable HTTP2 for reverse proxy settings.
+          # http2=''
+          ;;
+        'redirect' )
+          action='redirect'
+          mainTemplate="${REDIRECT_TEMPLATE}"
+          typePrefix="redirect-"
+
+          # Disable HTTP2 for redirect settings.
+          #http2=''
+          ;;
+        'custom' )
+          action='custom'
+          mainTemplate="CUSTOM"
+          ;;
+      esac
+      ;;
+
+    'ssl' | 's' )
+      sslEnabled='1'
+      frontendSslOnOff='on'
+      protocol='https'
+      listenPort='443 ssl'
+
+      if [[ -n "${optionArgument}" ]]; then
+
+        # Enable Let's Encrypt certificate generation if acme.sh is representation
+        # and --ssl=auto is used.
+        if [[ "${optionArgument}" = 'auto' && -e "${sslAcmeSh}" ]]; then
+          sslCertbot="1"
+        fi
+
+        # Set private key path if missing (--private-key not used).
+        if [[ -z "${sslPrivateKey}" \
+            && -e "/etc/ssl/private/${optionArgument}.key" ]]; then
+          sslPrivateKey="/etc/ssl/private/${optionArgument}.key"
+        fi
+
+        # Set complete public key path if missing (--public-key not used).
+        if [[ -z "${sslCompletePublicKey}" \
+            && -e "/etc/ssl/certificates/${optionArgument}.crt+chain+root" ]]; then
+          sslCompletePublicKey="/etc/ssl/certificates/${optionArgument}.crt+chain+root"
+        fi
+
+        # Set public key path if missing (--public-key not used).
+        if [[ -z "${sslPublicKey}" \
+            && -e "/etc/ssl/certificates/${optionArgument}.crt" ]]; then
+          sslPublicKey="/etc/ssl/certificates/${optionArgument}.crt"
+
+          if [[ -z "${sslCompletePublicKey}" ]]; then
+            sslCompletePublicKey="${sslPublicKey}"
+          fi
+        fi
+      fi
+      ;;
+
+    'alias' | 'a' )
+      if [ -n "${optionArgument}" ]; then
+        serverAliases+=( "${optionArgument}" )
+      fi
+      ;;
+
+    'private-key' | 'key' | 'k' )
+      sslPrivateKey="$(realpath_check "${optionArgument}")"
+      ;;
+
+    'public-key' | 'crt' | 'p' )
+      sslPublicKey="$(realpath_check "${optionArgument}")"
+      sslCompletePublicKey="${sslPublicKey}"
+      ;;
+
+    'remove' | 'd' )
+      action='removal'
+      ;;
+
+    'custom-options' | 'co' )
+      customOptions="${customOptions}
+
+${optionArgument}"
+      ;;
+
+    'help' | 'h' | '*' )
+      usage 0
+      ;;
+  esac
+done
+
+# Discard processed options.
+shift $((optionIndex - 1))
+
+siteHostname="${1}"
+targetValue="${2}"
+
+if [ -z "${siteHostname}" ]; then
+  cecho "red" "Error : no domain name has been provided." >&2
+  usage 1
+fi
+
+# Compute the VirtualHost filename.
+vhostFile="${typePrefix}${protocol}-${siteHostname}.conf"
+
+# Create acme.sh certbot path for given hostname.
+# Used even if --ssl option is not given.
+# A configuration serving this path is added to every site created for the
+# domain. This path contain files used by certbot to check if the domain
+# for which the certificate is created point to this host.
+sslCertbotPath="${sslCertbotBasePath}/${siteHostname}"
+command mkdir -p "${sslCertbotPath}"
+
+# Process targetValue according to choosen action.
+case "${action}" in
+  'virtual-host' )
+    # Target value is a path. Check if it exists.
+    targetValue="$(realpath_check "${targetValue}")"
+
+    # Detect PHP FPM listen address/socket:
+    phpFpmListen="$(php_fpm_listen)"
+
+    # If PHP FPM is found, add the needed configuration to the template.
+    if [[ -n "${phpFpmListen}" ]]; then
+      # Test if Debian specific configuration files are available.
+      if [[ -e '/etc/nginx/snippets/fastcgi-php.conf' ]]; then
+        mainTemplate="${mainTemplate}
+${PHP_FPM_DEBIAN_TEMPLATE}"
+      else
+        mainTemplate="${mainTemplate}
+${PHP_FPM_TEMPLATE}"
+      fi
+
+      # Apply settings to vhostContent
+      mainTemplate="$(sed -e "s|%_FASTCGI_PASS_%|${phpFpmListen}|g" \
+                        <<< "${mainTemplate}")"
+    fi
+    ;;
+
+  'reverse-proxy' )
+    # In reverse proxy situation, make sure to add '/' at the end of the
+    # target value URL.
+    targetValue="$(sed -e 's|//$|/|g' <<< "${targetValue}/")"
+    ;;
+
+  'redirect' )
+    # In redirect situation, remove all ending '/' from the
+    # target value URL.
+    targetValue=$(sed -e 's|[/]*$||g' <<< "${targetValue}")
+    ;;
+
+  'custom' )
+    # For custom template, the target value is used as template.
+    # Compute the VirtualHost filename.
+    mainTemplate="${targetValue}"
+    targetValue=""
+    ;;
+
+  'removal' )
+    # The --remove option has been given.
+    # Process the virtualhosts removal.
+
+    remove_site_hostname "${siteHostname}"
+    exit ${?}
+    ;;
+esac
+
+
+# Disable SSL template if not needed
+[[ "${sslEnabled}" -eq 0 ]] && SSL_TEMPLATE=''
+
+cecho "green" "Creating /etc/nginx/sites-available/${vhostFile}..."
+
+vhostContent="${VHOST_TEMPLATE[0]}
+${LOGS_TEMPLATE}
+${SSL_TEMPLATE}
+${CERTBOT_TEMPLATE}
+${mainTemplate}
+${customOptions}
+${VHOST_TEMPLATE[1]}"
+
+# Apply settings to vhostContent
+vhostContent="$(echo "${vhostContent}" \
+  | command sed -e "s|%_LISTEN_PORT_%|${listenPort}|g" \
+                -e "s|%_HTTP2_%|${http2}|g" \
+                -e "s|%_SITE_HOSTNAME_%|${siteHostname}|g" \
+                -e "s|%_SERVER_ALIAS_%|${serverAliases[*]}|g" \
+                -e "s|%_TARGET_VALUE_%|${targetValue}|g" \
+                -e "s|%_FRONTEND_SSL_ONOFF_%|${frontendSslOnOff}|" \
+	              -e "s|%_FORWARDED_PROTOCOL_%|${protocol}|" \
+                -e "s|%_CERTBOT_PATH_%|${sslCertbotPath}/.well-known/acme-challenge/|g")"
+
+#
+#===Apply SSL specific transforms.==============================================
+#
+if [[ "${sslEnabled}" -ne 0 ]]; then
+
+  # Generating missing diffie helmann key.
+  if [[ ! -e '/etc/nginx/dh.pem' ]]; then
+    openssl dhparam -out '/etc/nginx/dh.pem' 4096
+  fi
+
+  # If no existing http configuration exists;
+  if [[ ! ( -e "/etc/nginx/sites-enabled/http-${siteHostname}.conf" \
+    || -e "/etc/nginx/sites-enabled/redirect-http-${siteHostname}.conf" ) ]]; then
+    # Create HTTP redirect VirtualHost with Certbot Webroot path included (for certificate validation).
+    "${scriptName}" -t 'redirect' "${siteHostname}" "https://${siteHostname}/"
+  fi
+
+  # User certbot to generate Let's Encrypt SSL certificates, if --ssl=auto is
+  # used.
+  if [[ "${sslCertbot}" = "1" ]]; then
+    # Set certbot (acme.sh) keys paths.
+    # @see https://howto.biapy.com/en/debian-gnu-linux/servers/http/create-a-ssl-tls-certificate-on-debian
+    sslPrivateKey="/etc/ssl/private/${siteHostname}.key"
+    sslCompletePublicKey="/etc/ssl/certificates/${siteHostname}.crt+chain+root"
+    sslPublicKey="/etc/ssl/certificates/${siteHostname}.crt"
+    sslChainCa="/etc/ssl/chains/${siteHostname}.ca"
+
+    # Create directories for keys.
+    command mkdir -p "$(dirname "${sslPrivateKey}")"
+    command mkdir -p "$(dirname "${sslPublicKey}")"
+    command mkdir -p "$(dirname "${sslChainCa}")"
+    command mkdir -p "$(dirname "${sslCompletePublicKey}")"
+
+    # Use acme.sh to create a Let's Encrypt certificate for the domain.
+    "${sslAcmeSh}" --issue  --domain "${siteHostname}" \
+          --webroot "${sslCertbotPath}"
+
+    # Install the certificate on the system.
+    "${sslAcmeSh}" --installcert -d "${siteHostname}" \
+          --keypath "${sslPrivateKey}" \
+          --certpath "${sslPublicKey}" \
+          --capath "${sslChainCa}" \
+          --fullchainpath "${sslCompletePublicKey}" \
+          --reloadcmd "systemctl reload nginx"
+
+  elif [[ ( -z "${sslPrivateKey}" || -z "${sslPublicKey}" ) ]]; then
+    # Certbot is not used, and no private and public key are specified.
+    cecho "red" "Error : --private-key and --public-key options are mandatory when --ssl is used." >&2
+    exit 1
+  fi
+
+  # Apply SSL settings to vhostContent
+  vhostContent="$(echo "${vhostContent}" \
+    | command sed -e "s|%_CERTIFICATE_COMPLETE_FILE_%|${sslCompletePublicKey}|g" \
+      -e "s|%_KEY_FILE_%|${sslPrivateKey}|g")"
+fi
+#
+#===End of Apply SSL specific transforms.=======================================
+#
+
+# Write generated configuration to filesystem.
+echo "${vhostContent}" > "/etc/nginx/sites-available/${vhostFile}"
+
+# Enable the new site configuration, if needed.
+if [[ ! -e "/etc/nginx/sites-enabled/${vhostFile}" ]]; then
+  ln -s "/etc/nginx/sites-available/${vhostFile}" "/etc/nginx/sites-enabled/${vhostFile}"
+fi
+
+# Disable the site if there is a configuration error.
+if ! nginx -t; then
+  if [[ -e "/etc/nginx/sites-enabled/${vhostFile}" ]]; then
+    rm "/etc/nginx/sites-enabled/${vhostFile}"
+  fi
+
+  if [[ -e "/etc/nginx/sites-available/${vhostFile}" ]]; then
+    rm "/etc/nginx/sites-available/${vhostFile}"
+  fi
+
+  exit 1
+fi
+
+# Reload NGINX configuration.
+nginx_reload
+exit 0
