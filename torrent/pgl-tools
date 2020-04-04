@@ -5,10 +5,16 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/torrent/pgl-tools"
 version="0.1.0"
 
 # History
 # -------
+#
+# 0.2.0:
+#  - Better code quality with shellcheck validation.
+#  - Add upstreamUrl for biapy-updater compatibility.
+#  - update to cecho code.
 #
 # 0.1.0:
 #  - Initial release.
@@ -212,6 +218,8 @@ function cecho() {
     return 0
   fi
 
+  local key
+
   # Bash 4 version with associative array.
   ## Color and weight definitions.
   #declare -A font
@@ -247,30 +255,32 @@ function cecho() {
   declare -a fontIndex
   declare -a fontValue
 
-  local index=0
-  fontIndex[$index]='black';     fontValue[$index]="$(tput 'setaf' 0)"; ((index++))
-  fontIndex[$index]='red';       fontValue[$index]="$(tput 'setaf' 1)"; ((index++))
-  fontIndex[$index]='green';     fontValue[$index]="$(tput 'setaf' 2)"; ((index++))
-  fontIndex[$index]='yellow';    fontValue[$index]="$(tput 'setaf' 3)"; ((index++))
-  fontIndex[$index]='blue';      fontValue[$index]="$(tput 'setaf' 4)"; ((index++))
-  fontIndex[$index]='magenta';   fontValue[$index]="$(tput 'setaf' 5)"; ((index++))
-  fontIndex[$index]='cyan';      fontValue[$index]="$(tput 'setaf' 6)"; ((index++))
-  fontIndex[$index]='white';     fontValue[$index]="$(tput 'setaf' 7)"; ((index++))
+  fontIndex=()
+  fontValue=()
 
-  fontIndex[$index]='bgBlack';   fontValue[$index]="$(tput 'setab' 0)"; ((index++))
-  fontIndex[$index]='bgRed';     fontValue[$index]="$(tput 'setab' 1)"; ((index++))
-  fontIndex[$index]='bgGreen';   fontValue[$index]="$(tput 'setab' 2)"; ((index++))
-  fontIndex[$index]='bgYellow';  fontValue[$index]="$(tput 'setab' 3)"; ((index++))
-  fontIndex[$index]='bgBlue';    fontValue[$index]="$(tput 'setab' 4)"; ((index++))
-  fontIndex[$index]='bgMagenta'; fontValue[$index]="$(tput 'setab' 5)"; ((index++))
-  fontIndex[$index]='bgCyan';    fontValue[$index]="$(tput 'setab' 6)"; ((index++))
-  fontIndex[$index]='bgWhite';   fontValue[$index]="$(tput 'setab' 7)"; ((index++))
+  fontIndex+=( 'black' );     fontValue+=( "$(tput 'setaf' 0)" )
+  fontIndex+=( 'red' );       fontValue+=( "$(tput 'setaf' 1)" )
+  fontIndex+=( 'green' );     fontValue+=( "$(tput 'setaf' 2)" )
+  fontIndex+=( 'yellow' );    fontValue+=( "$(tput 'setaf' 3)" )
+  fontIndex+=( 'blue' );      fontValue+=( "$(tput 'setaf' 4)" )
+  fontIndex+=( 'magenta' );   fontValue+=( "$(tput 'setaf' 5)" )
+  fontIndex+=( 'cyan' );      fontValue+=( "$(tput 'setaf' 6)" )
+  fontIndex+=( 'white' );     fontValue+=( "$(tput 'setaf' 7)" )
 
-  fontIndex[$index]='bold';      fontValue[$index]="$(tput 'bold')"; ((index++))
-  fontIndex[$index]='stout';     fontValue[$index]="$(tput 'smso')"; ((index++)) # Standout.
-  fontIndex[$index]='under';     fontValue[$index]="$(tput 'smul')"; ((index++)) # Underline.
-  fontIndex[$index]='blink';     fontValue[$index]="$(tput 'blink')"; ((index++)) # Blinking.
-  fontIndex[$index]='italic';    fontValue[$index]="$(tput 'sitm')"; ((index++))
+  fontIndex+=( 'bgBlack' );   fontValue+=( "$(tput 'setab' 0)" )
+  fontIndex+=( 'bgRed' );     fontValue+=( "$(tput 'setab' 1)" )
+  fontIndex+=( 'bgGreen' );   fontValue+=( "$(tput 'setab' 2)" )
+  fontIndex+=( 'bgYellow' );  fontValue+=( "$(tput 'setab' 3)" )
+  fontIndex+=( 'bgBlue' );    fontValue+=( "$(tput 'setab' 4)" )
+  fontIndex+=( 'bgMagenta' ); fontValue+=( "$(tput 'setab' 5)" )
+  fontIndex+=( 'bgCyan' );    fontValue+=( "$(tput 'setab' 6)" )
+  fontIndex+=( 'bgWhite' );   fontValue+=( "$(tput 'setab' 7)" )
+
+  fontIndex+=( 'bold' );      fontValue+=( "$(tput 'bold')" )
+  fontIndex+=( 'stout' );     fontValue+=( "$(tput 'smso')" ) # Standout.
+  fontIndex+=( 'under' );     fontValue+=( "$(tput 'smul')" ) # Underline.
+  fontIndex+=( 'blink' );     fontValue+=( "$(tput 'blink')" ) # Blinking.
+  fontIndex+=( 'italic' );    fontValue+=( "$(tput 'sitm')" )
 
   for key in "${!fontIndex[@]}"; do
     [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
@@ -488,140 +498,131 @@ ${addedLine}"
 } # update_allowp2p()
 
 
-#######################################################################################
-#######################################################################################
-#######################################################################################
-# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
-#######################################################################################
-#######################################################################################
-#######################################################################################
+################################################################################
+################################################################################
+################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of
+# package bash-doc.
+################################################################################
+################################################################################
+################################################################################
 function getoptex()
 {
-  let $# || return 1
-  local optlist="${1#;}"
-  let optind || optind=1
-  [[ $optind -lt $# ]] || return 1
-  shift $optind
-  if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
-    optind=$((optind+1));
-    if [[ "$1" != "--" ]]; then
-      local o
-      o="-${1#-$optofs}"
-      for opt in ${optlist#;}
-      do
-        optopt="${opt%[;.:]}"
-        unset optarg
-        local opttype="${opt##*[^;:.]}"
-        [[ -z "$opttype" ]] && opttype=";"
-        if [[ ${#optopt} -gt 1 ]]; then # long-named option
-          case $o in
-            "--$optopt")
-              if [[ "${opttype}" = ':' ]]; then
-                optarg="${2}"
-                if [[ -z "$optarg" ]]; then
-                  cecho 'redbold' "$0: error: $optopt must have an argument" >&2
-                  optarg="${optopt}"
-                  optopt="?"
-                  return 1
-                fi
-
-                optind=$((optind+1)) # skip option's argument
-              elif [[ "${opttype}" = '.' ]]; then
-                if [[ "${2}" != -* ]]; then
-                  optarg="${2}"
-
-                  optind=$((optind+1)) # skip option's argument
-                fi
-              fi
+  (( $# )) || return 1
+  local optionList
+  optionList="${1#;}"
+  (( optionIndex )) || optionIndex=1
+  [[ ${optionIndex} -lt $# ]] || return 1
+  shift ${optionIndex}
+  if [[ "${1}" != "-" && "${1}" != "${1#-}" ]]; then
+    optionIndex=$((optionIndex + 1)); if [[ "${1}" != "--" ]]; then
+    local o
+    o="-${1#-${optionOfs}}"
+    for opt in ${optionList#;}
+    do
+      optionName="${opt%[;.:]}"
+      unset optionArgument
+      local optionType="${opt##*[^;:.]}"
+      [[ -z "${optionType}" ]] && optionType=";"
+      if [[ ${#optionName} -gt 1 ]]; then
+        # long-named option
+        case "$o" in
+          "--${optionName}")
+            if [[ "${optionType}" != ":" ]]; then
               return 0
-            ;;
-            "--$optopt="*)
-              if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
-                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
-                optarg="$optopt"
-                optopt="?"
-                return 1
-              fi
-              optarg=${o#"--$optopt="}
+            fi
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              # error: must have an agrument
+              echo "$0: error: ${optionName} must have an argument" >&2
+              optionArgument="${optionName}";
+              optionName="?"
+              return 1;
+            fi
+            optionIndex=$((optionIndex + 1)) # skip option's argument
+            return 0
+          ;;
+          "--${optionName}="*)
+            if [[ "${optionType}" = ";" ]];
+            then  # error: must not have arguments
+              (( OPTERR )) && echo "$0: error: ${optionName} must not have arguments" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionArgument=${o#--${optionName}=}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-${optionName}")
+            unset optionOfs
+            [[ "${optionType}" != ":" ]] && return 0
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              echo "$0: error: -${optionName} must have an argument" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionIndex=$(( optionIndex + 1 )) # skip option's argument
+            return 0
+          ;;
+          "-${optionName}"*)
+            if [ ${optionType} = ";" ]
+            then # an option with no argument is in a chain of options
+              optionOfs="${optionOfs}?" # move to the next option in the chain
+              optionIndex=$(( optionIndex - 1 )) # the chain still has other options
               return 0
-            ;;
-          esac
-        else # short-named option
-          case "$o" in
-            "-$optopt")
-              unset optofs
-              if [[ "${opttype}" = ':' ]]; then
-                optarg="${2}"
-                if [[ -z "$optarg" ]]; then
-                  cecho 'redbold' "$0: error: -$optopt must have an argument" >&2
-                  optarg="${optopt}"
-                  optopt="?"
-                  return 1
-                fi
-
-                optind=$((optind+1)) # skip option's argument
-              elif [[ "${opttype}" = '.' ]]; then
-                if [[ "${2}" != -* ]]; then
-                  optarg="${2}"
-
-                  optind=$((optind+1)) # skip option's argument
-                fi
-              fi
+            else
+              unset optionOfs
+              optionArgument="${o#-${optionName}}"
               return 0
-            ;;
-            "-$optopt"*)
-              if [[ $opttype = ";" ]]; then # an option with no argument is in a chain of options
-                optofs="$optofs?" # move to the next option in the chain
-                optind=$((optind-1)) # the chain still has other options
-                return 0
-              else
-                unset optofs
-                optarg="${o#-$optopt}"
-                return 0
-              fi
-            ;;
-          esac
-        fi
-      done
-      cecho 'redbold' "Error : invalid option : '${o}'." >&2
-      usage
-      exit 1
-    fi
-  fi
-  optopt="?"
-  unset optarg
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage 1
+  fi; fi
+  optionName="?"
+  unset optionArgument
   return 1
 }
-function optlistex
+function optionListex
 {
-  local l="$1"
+  local l="${1}"
   local m # mask
   local r # to store result
   while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
-  while [[ -n "$l" ]]; do
+  while [[ -n "$l" ]]
+  do
     r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
     l="${l#?}" # cut the first charecter from $l
     m="${m#?}"  # cut one "?" sign from m
-    if [[ -n "${l%%[^:.;]*}" ]]; then # a special character (";", ".", or ":") was found
+    if [[ -n "${l%%[^:.;]*}" ]]
+    then # a special character (";", ".", or ":") was found
       r="$r${l%$m}" # append it to $r
       l="${l#?}" # cut the special character from l
       m="${m#?}"  # cut one more "?" sign
     fi
   done
-  echo "$r"
+  echo "${r}"
 }
 function getopt()
 {
-  local optlist
+  local optionList
 
-  optlist=$(optlistex "$1")
+  optionList="$(optionListex "${1}")"
   shift
-  getoptex "$optlist" "$@"
-  return $?
+  getoptex "${optionList}" "${@}"
+  return ${?}
 }
-#######################################################################################
-#######################################################################################
-#######################################################################################
+################################################################################
+################################################################################
+################################################################################
 
 # Defaults
 verbose=0
@@ -637,9 +638,9 @@ while getoptex "help h allowp2p-path update u add: a: remove: r: quiet q verbose
   # Options debuging.
   # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
 
-  case "${optopt}" in
+  case "${optionName}" in
     'allowp2p-path' )
-      allowp2pPath="$(realpath_check "${optarg}")"
+      allowp2pPath="$(realpath_check "${optionArgument}")"
       ;;
 
     'update' | 'u' )
@@ -647,11 +648,11 @@ while getoptex "help h allowp2p-path update u add: a: remove: r: quiet q verbose
       ;;
 
     'add' | 'a' )
-      addedHosts+=("${optarg}")
+      addedHosts+=("${optionArgument}")
       ;;
 
     'remove' | 'r' )
-      removedHosts+=("${optarg}")
+      removedHosts+=("${optionArgument}")
       ;;
 
     'quiet' | 'q' )
@@ -668,7 +669,7 @@ while getoptex "help h allowp2p-path update u add: a: remove: r: quiet q verbose
   esac
 done
 
-shift $((optind-1))
+shift $((optionIndex - 1))
 
 if [[ -z "${allowp2pPath}" ]]; then
   cecho 'redbold' 'Error: no allow.p2p file provided.' >&2
