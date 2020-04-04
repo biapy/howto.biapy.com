@@ -1,55 +1,73 @@
 #!/bin/bash
+#
+# /etc/network/if-up.d/00-iptables-no-woot
+# Iptables rules to block DFind vulnerability scanner.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/deprecated/00-iptables-no-woot"
+version="1.0.0"
 
-# cette partie est à mettre au tout début de vos règles :
+# History
+# -------
+#
+# 1.0.0:
+#  - First release on github.
 
-# accepte loopback
-if [ -z "$(command iptables -vL INPUT \
+# This rule must be the first loaded rule before everything else:
+# Allow for loopback
+if [ -z "$(command iptables -vL 'INPUT' \
     | command grep 'ACCEPT[ ]*all[ -]*lo[ ]*any[ ]*anywhere[ ]*anywhere')" ]; then
-  command iptables -A INPUT -i lo -j ACCEPT
+  command iptables -A 'INPUT' -i 'lo' -j 'ACCEPT'
 fi
 
-# vérifie si l'IP est déjà présente dans la liste w00tlist.
-# Si c'est la cas, on la rejette immédiatement, met à jour la liste et
-# l'attaquant est de nouveau blacklisté pour 6h :
-if [ -z "$(command iptables -L INPUT \
+# Check if the IP is already present in w00tlist.
+# If it is the case, the IP is immediatly rejected, and the attacker is again
+# blacklisted for 6 hours :
+if [ -z "$(command iptables -L 'INPUT' \
     | command grep 'Chain w00tlist')" ]; then
-  command iptables -A INPUT -p tcp -m recent --name w00tlist --update --seconds 21600 -j DROP
+  command iptables -A 'INPUT' -p 'tcp' -m 'recent' --name 'w00tlist' \
+                  --update --seconds 21600 -j 'DROP'
 fi
 
-# création de la chaine w00tchain qui rajoute l'IP
-# à la liste w00tlist et reset la connexion (ne pas oublier le paramètre
-# '-p tcp' indispensable pour l'utilisation de '--reject-with tcp-reset') :
+# Create the w00tchain adding attacker IP to w00tlist and reset the connnection.
+# (don't forget the -p 'tcp' parameter required to
+# use --reject-with 'tcp-reset')
 if [ -z "$(command iptables -L \
     | command grep 'Chain w00tchain')" ]; then
-  command iptables -N w00tchain
-  command iptables -A w00tchain -m recent --set --name w00tlist -p tcp \
-      -j REJECT --reject-with tcp-reset
+  command iptables -N 'w00tchain'
+  command iptables -A 'w00tchain' -m 'recent' --set --name 'w00tlist' -p 'tcp' \
+      -j 'REJECT' --reject-with 'tcp-reset'
 fi
 
 if [ -z "$(command iptables -L \
     | command grep 'Chain w00t (')" ]; then
-  # création de notre chaîne w00t :
+  # Create the w00t chain :
   command iptables -N w00t
 
-  # redirige les paquets TCP sur notre chaîne :
+  # Redirect all TCP packets to the w00t chain:
   command iptables -A INPUT -p tcp -j w00t
 
   #####################################################
 
-  # chaîne w00t :
-  # recherche du premier SYN et création de la liste :
-  command iptables -A w00t -m recent -p tcp --syn --dport 80 --set
+  # w00t chain:
+  # Create the chain and add a search for first SYN:
+  command iptables -A 'w00t' -m 'recent' -p 'tcp' --syn --dport 80 --set
 
-  # recherche du paquet SYN,ACK et mise à jour la liste :
-  command iptables -A w00t -m recent -p tcp --tcp-flags PSH,SYN,ACK SYN,ACK --sport 80 --update
+  # Add a search for SYN,ACK packet to the chain:
+  command iptables -A 'w00t' -m 'recent' -p 'tcp' \
+      --tcp-flags 'PSH,SYN,ACK SYN,ACK' --sport 80 --update
 
-  # recherche du paquet ACK et mise à jour la liste :
-  command iptables -A w00t -m recent -p tcp --tcp-flags PSH,SYN,ACK ACK --dport 80 --update
+  # Add a search for ACK packet to the chain:
+  command iptables -A 'w00t' -m 'recent' -p 'tcp' \
+      --tcp-flags 'PSH,SYN,ACK ACK' --dport 80 --update
 
-  # recherche de la signature hexadécimale dans le prenier PSH+ACK.
-  # Si elle est présente, on renvoie sur w00tchain pour blacklister et
-  # terminer la connexion.
-  # On supprime la liste pour ne pas filtrer les paquets suivants :
-  command iptables -A w00t -m recent -p tcp --tcp-flags PSH,ACK PSH,ACK --dport 80 --remove \
-      -m string --to 80 --algo bm --hex-string '|485454502f312e310d0a0d0a|' -j w00tchain
+  # Search for the hexadecimal signature of the first PSH+ACK packet.
+  # If it is found, direct the connection to w00tchain to blacklist the attacker
+  # and drop the connection.
+  # Break the chain to prevent filtering of next packets.
+  command iptables -A 'w00t' -m 'recent' -p 'tcp' \
+      --tcp-flags 'PSH,ACK PSH,ACK' --dport 80 --remove -m 'string' --to 80 \
+      --algo 'bm' --hex-string '|485454502f312e310d0a0d0a|' -j 'w00tchain'
 fi
