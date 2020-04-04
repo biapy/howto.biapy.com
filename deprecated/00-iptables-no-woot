@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# cette partie est à mettre au tout début de vos règles :
+
+# accepte loopback
+if [ -z "$(command iptables -vL INPUT \
+    | command grep 'ACCEPT[ ]*all[ -]*lo[ ]*any[ ]*anywhere[ ]*anywhere')" ]; then
+  command iptables -A INPUT -i lo -j ACCEPT
+fi
+
+# vérifie si l'IP est déjà présente dans la liste w00tlist.
+# Si c'est la cas, on la rejette immédiatement, met à jour la liste et
+# l'attaquant est de nouveau blacklisté pour 6h :
+if [ -z "$(command iptables -L INPUT \
+    | command grep 'Chain w00tlist')" ]; then
+  command iptables -A INPUT -p tcp -m recent --name w00tlist --update --seconds 21600 -j DROP
+fi
+
+# création de la chaine w00tchain qui rajoute l'IP
+# à la liste w00tlist et reset la connexion (ne pas oublier le paramètre
+# '-p tcp' indispensable pour l'utilisation de '--reject-with tcp-reset') :
+if [ -z "$(command iptables -L \
+    | command grep 'Chain w00tchain')" ]; then
+  command iptables -N w00tchain
+  command iptables -A w00tchain -m recent --set --name w00tlist -p tcp \
+      -j REJECT --reject-with tcp-reset
+fi
+
+if [ -z "$(command iptables -L \
+    | command grep 'Chain w00t (')" ]; then
+  # création de notre chaîne w00t :
+  command iptables -N w00t
+
+  # redirige les paquets TCP sur notre chaîne :
+  command iptables -A INPUT -p tcp -j w00t
+
+  #####################################################
+
+  # chaîne w00t :
+  # recherche du premier SYN et création de la liste :
+  command iptables -A w00t -m recent -p tcp --syn --dport 80 --set
+
+  # recherche du paquet SYN,ACK et mise à jour la liste :
+  command iptables -A w00t -m recent -p tcp --tcp-flags PSH,SYN,ACK SYN,ACK --sport 80 --update
+
+  # recherche du paquet ACK et mise à jour la liste :
+  command iptables -A w00t -m recent -p tcp --tcp-flags PSH,SYN,ACK ACK --dport 80 --update
+
+  # recherche de la signature hexadécimale dans le prenier PSH+ACK.
+  # Si elle est présente, on renvoie sur w00tchain pour blacklister et
+  # terminer la connexion.
+  # On supprime la liste pour ne pas filtrer les paquets suivants :
+  command iptables -A w00t -m recent -p tcp --tcp-flags PSH,ACK PSH,ACK --dport 80 --remove \
+      -m string --to 80 --algo bm --hex-string '|485454502f312e310d0a0d0a|' -j w00tchain
+fi
