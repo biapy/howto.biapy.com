@@ -1,0 +1,719 @@
+#!/bin/bash
+#
+# Update https://howto.biapy.com/ scripts fron github.
+# This tool is little more than a wget replacing the installed script.
+# It's only use is to check for version number changes.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/updaters/biapy-updater"
+
+version="1.3.2"
+
+# History
+# -------
+#
+# 1.3.2
+#  - Move biapy-updaters from various to updaters folder.
+#
+# 1.3.1
+#  - Replace call using ${scriptName} by ${scriptPath} for environment where
+#    /usr/local/bin is not in path.
+#
+# 1.3.0
+#  - Add a configurable cron task feature.
+#  - Add option to find upstream version URL in check script (on first line
+#    with (# )upstreamUrl=)
+#
+# 1.2.3
+#  - Fix typo.
+#
+# 1.2.2
+#  - Add missing check on update target argument.
+#
+# 1.2.1
+#  - Fix missing $ in verbose information.
+#
+# 1.2.0
+#  - Add octal mode preservation for updated script.
+#
+# 1.1.0
+#  - Fix self upgrade process to prevent crash.
+#  - Correct usage examples.
+#
+# 1.0.1
+#  - Fix version number detection by removing quotes from result.
+#
+# 1.0.0
+#  - No change but the version number to prevent a warning with dpkg --compare-versions
+#
+# 0.0.1
+#  - Initial release, first proof of concept.
+#
+
+
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
+} # realpath
+
+
+
+scriptPath="$(realpath "${0}")"
+scriptName="$(basename "${0}")"
+
+
+
+# Print this script help.
+function usage {
+  echo "Biapy Updater v${version}
+This script automate keeping up-to-date scripts created for
+https://howto.biapy.com/.
+
+Usage :
+
+  ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
+     { --cron | -c }
+     { [ --source='/path/on/biapy/github/updated-script' ] 'updated-script' }
+
+  Available options are :
+    * --help | -h     : Display this message.
+    * --quiet | -q    : Disable almost all outputs.
+    * --verbose | -v  : Enable debug outputs.
+    * --cron | -c     : Run a cron task upgrading all scripts listed
+                        in '/etc/biapy-updater.conf' (on script by line)
+    * --source | -s   : Set the upstream script git path. Detected from updated
+                        script basename by default.
+                        Upstream URL can also be fetch from the script source
+                        (by searching for \"# upstreamUrl=\")
+
+  Example, for this script:
+      ${scriptName} '${scriptName}'
+    or:
+      ${scriptName} --source='updaters/${scriptName}' '${scriptName}'
+    or:
+      ${scriptName} '${scriptPath}'
+
+  Cron task setup:
+    1.  Create a /etc/biapy-updater.conf file which contain scripts names to be
+        checked daily for upgrades.
+
+    2.  Create a /etc/cron.d/biapy-updater file with this content:
+
+        # Every night at 6 o'clock.
+        0 6 * * *   root    test -x ${scriptPath} && ${scriptPath} --cron
+
+"
+
+  [[ -n "${1}" ]] && exit "${1}"
+} # usage
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+  realpath="$(realpath "${1}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+
+
+
+# Check if a binary is present. Print its path on &1 if found.
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  local key
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  fontIndex=()
+  fontValue=()
+
+  fontIndex+=( 'black' );     fontValue+=( "$(tput 'setaf' 0)" )
+  fontIndex+=( 'red' );       fontValue+=( "$(tput 'setaf' 1)" )
+  fontIndex+=( 'green' );     fontValue+=( "$(tput 'setaf' 2)" )
+  fontIndex+=( 'yellow' );    fontValue+=( "$(tput 'setaf' 3)" )
+  fontIndex+=( 'blue' );      fontValue+=( "$(tput 'setaf' 4)" )
+  fontIndex+=( 'magenta' );   fontValue+=( "$(tput 'setaf' 5)" )
+  fontIndex+=( 'cyan' );      fontValue+=( "$(tput 'setaf' 6)" )
+  fontIndex+=( 'white' );     fontValue+=( "$(tput 'setaf' 7)" )
+
+  fontIndex+=( 'bgBlack' );   fontValue+=( "$(tput 'setab' 0)" )
+  fontIndex+=( 'bgRed' );     fontValue+=( "$(tput 'setab' 1)" )
+  fontIndex+=( 'bgGreen' );   fontValue+=( "$(tput 'setab' 2)" )
+  fontIndex+=( 'bgYellow' );  fontValue+=( "$(tput 'setab' 3)" )
+  fontIndex+=( 'bgBlue' );    fontValue+=( "$(tput 'setab' 4)" )
+  fontIndex+=( 'bgMagenta' ); fontValue+=( "$(tput 'setab' 5)" )
+  fontIndex+=( 'bgCyan' );    fontValue+=( "$(tput 'setab' 6)" )
+  fontIndex+=( 'bgWhite' );   fontValue+=( "$(tput 'setab' 7)" )
+
+  fontIndex+=( 'bold' );      fontValue+=( "$(tput 'bold')" )
+  fontIndex+=( 'stout' );     fontValue+=( "$(tput 'smso')" ) # Standout.
+  fontIndex+=( 'under' );     fontValue+=( "$(tput 'smul')" ) # Underline.
+  fontIndex+=( 'blink' );     fontValue+=( "$(tput 'blink')" ) # Blinking.
+  fontIndex+=( 'italic' );    fontValue+=( "$(tput 'sitm')" )
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
+
+
+
+# Echo script source for given script name.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $updatedScriptPath The script to be updated path.
+# @param string $updatedScriptSource The script source in upstream git (optional).
+function upstream_url() {
+  [[ ${#} -lt 3 && ${#} -gt 4 ]] && exit 1
+
+
+  local quiet="${1}"
+  local verbose="${2}"
+  local updatedScriptPath="${3}"
+  local updatedScriptSource="${4}"
+
+  local updatedScriptName=''
+  updatedScriptName="$(basename "${updatedScriptPath}")"
+
+  local baseUpstreamUrl='https://raw.githubusercontent.com/biapy/howto.biapy.com/master/'
+  local upstreamUrl=''
+
+  local key
+
+  declare -a sourceIndex
+  declare -a sourceValue
+
+  sourceIndex=()
+  sourceValue=()
+
+  sourceIndex+=( 'biapy-updater');      sourceValue+=( 'updaters/biapy-updater' )
+  sourceIndex+=( 'music-tools' );       sourceValue+=( 'music/music-tools' )
+  sourceIndex+=( 'a2tools' );           sourceValue+=( 'apache2/a2tools' )
+  sourceIndex+=( 'nginx-tools' );       sourceValue+=( 'nginx/nginx-tools' )
+  sourceIndex+=( 'php-tools' );         sourceValue+=( 'php5/php-tools' )
+  sourceIndex+=( 'biapy-updater' );     sourceValue+=( 'various/biapy-updater' )
+  sourceIndex+=( 'mussync-tools' );     sourceValue+=( 'various/mussync-tools' )
+  sourceIndex+=( 'sf-downloader' );     sourceValue+=( 'various/sf-downloader' )
+  sourceIndex+=( 'mysql-defragger' );   sourceValue+=( 'mysql/mysql-defragger' )
+  sourceIndex+=( 'mysql-tools' );       sourceValue+=( 'mysql/mysql-tools' )
+
+  # Remove trailing slashes from URL:
+  baseUpstreamUrl="${baseUpstreamUrl%"${baseUpstreamUrl##*[!/]}"}"
+
+  # Remove leading slashes from updated script source:
+  updatedScriptSource="${updatedScriptSource#"${updatedScriptSource%%[!/]*}"}"
+
+  if [[ -z "${updatedScriptSource}" \
+        || "${updatedScriptSource}" == "auto" ]]; then
+    # Source unspecified. Trying to detect it from script name.
+    updatedScriptSource=''
+
+    # Try to detect upstream URL from script basename.
+    for key in "${!sourceIndex[@]}"; do
+      if [[ "${updatedScriptName}" == "${sourceIndex[${key}]}" ]]; then
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Upstream URL for '${updatedScriptName}' automatically detected." >&2
+
+    	  echo -n "${baseUpstreamUrl}/${sourceValue[${key}]}"
+    	  return 0
+      fi
+    done
+
+    upstreamUrl="$(grep --max-count=1 '^[# ]*upstreamUrl=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2- | tr --delete "'\"")"
+
+    if [[ -n "${upstreamUrl}" ]]; then
+      [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Upsteam URL for '${updatedScriptName}' extracted from script code." >&2
+
+      echo -n "${upstreamUrl}"
+      return 0
+    fi
+
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: script ${updatedScriptName} is not supported by biapy-updater." >&2
+    return 1
+  fi
+
+  # Compute source script URL from source option.
+  [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Upstream URL for '${updatedScriptName}' computed from --source value." >&2
+
+  echo -n "${baseUpstreamUrl}/${updatedScriptSource}"
+  return 0
+} # cecho()
+export -f 'upstream_url'
+
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  (( $# )) || return 1
+  local optionList
+  optionList="${1#;}"
+  (( optionIndex )) || optionIndex=1
+  [[ ${optionIndex} -lt $# ]] || return 1
+  shift ${optionIndex}
+  if [[ "${1}" != "-" && "${1}" != "${1#-}" ]]; then
+    optionIndex=$((optionIndex + 1)); if [[ "${1}" != "--" ]]; then
+    local o
+    o="-${1#-${optionOfs}}"
+    for opt in ${optionList#;}
+    do
+      optionName="${opt%[;.:]}"
+      unset optionArgument
+      local optionType="${opt##*[^;:.]}"
+      [[ -z "${optionType}" ]] && optionType=";"
+      if [[ ${#optionName} -gt 1 ]]; then
+        # long-named option
+        case "$o" in
+          "--${optionName}")
+            if [[ "${optionType}" != ":" ]]; then
+              return 0
+            fi
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              # error: must have an agrument
+              echo "$0: error: ${optionName} must have an argument" >&2
+              optionArgument="${optionName}";
+              optionName="?"
+              return 1;
+            fi
+            optionIndex=$((optionIndex + 1)) # skip option's argument
+            return 0
+          ;;
+          "--${optionName}="*)
+            if [[ "${optionType}" = ";" ]];
+            then  # error: must not have arguments
+              (( OPTERR )) && echo "$0: error: ${optionName} must not have arguments" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionArgument=${o#--${optionName}=}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-${optionName}")
+            unset optionOfs
+            [[ "${optionType}" != ":" ]] && return 0
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              echo "$0: error: -${optionName} must have an argument" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionIndex=$(( optionIndex + 1 )) # skip option's argument
+            return 0
+          ;;
+          "-${optionName}"*)
+            if [ ${optionType} = ";" ]
+            then # an option with no argument is in a chain of options
+              optionOfs="${optionOfs}?" # move to the next option in the chain
+              optionIndex=$(( optionIndex - 1 )) # the chain still has other options
+              return 0
+            else
+              unset optionOfs
+              optionArgument="${o#-${optionName}}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage 1
+  fi; fi
+  optionName="?"
+  unset optionArgument
+  return 1
+}
+
+function optionListex
+{
+  local l="${1}"
+  local m # mask
+  local r # to store result
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [[ -n "${l%%[^:.;]*}" ]]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo "${r}"
+}
+
+function getopt()
+{
+  local optionList
+
+  optionList="$(optionListex "${1}")"
+  shift
+  getoptex "${optionList}" "${@}"
+  return ${?}
+}
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Check for binaries presence
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "mktemp" "mktemp" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "wget" "wget" > '/dev/null'
+check_binary "dpkg" "dpkg" > '/dev/null'
+
+
+defaultInstallPath='/usr/local/bin'
+updatedScriptSource='auto'
+
+cronTaskConfigPath='/etc/biapy-updater.conf'
+
+action='upgrade'
+
+quiet=0
+verbose=0
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h quiet q verbose v cron c source: s:" "${@}"; do
+  # Options debuging.
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
+
+  case "${optionName}" in
+    'source' )
+      updatedScriptSource="${optionArgument}"
+      ;;
+
+    'cron' | 'c' )
+      action='crontask'
+      ;;
+
+    'quiet' | 'q' )
+      quiet=1
+      ;;
+
+    'verbose' | 'v' )
+      verbose=1
+      ;;
+
+    'help' | 'h' | * )
+      usage 0
+      ;;
+  esac
+done
+
+# Discard processed options.
+shift $((optionIndex - 1))
+
+if [[ "${verbose}" -ne 0 ]]; then
+  quiet=0
+fi
+
+# ==============================================================================
+# Run as cron task.
+if [[ "${action}" == 'crontask' ]]; then
+  # Check for configuration file existance.
+  cronTaskConfigPath="$(realpath_check "${cronTaskConfigPath}")" || exit 1
+
+  declare -a commandOptions
+  commandOptions=()
+
+  [[ "${quiet}" -ne 0 ]] && commandOptions+=( "--quiet" )
+  [[ "${verbose}" -ne 0 ]] && commandOptions+=( "--verbose" )
+
+  # For each line of the configuration file, run biapy-updater.
+  while read -r updatedScript; do
+    # Skip empty lines.
+    if [[ -n "${updatedScript}" ]]; then
+      # Run biapy-updater for each line of the configuration file if it does not
+      # start with a '#', and if the updated script is not this tool.
+      [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Found '${updatedScript}' in '${cronTaskConfigPath}'."
+      if [[ "${updatedScript}" != '#'* \
+            && "${updatedScript}" != "${scriptName}" \
+            && "${updatedScript}" != "${scriptPath}" ]]; then
+        # Run biapy-updater with configuration file line as parameter.
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: running ${scriptName} ${commandOptions[*]} '${updatedScript}'."
+        ${scriptPath} "${commandOptions[@]}" "${updatedScript}"
+      else
+        [[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: ignoring comment line (or ${scriptName} line)."
+      fi
+    fi
+  done < "${cronTaskConfigPath}"
+
+  # Run the update for this script.
+  exec /bin/bash -c "${scriptPath} ${commandOptions[*]} '${scriptName}'"
+  exit 0
+fi
+# ==============================================================================
+
+# Store the updated script path and get its basename.
+updatedScriptPath="${1}"
+
+if [[ -z "${updatedScriptPath}" ]]; then
+	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: no update target specified."
+	exit 1
+fi
+
+updatedScriptName="$(basename "${updatedScriptPath}")"
+
+# Use $defaultInstallPath as default updated script path, if needed.
+if [[ "${updatedScriptPath}" = "${updatedScriptName}" ]]; then
+	updatedScriptPath="${defaultInstallPath}/${updatedScriptName}"
+	[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: '${updatedScriptName}' path is set to be '${updatedScriptPath}'." >&2
+fi
+
+# Check that the updated script exits and get its real path.
+updatedScriptPath="$(realpath_check "${updatedScriptPath}")" || exit 1
+
+# Get the script upstream URL.
+upstreamUrl="$(upstream_url "${quiet}" "${verbose}" "${updatedScriptPath}" "${updatedScriptSource}")" || exit 1
+
+# Create a temporary file to download the upstream version of the updated script.
+upstreamScriptTempPath="$(mktemp)"
+
+# Fetch the newest (upstream) script version:
+[[ "${verbose}" -ne 0 ]] && cecho 'cyan' "Info: Downloading upstream version for '${updatedScriptName}' from '${upstreamUrl}'." >&2
+if wget --output-document="${upstreamScriptTempPath}" --quiet "${upstreamUrl}"; then
+	[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: Download successfull." >&2
+
+	upstreamVersion="$(grep --max-count=1 '^version=' "${upstreamScriptTempPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
+	currentVersion="$(grep --max-count=1 '^version=' "${updatedScriptPath}" | cut --delimiter='=' --fields=2 | tr --delete "'\"")"
+
+  # Compare current version number with upstream version number.
+	if dpkg --compare-versions "${currentVersion}" 'lt' "${upstreamVersion}"; then
+		[[ "${verbose}" -ne 0 ]] && cecho 'yellow' "Update needed: ${updatedScriptName} ${currentVersion} < upstream version ${upstreamVersion}." >&2
+
+  		# Copy over owner and group from old version
+  		currentOwner="$(stat -c '%U:%G' "${updatedScriptPath}")"
+  		if ! chown "${currentOwner}" "${upstreamScriptTempPath}" ; then
+    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set owner and group to '${currentOwner}' on '${upstreamScriptTempPath}'." >&2
+    		exit 1
+    	else
+			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: owner and group set to '${currentOwner}' on '${upstreamScriptTempPath}'." >&2
+  		fi
+
+  		# Copy over modes from old version
+  		currentPermissions="$(stat -c '%a' "${updatedScriptPath}")"
+  		if ! chmod "${currentPermissions}" "${upstreamScriptTempPath}" ; then
+    		[[ "${quiet}" -eq 0 ]] && cecho 'red' "Failed: Error while trying to set mode to '${currentPermissions}' on '${upstreamScriptTempPath}'." >&2
+    		exit 1
+    	else
+			[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: permissions set to '${currentPermissions}' on '${upstreamScriptTempPath}'." >&2
+  		fi
+
+		if [[ "${updatedScriptPath}" = "${scriptPath}" ]]; then
+			# Self-update: run the update in a separated process.
+			exec /bin/bash -c "
+				if mv '${upstreamScriptTempPath}' '${updatedScriptPath}'; then
+					[[ '${quiet}' -eq 0 ]] && echo 'Update successfull: ${updatedScriptName} ${currentVersion} updated to ${upstreamVersion}.'
+				else
+					[[ '${quiet}' -eq 0 ]] && echo 'Error: unable to update \"${updatedScriptPath}\".' >&2
+
+					# Removing temporary file.
+					[[ -e '${upstreamScriptTempPath}' ]] && rm '${upstreamScriptTempPath}'
+
+					exit 1
+				fi"
+		else
+      # Update of another script.
+			if mv "${upstreamScriptTempPath}" "${updatedScriptPath}"; then
+				[[ "${quiet}" -eq 0 ]] && cecho 'green' "Update successfull: ${updatedScriptName} ${currentVersion} updated to ${upstreamVersion}."
+			else
+				[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to update '${updatedScriptPath}'." >&2
+
+				# Removing temporary file.
+				[[ -e "${upstreamScriptTempPath}" ]] && rm "${upstreamScriptTempPath}"
+
+				exit 1
+			fi
+		fi
+	else
+		[[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: ${updatedScriptName} ${currentVersion} is up-to-date. No updated needed (upstream version: ${upstreamVersion})." >&2
+	fi
+else
+	[[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to download '${updatedScriptName}' from '${upstreamUrl}'." >&2
+	exit 1
+fi
