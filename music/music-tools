@@ -5,10 +5,19 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
-version="0.6.0"
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/music/music-tools"
+version="0.7.0"
 
 # History
 # -------
+#
+# 0.7.0
+#  - Fix bug where files with m4a extensions are not detected as
+#    music files and ignored.
+#  - Add upstreamUrl for use with biapy-updater.
+#
+# 0.6.1
+#  - Add support for error "ERROR, MD5 signature mismatch" to --rebuild-flac.
 #
 # 0.6.0
 #  - Add --to-flac action.
@@ -608,15 +617,18 @@ function compute_replay_gain() {
       fi
 
       if [[ "${verbose}" -ne 0 ]]; then
-        collectiongain --regain "${processedFolder}"
-      else
-        collectiongain --regain "${processedFolder}" > '/dev/null'
-      fi
+        if collectiongain --regain "${processedFolder}"; then
+          [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
+        else
+          [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+        fi
 
-      if [[ "${?}" -eq 0 ]]; then
-        [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
       else
-        [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+        if collectiongain --regain "${processedFolder}" > '/dev/null'; then
+          [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
+        else
+          [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+        fi
       fi
     fi
 
@@ -628,15 +640,17 @@ function compute_replay_gain() {
       fi
 
       if [[ "${verbose}" -ne 0 ]]; then
-        aacgain -a -t -p -s r -k -f "${m4aFiles[@]}"
+        if aacgain -a -t -p -s r -k -f "${m4aFiles[@]}"; then
+          [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
+        else
+          [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+        fi
       else
-        aacgain -q -a -t -p -s r -k -f "${m4aFiles[@]}" > '/dev/null'
-      fi
-
-      if [[ "${?}" -eq 0 ]]; then
-        [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
-      else
-        [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+        if aacgain -q -a -t -p -s r -k -f "${m4aFiles[@]}" > '/dev/null'; then
+          [[ "${quiet}" -eq 0 ]] && cecho 'green' ' Done.'
+        else
+          [[ "${quiet}" -eq 0 ]] && cecho 'red' ' Failed.'
+        fi
       fi
     fi
 
@@ -714,6 +728,30 @@ function check_music_files() {
       if [[ -z "${errorMessage}" ]]; then
         foundFileFormat="$(mediainfo --Inform="Audio;%Format%" "${foundFile}" 2>'/dev/null' | tr '[:lower:]' '[:upper:]')"
 
+        if [[ -z "${foundFileFormat}" ]]; then
+          # Check found file extension for audio typed extensions (in case of
+          # erroneous files not reconized as audio)
+          foundFileExtension="$(echo "${foundFile##*.}" | tr '[:upper:]' '[:lower:]')"
+
+          case "${foundFileExtension}" in
+            'flac' )
+              foundFileFormat='FLAC'
+              ;;
+
+            'mp3' )
+              foundFileFormat='MPEG AUDIO'
+              ;;
+
+            'm4a' )
+              foundFileFormat='MPEG-4'
+              ;;
+
+            'riff' | 'wav' | 'bwf' | 'ogg' | 'oga' | 'aiff' | 'caf' | 'raw' | 'pcm' | 'alac' | 'shn' | 'ac3' | 'vqf' | 'vql' | 'vqe' | 'wma' | 'au' | 'asf' | 'aa' | 'atrac' | 'mid' )
+              foundFileFormat='OTHER AUDIO'
+              ;;
+          esac
+        fi
+
         if [[ -n "${foundFileFormat}" ]]; then
           [[ "${filesCount}" -eq 0 && "${verbose}" -ne 0 ]] && echo ""
 
@@ -741,6 +779,7 @@ function check_music_files() {
             'MPEG-4' )
               # Process M4A files.
               ((m4aFiles++))
+              # ffmpeg -v error -i corrupted_input.ts -f null - &> corruptions.log
               errorMessage="$(avprobe -v quiet -show_error "${foundFile}" \
                               | grep '^string=' | cut -c '8-')"
               ;;
@@ -862,7 +901,8 @@ function rebuild_flac() {
         # Test flac file for error.
         errorMessage="$(flac -s -t "${flacFile}" 2>&1)"
 
-        if [[ "${errorMessage}" == *"WARNING, cannot check MD5 signature since it was unset in the STREAMINFO" ]]; then
+        if [[ "${errorMessage}" == *"WARNING, cannot check MD5 signature since it was unset in the STREAMINFO" \
+              || "${errorMessage}" == *"ERROR, MD5 signature mismatch" ]]; then
           # FLAC file has no MD5. Checking by decoding.
           errorMessage="$(avprobe -v quiet -show_error "${flacFile}" \
                             | grep '^string=' | cut -c '8-')"
@@ -1228,9 +1268,9 @@ function to_flac() {
 #######################################################################################
 function getoptex()
 {
-  let $# || return 1
+  (( $# )) || return 1
   local optlist="${1#;}"
-  let optind || optind=1
+  (( optind )) || optind=1
   [[ $optind -lt $# ]] || return 1
   shift $optind
   if [[ "$1" != "-" && "$1" != "${1#-}" ]]; then
@@ -1268,7 +1308,7 @@ function getoptex()
             ;;
             "--$optopt="*)
               if [[ "$opttype" = ";" ]]; then  # error: must not have arguments
-                let OPTERR && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
+                (( OPTERR )) && cecho 'redbold' "$0: error: $optopt must not have arguments" >&2
                 optarg="$optopt"
                 optopt="?"
                 return 1
