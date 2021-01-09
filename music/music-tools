@@ -6,10 +6,13 @@
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/music/music-tools"
-version="0.7.0"
+version="0.7.1"
 
 # History
 # -------
+#
+# 0.7.1
+#  - Fix detection of MPEG-4 formats (reported as AAC)
 #
 # 0.7.0
 #  - Fix bug where files with m4a extensions are not detected as
@@ -588,6 +591,7 @@ function compute_replay_gain() {
               ;;
 
             'MPEG-4' )
+            'AAC' )
               m4aFiles+=( "${foundFile}" )
               ;;
 
@@ -743,7 +747,7 @@ function check_music_files() {
               ;;
 
             'm4a' )
-              foundFileFormat='MPEG-4'
+              foundFileFormat='AAC'
               ;;
 
             'riff' | 'wav' | 'bwf' | 'ogg' | 'oga' | 'aiff' | 'caf' | 'raw' | 'pcm' | 'alac' | 'shn' | 'ac3' | 'vqf' | 'vql' | 'vqe' | 'wma' | 'au' | 'asf' | 'aa' | 'atrac' | 'mid' )
@@ -777,6 +781,7 @@ function check_music_files() {
                               | grep '^ERROR:' | sed -e 's/^.*: //g')"
               ;;
             'MPEG-4' )
+            'AAC' )
               # Process M4A files.
               ((m4aFiles++))
               # ffmpeg -v error -i corrupted_input.ts -f null - &> corruptions.log
