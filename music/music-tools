@@ -590,8 +590,7 @@ function compute_replay_gain() {
               fi
               ;;
 
-            'MPEG-4' )
-            'AAC' )
+            'MPEG-4' | 'AAC' )
               m4aFiles+=( "${foundFile}" )
               ;;
 
@@ -780,8 +779,7 @@ function check_music_files() {
               errorMessage="$(mp3val -si "${foundFile}" \
                               | grep '^ERROR:' | sed -e 's/^.*: //g')"
               ;;
-            'MPEG-4' )
-            'AAC' )
+            'MPEG-4' | 'AAC' )
               # Process M4A files.
               ((m4aFiles++))
               # ffmpeg -v error -i corrupted_input.ts -f null - &> corruptions.log
