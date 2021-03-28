@@ -16,6 +16,9 @@ version="1.0.0"
 # History
 # -------
 #
+# 1.0.1
+#  - Fix help contents
+#
 # 1.0.0
 #  - Initial release, rewriten from backup-manager-tools
 #
@@ -77,41 +80,30 @@ function realpath() {
 
 
 
-scriptPath="$(realpath "${0}")"
 scriptName="$(basename "${0}")"
 
 
 
 # Print this script help.
 function usage {
-  echo "Biapy Updater v${version}
-This script automate keeping up-to-date scripts created for
-https://howto.biapy.com/.
+  echo "Backup Tools v${version}
+This script automates management of backup targets for these backup softwares:
+  * Backup Manager (backup-manager).
 
 Usage :
 
   ${scriptName} [ --help ] [ --quiet ] [ --verbose ]
-     { --cron | -c }
-     { [ --source='/path/on/biapy/github/updated-script' ] 'updated-script' }
+     { --list | -l } { --cleanup | -c }
+     { --add='/path/to/backup' } { --remove='/path/to/remove/from/backup' }
 
   Available options are :
     * --help | -h     : Display this message.
     * --quiet | -q    : Disable almost all outputs.
     * --verbose | -v  : Enable debug outputs.
-    * --cron | -c     : Run a cron task upgrading all scripts listed
-                        in '/etc/biapy-updater.conf' (on script by line)
-    * --source | -s   : Set the upstream script git path. Detected from updated
-                        script basename by default.
-                        Upstream URL can also be fetch from the script source
-                        (by searching for \"# upstreamUrl=\")
-
-  Example, for this script:
-      ${scriptName} '${scriptName}'
-    or:
-      ${scriptName} --source='updaters/${scriptName}' '${scriptName}'
-    or:
-      ${scriptName} '${scriptPath}'
-
+    * --list | l      : List currently backed-up paths, one per line.
+    * --add | -a      : Add a path to backup targets.
+    * --remove | -r   : Remove a path from backup targets.
+    * --cleanup | -c  : Remove missing paths from backup targets.
 "
 
   [[ -n "${1}" ]] && exit "${1}"
