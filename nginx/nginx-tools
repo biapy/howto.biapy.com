@@ -5,10 +5,15 @@
 # For suggestion and bug reports, please contact
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/nginx/nginx-tools"
-version=0.2.0
+version=0.2.1
 
 # History
 # -------
+#
+# 0.2.1:
+#  - Fix bug "Server is speaking HTTP/2 over HTTP" with CertBot. HTTP/2 is a HTTPS only protocol.
+#  - Fix problems reported by shellcheck
+#  - Cosmetic changes.
 #
 # 0.2.0:
 #  - Fix redirect URL creation.
@@ -731,13 +736,14 @@ function remove_site_hostname() {
   return ${?}
 } #remove_site_hostname()
 
-#######################################################################################
-#######################################################################################
-#######################################################################################
-# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
-#######################################################################################
-#######################################################################################
-#######################################################################################
+################################################################################
+################################################################################
+################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of
+# package bash-doc.
+################################################################################
+################################################################################
+################################################################################
 function getoptex()
 {
   (( $# )) || return 1
@@ -852,9 +858,9 @@ function getopt()
   getoptex "${optionList}" "${@}"
   return ${?}
 }
-#######################################################################################
-#######################################################################################
-#######################################################################################
+################################################################################
+################################################################################
+################################################################################
 
 # Check for binaries presence
 check_binary 'basename' 'coreutils' > '/dev/null'
@@ -1208,21 +1214,20 @@ ${PHP_FPM_TEMPLATE}"
       fi
 
       # Apply settings to vhostContent
-      mainTemplate="$(sed -e "s|%_FASTCGI_PASS_%|${phpFpmListen}|g" \
-                        <<< "${mainTemplate}")"
+      mainTemplate="${mainTemplate//%_FASTCGI_PASS_%/${phpFpmListen}}"
     fi
     ;;
 
   'reverse-proxy' )
     # In reverse proxy situation, make sure to add '/' at the end of the
     # target value URL.
-    targetValue="$(sed -e 's|//$|/|g' <<< "${targetValue}/")"
+    targetValue="${targetValue%%*(/)}/"
     ;;
 
   'redirect' )
     # In redirect situation, remove all ending '/' from the
     # target value URL.
-    targetValue=$(sed -e 's|[/]*$||g' <<< "${targetValue}")
+    targetValue="${targetValue%%*(/)}"
     ;;
 
   'custom' )
@@ -1242,8 +1247,12 @@ ${PHP_FPM_TEMPLATE}"
 esac
 
 
-# Disable SSL template if not needed
-[[ "${sslEnabled}" -eq 0 ]] && SSL_TEMPLATE=''
+if [[ "${sslEnabled}" -eq 0 ]]; then
+  # Disable SSL template if not needed
+  SSL_TEMPLATE=''
+  # If SSL is not enabled, disable HTTP/2 (HTTP/2 is a SSL only protcol)
+  http2=''
+fi
 
 cecho "green" "Creating /etc/nginx/sites-available/${vhostFile}..."
 
