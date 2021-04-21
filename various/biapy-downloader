@@ -1,0 +1,1629 @@
+#!/bin/bash
+#
+# Biapy Downloader
+# Command line tools to download and extract software archives.
+# Reworking from scratch of sf-downloader with less and cleaner features.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/various/biapy-downloader"
+version="0.0.1"
+
+# History
+# -------
+#
+# 0.0.1
+#  - First alpha release.
+#
+
+
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
+} # realpath
+
+
+
+scriptName="$(basename "${0}")"
+
+
+
+# Print this script help.
+# Exit with $exitCode if set.
+#
+# @param integer $exitCode An optionnal exit code value.
+function usage {
+  echo "Biapy Downloader v${version}
+Download and extract latest version of a software.
+Usage :
+
+  ${scriptName} [ --help| -h ] [ --quiet | -q ] [ --verbose | -v ]
+      [ -c | --cookies='CookieName=Cookievalue' ] [ -a | --user-agent='Custom user agent' ]
+      [ -f | --forge={ 'github' | 'sourceforge' } ] 
+      [ -e | --extract [ ={ 'auto' | 'zip' | 'tgz' | 'tar.gz' | 'tbz2' | 'tar.bz2' } ] ]
+      [ -o | --output-path='/path/where/to/store/files' ] [ -s | --strip-components=N ]
+      [ -t | --file-template='filename-VERSION.format' ]
+      [ -u | --url-template='http(s)://url.of/custom/filename-VERSION.format']
+      [ [ --list-versions | --list | -l ] [ --print-version | -p ] ]
+      [
+          'http(s)://url.of/archive.format'
+        | 'http(s)://version.list.url/'
+        | 'Sourceforge project name'
+        | 'Github User/Github project'
+      ]
+
+  Available options are :
+    * --cookies | -c      : Set a cookie header for the download.
+    * --user-agent | -a   : Set a custom user agent for the download.
+    * --forge | -f        : Download software from 'sourceforge' or 'github'.
+    * --extract | -e      : Extract the downloaded contents. 'auto' detect the archive format (default to auto).
+    * --output-path | -o  : Output path where to store the extracted contents, or the downloaded file (optionnal).
+    * --file-template | -t: File template to search in the version listing to detect the versions.
+                            Example: file-VERSION.tar.gz (VERSION is used to detect the version number).
+    * --url-template | -u : URL template used to download the achive for the given version
+                            (VERSION is replaced by the version number).
+    * --quiet | -q        : Disable almost all outputs.
+    * --verbose | -v      : Enable debug outputs.
+
+  Available actions are :
+    * --help                : Display this message.
+    * --list-versions | -l  : List all versions found in the version listing.
+    * --print-version | -p  : Print latest detected version.
+
+    Default action is to download the latest detected version.
+
+  Examples:
+    * Download an archive directly from URL, without version detection:
+      ${scriptName} 'https://builds.matomo.org/matomo-latest.zip'
+
+    * Detect and list all versions (from version list page):
+      ${scriptName} --list-versions --file-template='dropbox_VERSION_amd64.deb' \\
+          'https://linux.dropboxstatic.com/ubuntu/pool/main/'
+
+    * Download the latest version of a github.com release:
+      ${scriptName} --forge='github' --file-template='shaarli-vVERSION-full.tar.gz' 'shaarli/Shaarli'
+
+    * Download latest version from sourceforge.net and extracting contents:
+      ${scriptName} --forge='sourceforge' --extract --file-template='dolibarr-VERSION.zip' 'dolibarr'
+
+    * Download from sourceforge.net and using --url-template option:
+      ${scriptName} --forge='sourceforge' \\
+          --url-template='https://freefr.dl.sourceforge.net/project/bandwidthd/bandwidthd/bandwidthd%20VERSION/bandwidthd-VERSION.tgz' \\
+          --file-template='bandwidthd-VERSION-binary-windows.zip' 'bandwidthd'
+"
+
+  test -n "${1}" && exit "${1}"
+} # usage
+
+
+
+# Alternative getopt for functions.
+# store allowed --myOption="value" in variable myOption.
+# if --myOption has no value set, set it to 1.
+#
+# @param string allowedOptionsList Space separated listed of allowed options.
+#         an option name ending by '*' mark the option as mandatory.
+#         an option name ending by '+' mark the option as mandatory with a non empty value.
+# @param ${@} aguments to process.
+# @return 1 on error, 0 on success.
+#
+# Store values in theses global variables:
+#  - arguments[] : arguments that does not start by -- or are after a '--'.
+#  - "${optionName}" : variable named after each argument starting by '--' (--optionName).
+#
+# Example usage:
+# example_function () {
+#   # Describe function options.
+#   local allowedOptions=( 'quiet' 'verbose' 'user_agent' 'mandatory*' 'mandatoryWithValue+' )
+#
+#   # Declare option variables as local.
+#   # arguments is a default of processOptions function. It is similar to "${@}" without values starting by '--'.
+#   local arguments=()
+#   local quiet=0
+#   local verbose=0
+#   local user_agent=''
+#   local mandatory=''
+#   local mandatoryWithValue=''
+#
+#   # Call the processOptions function:
+#   processOptions "${allowedOptions[*]}" "${@}" || return 1
+#
+#   # Display arguments that are not an option:
+#   printf '%s\n' "${arguments[@]}"
+# }
+#
+# # Call example_function with:
+# example_function --quiet --verbose=0 --user-agent="Mozilla" --mandatory --mandatoryWithValue="mandatory value" -- arg1 arg2 --arg3 arg4
+function processOptions() {
+  ### arguments handling.
+  local allowedOptionsString="${1}"
+  local allowedOptions=()
+  local processedOptions=()
+  local optionName=''
+  local optionValue=''
+  local optionDefault=''
+  local optionValidityTest=''
+  local cleanedOptionName=''
+  local optionPresenceTest=''
+
+  # Discard first argument (allowedOptionsString)
+  shift
+
+  # Split allowed options string on space.
+  IFS=' ' read -r -a 'allowedOptions' <<< "${allowedOptionsString}"
+
+  arguments=()
+
+  # Loop over arguments.
+  while [[ "${#}" -gt 0 && "${1}" != '--' ]]; do # For each function argument until a '--'.
+    # Test if argument is a option (starts with '--')
+    if [[ "${1}" =~ ^--([^=]*)(=?)(.*)$ ]]; then
+      optionName="${BASH_REMATCH[1]//[^[:alnum:]]/_}"
+
+      # Store BASH_REMATCH values. option default is '' if = present, 1 otherwise.
+      optionDefault="${BASH_REMATCH[2]:-1}"
+      optionValue="${BASH_REMATCH[3]:-${optionDefault//=/}}"
+
+      # Build the option validity test regular expression.
+      optionValidityTest="^.*[ ]${optionName}[*+]?[ ].*\$"
+      if [[ " ${allowedOptions[*]} " =~ ${optionValidityTest} ]]; then
+        # Assign value if --option in allowedOptions,
+        # Use printf to do $optionName="${optionValue}"
+        printf -v "${optionName}" "%s" "${optionValue}"
+        processedOptions+=( "${optionName}" )
+      else
+        # Exit with error if a '--option' is not in allowedOptions.
+        cecho 'red' "Error: invalid argument ${1}." >&2
+        return 1
+      fi
+
+    else
+      # Argument is not an option, store it for future use.
+      arguments+=( "${1}" )
+    fi
+
+    shift
+  done
+
+  # Handle arguments after '--'
+  [[ "${1}" = '--' ]] && shift && arguments+=( "${@}" )
+
+  # For each mandatory argument, test its presence.
+  for optionName in "${allowedOptions[@]}"; do
+    # Build the option presence test regular expression.
+    cleanedOptionName="${optionName%[+*]}"
+
+    # Test if option is mandatory
+    # (cleanedOptionName is different of optionName)
+    # (optionName end by + or *)
+    if [[ "${cleanedOptionName}" != "${optionName}" ]]; then
+      optionPresenceTest="^.*[ ]${cleanedOptionName}[ ].*\$"
+
+      # Test if mandatory option is present.
+      if [[ ! " ${processedOptions[*]} " =~ ${optionPresenceTest} ]]; then
+        cecho 'red' "Error: --${cleanedOptionName} is missing." >&2
+        return 1
+      fi
+
+      # Test if option need a mandatory value (end by +) and option is empty.
+      if [[ "${optionName}" = "${cleanedOptionName}+" \
+            && -z "${!cleanedOptionName}" ]]; then
+        cecho 'red' "Error: --${cleanedOptionName} is empty." >&2
+        return 1
+      fi
+    fi
+  done
+
+  return 0
+} # processOptions()
+
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $quiet A optionnal '--quiet' tag to disable the error message.
+# @param string $exit A optionnal '--exit' tag to enable exit on failure.
+# @param string $path A relative path.
+#
+# @return 1 if the path does not exist, 0 otherwise.
+function realpath_check() {
+  [[ ${#} -ge 1 && ${#} -le 3 ]] || exit 1
+
+  local optionIndex
+  local optionName
+  local optionArgument
+
+  local quiet=0
+  local exitOnError=0
+  local path=''
+  local realpath=''
+
+  # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+  while getoptex "exit e quiet q" "${@}"; do
+    # Options debuging.
+    # echo "Option <$optionName> ${optionArgument:+has an arg <$optionArgument>}"
+
+    case "${optionName}" in
+      'quiet' | 'q' )
+        quiet=1
+        ;;
+
+      'exit' | 'e' )
+        exitOnError=1
+        ;;
+    esac
+  done
+
+  # Discard processed options.
+  shift $((optionIndex - 1))
+
+  path="${1}"
+
+  realpath="$(realpath "${path}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    [[ "${quiet}" -eq 0 ]] && cecho 'redbold' "Error: File '${path}' does not exists." >&2
+    [[ "${exitOnError}" -ne 0 ]] && exit 1
+    return 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+export -f 'realpath_check'
+
+
+
+# Check if a binary is present. Print its path on &1 if found.
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a 'binaries' <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
+export -f 'check_binary'
+
+
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  local key
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  fontIndex=()
+  fontValue=()
+
+  fontIndex+=( 'black' );     fontValue+=( "$(tput 'setaf' 0)" )
+  fontIndex+=( 'red' );       fontValue+=( "$(tput 'setaf' 1)" )
+  fontIndex+=( 'green' );     fontValue+=( "$(tput 'setaf' 2)" )
+  fontIndex+=( 'yellow' );    fontValue+=( "$(tput 'setaf' 3)" )
+  fontIndex+=( 'blue' );      fontValue+=( "$(tput 'setaf' 4)" )
+  fontIndex+=( 'magenta' );   fontValue+=( "$(tput 'setaf' 5)" )
+  fontIndex+=( 'cyan' );      fontValue+=( "$(tput 'setaf' 6)" )
+  fontIndex+=( 'white' );     fontValue+=( "$(tput 'setaf' 7)" )
+
+  fontIndex+=( 'bgBlack' );   fontValue+=( "$(tput 'setab' 0)" )
+  fontIndex+=( 'bgRed' );     fontValue+=( "$(tput 'setab' 1)" )
+  fontIndex+=( 'bgGreen' );   fontValue+=( "$(tput 'setab' 2)" )
+  fontIndex+=( 'bgYellow' );  fontValue+=( "$(tput 'setab' 3)" )
+  fontIndex+=( 'bgBlue' );    fontValue+=( "$(tput 'setab' 4)" )
+  fontIndex+=( 'bgMagenta' ); fontValue+=( "$(tput 'setab' 5)" )
+  fontIndex+=( 'bgCyan' );    fontValue+=( "$(tput 'setab' 6)" )
+  fontIndex+=( 'bgWhite' );   fontValue+=( "$(tput 'setab' 7)" )
+
+  fontIndex+=( 'bold' );      fontValue+=( "$(tput 'bold')" )
+  fontIndex+=( 'stout' );     fontValue+=( "$(tput 'smso')" ) # Standout.
+  fontIndex+=( 'under' );     fontValue+=( "$(tput 'smul')" ) # Underline.
+  fontIndex+=( 'blink' );     fontValue+=( "$(tput 'blink')" ) # Blinking.
+  fontIndex+=( 'italic' );    fontValue+=( "$(tput 'sitm')" )
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
+
+
+# Test if given string is a url.
+# @see https://stackoverflow.com/questions/3183444/check-for-valid-link-url
+#
+# @param string $url The tested URL.
+# @return 0 if $url is a URL, 1 otherwise.
+function isUrl() {
+  local url="${1}"
+  local urlRegex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'
+
+  [[ "${url}" =~ ${urlRegex} ]] && return 0
+
+  return 1
+} # isUrl()
+export -f 'isUrl'
+
+
+
+# Download content from a URL.
+# if outputPath is not specified, output the content on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $url The fetched URL.
+# @param string $outputPath an optionnal output path.
+# @param string $userAgent an optionnal User Agent string.
+#
+# @return 0 on success, 1 on failure.
+function download() {
+  local quiet=0
+  local verbose=0
+  local url=''
+  local outputPath=''
+  local userAgent=''
+  local cookies=''
+
+  local binaryPath
+  local binary
+  local commandLine=()
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'url+' 'outputPath' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: download: downloading '${url}' to '${outputPath}'." >&2
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: download: checking for wget or curl." >&2
+
+  # Check for wget or curl presence.
+  binaryPath="$(check_binary 'wget;curl' 'wget')"
+  binary="$(basename "${binaryPath}")"
+
+  # If no target specified, output on stdout.
+  # Warning: redirecting output to "grep --max-count=1" will trigger an error.
+  [[ -z "${outputPath}" || "${outputPath}" = '-' ]] && outputPath='-'
+
+  # Build command line according to detected binary.
+  if [[ "${binary}" = 'curl' ]]; then
+    # Curl is used.
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: download: using curl." >&2
+
+    # --insecure: ignore SSL errors.
+    # --location: follow redirects.
+    commandLine+=( 'curl' '--insecure' '--location' )
+    commandLine+=( '--silent' )
+    [[ "${verbose}" -ne 0 ]] && commandLine+=( '--verbose' )
+    [[ -n "${cookies}" ]] && commandLine+=( "--cookie=${cookies}")
+    [[ -n "${userAgent}" ]] && commandLine+=( "--user-agent=${userAgent}" )
+    [[ -n "${outputPath}" ]] && commandLine+=( "--output=${outputPath}" )
+    commandLine+=( "${url}" )
+  else
+    # Wget is used.
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: download: using wget." >&2
+
+    # --no-check-certificate: ignore SSL errors.
+    # --append-output=/dev/stderr: Prevent the creation of wget-log files.
+    commandLine+=( 'wget' '--no-check-certificate' )
+    commandLine+=( '--append-output=/dev/stderr' )
+    [[ "${verbose}" -eq 0 ]] && commandLine+=( '--quiet' )
+    [[ "${verbose}" -ne 0 ]] && commandLine+=( '--no-verbose' )
+    [[ -n "${cookies}" ]] && commandLine+=( "--header=Cookie: ${cookies}")
+    [[ -n "${userAgent}" ]] && commandLine+=( "--user-agent=${userAgent}" )
+    [[ -n "${outputPath}" ]] && commandLine+=( "--output-document=${outputPath}" )
+    commandLine+=( "${url}" )
+  fi
+
+  # Run the command line.
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: download: calling { ${commandLine[*]} }" >&2
+  if "${commandLine[@]}"; then
+    [[ "${verbose}" -ne 0 ]] && cecho 'green' "Info: download succeed." >&2
+  else
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: download failed." >&2
+
+    # Remove incomplete downloaded file.
+    [[ "${outputPath}" != '-' && "${outputPath}" != '/dev/stdout' && -e "${outputPath}" ]] && rm "${outputPath}"
+
+    return 1
+  fi
+
+  return 0
+} # download()
+export -f 'download'
+
+
+
+# List all URLs matching the template in the contents of the source URL.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The URL of the inspected contents.
+# @param string $fileTemplate The template to match.
+# @param string $userAgent an optionnal User Agent string.
+#
+# @return 0 on success, 1 on failure.
+function listMatchingUrls() {
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local userAgent=''
+  local cookies=''
+
+  local rootUrl=''
+  local baseUrl=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate+' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: listMatchingUrls: search for '${fileTemplate}' in '${sourceUrl}'." >&2
+
+  # Compute the root URL of the content page..
+  rootUrl="$(cut -d '/' -f 1-3 <<< "${sourceUrl}")"
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: listMatchingUrls: Root URL is '${rootUrl}'." >&2
+
+  # Compute the base URL of the content page.
+  baseUrl="${sourceUrl%/*}"
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: listMatchingUrls: Base URL is '${baseUrl}'." >&2
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: listMatchingUrls: downloading source page." >&2
+  # 1. download the souceUrl content.
+  # 2. Use sed to resolve relative URLs (href contents must start by a 'http://' or similar).
+  # 3. Use grep to output URL matching the file template.
+  # 4. Use sed to remove the trailing '"'
+  if download --quiet="${quiet}" --verbose="${verbose}" \
+              --url="${sourceUrl}" --outputPath='-' \
+              --userAgent="${userAgent}" --cookies="${cookies}" \
+          | sed -e "s|\(href=[\"']\)/|\1${rootUrl}/|g" \
+                -e "s|href=[\"']\([^:\"']*\)[\"']|href=\"${baseUrl}/\1\"|g" \
+          | grep --only-matching "[\"'][^\"'=]*://[^\"']*/${fileTemplate//VERSION/[^\"\']*}[^\"']*[\"']" \
+          | sed -e "s|^[\"']||" -e "s|[\"']$||" -e 's/&amp;/\&/g'; then
+    # Success
+    return 0
+  fi
+
+  return 1
+} # listMatchingUrls()
+
+
+
+# Get the version of the fileTemplate in the given url.
+# Output the versions on stdout, one per line.
+#
+# @param string $fileTemplate The template to match.
+# @param string[] $urls The URLs where to detect the version.
+#
+# @return 0 on success, 1 on failure.
+function getVersionFromUrl() {
+  local quiet=0
+  local verbose=0
+  local fileTemplate=''
+  local urls=()
+  local url=''
+  local version=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'fileTemplate+' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  urls=( "${arguments[@]}" )
+  [[ "${#urls[@]}" -eq 0 ]] && mapfile -t 'urls' '/dev/stdin'
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: getVersionFromUrl: extract version number of '${fileTemplate}' from ${#urls[@]} urls." >&2
+
+  for url in "${urls[@]}"; do
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' -n "Info: getVersionFromUrl: processing URL '${url}'..." >&2
+
+    if [[ "${url}" =~ ^.*${fileTemplate//VERSION/(.*)}.*$ ]]; then
+      version="${BASH_REMATCH[1]}"
+      [[ "${verbose}" -ne 0 ]] && cecho 'green' "${version}" >&2
+      echo "${version}"
+    else
+      [[ "${verbose}" -ne 0 ]] && cecho 'red' "Error" >&2
+      echo 'error'
+    fi
+  done
+
+  return 0
+} # getVersionFromUrl()
+
+
+
+# Get the filename of the fileTemplate in the given url.
+# Output the filename on stdout, one per line.
+#
+# @param string $fileTemplate The template to match.
+# @param string[] $urls The URLs where to detect the version.
+#
+# @return 0 on success, 1 on failure.
+function getFilenameFromUrl() {
+  local quiet=0
+  local verbose=0
+  local fileTemplate=''
+  local urls=()
+  local filename=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'fileTemplate' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+
+  urls=( "${arguments[@]}" )
+  [[ "${#urls[@]}" -eq 0 ]] && mapfile -t 'urls' '/dev/stdin'
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: getFilenameFromUrl: extract filename of '${fileTemplate}' from ${#urls[@]} urls." >&2
+
+  for url in "${urls[@]}"; do
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' -n "Info: getFilenameFromUrl: processing URL '${url}'..." >&2
+
+    if [[ -n "${fileTemplate}" && "${url}" =~ ^.*(${fileTemplate//VERSION/.*}).*$ ]]; then
+      filename="${BASH_REMATCH[1]}"
+      [[ "${verbose}" -ne 0 ]] && cecho 'green' "${filename}" >&2
+      echo "${filename}"
+    else
+      # fileTemplate is not specified, or URL does not match fileTemplate (urlTemplate may have been used).
+      # Extract probable filename from URL using basename.
+      filename="$(basename "${url%%\?*}")"
+
+      if [[ -n "${filename}" ]]; then
+        [[ "${verbose}" -ne 0 ]] && cecho 'green' "${filename}" >&2
+        echo "${filename}"
+      else
+        [[ "${verbose}" -ne 0 ]] && cecho 'red' "Error" >&2
+        echo "error"
+
+        # Exit with error if there is only one url to process.
+        [[ "${#urls[@]}" -eq 1 ]] && return 1
+      fi
+    fi
+  done
+
+  return 0
+} # getFilenameFromUrl()
+
+
+
+# List the versions and their URLs matching the template in the contents of the source URL.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The URL of the inspected contents.
+# @param string $fileTemplate The template to match.
+# @param string $userAgent an optionnal User Agent string.
+# @param string $cookies an optionnal cookies header.
+#
+# @return 0 on success, 1 on failure.
+function listVersions() {
+
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local userAgent=''
+  local cookies=''
+
+  local versionsUrls=()
+  local version=''
+  local url=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate+' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: listVersions: get URL of the latest version of '${fileTemplate}' in '${sourceUrl}'." >&2
+
+  mapfile -t 'versionUrls' < <(listMatchingUrls --quiet="${quiet}" --verbose="${verbose}"\
+          --sourceUrl="${sourceUrl}" --fileTemplate="${fileTemplate}" \
+          --userAgent="${userAgent}" --cookies="${cookies}")
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: listVersions: get version number of all '${fileTemplate}' in '${sourceUrl}'." >&2
+
+  for url in "${versionUrls[@]}"; do
+    version="$(getVersionFromUrl --quiet="${quiet}" --verbose="${verbose}" --fileTemplate="${fileTemplate}" "${url}")"
+
+    printf '%s\t%s\n' "${version}" "${url}"
+  done
+
+  return 0
+} # listVersions()
+
+
+
+
+# Get the URL of the latest version matching the template in the contents of the source URL.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The URL of the inspected contents.
+# @param string $fileTemplate The template to match.
+# @param string $userAgent an optionnal User Agent string.
+# @param string $cookies an optionnal cookies header.
+#
+# @return 0 on success, 1 on failure.
+function getLatestVersionUrl() {
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local userAgent=''
+  local cookies=''
+
+  local versionUrls=()
+  local latestVersion=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate+' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: getLatestVersionUrl: get URL of the latest version of '${fileTemplate}' in '${sourceUrl}'." >&2
+
+  mapfile -t 'versionUrls' < <(listMatchingUrls --quiet="${quiet}" --verbose="${verbose}"\
+          --sourceUrl="${sourceUrl}" --fileTemplate="${fileTemplate}" \
+          --userAgent="${userAgent}" --cookies="${cookies}")
+
+  if [[ "${#versionUrls}" -ne 0 ]]; then
+    # Get the latest version.
+    latestVersion="$(printf '%s\n' "${versionUrls[@]}" \
+        | getVersionFromUrl --quiet="${quiet}" --verbose="${verbose}" --fileTemplate="${fileTemplate}" \
+        | grep -v -e 'alpha\|beta' \
+        | sort --version-sort \
+        | tail -n 1)"
+
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: getLatestVersionUrl: latest version is '${latestVersion}'." >&2
+
+    printf '%s\n' "${versionUrls[@]}" \
+        | grep --max-count=1 "${fileTemplate//VERSION/${latestVersion}}"
+
+    return 0
+  fi
+
+  return 1
+} # getLatestVersionUrl()
+
+
+
+# Get the URL of the latest version matching the template in the contents of the source URL.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The URL of the inspected contents.
+# @param string $fileTemplate The template to match.
+# @param string $userAgent an optionnal User Agent string.
+# @param string $cookies an optionnal cookies header.
+#
+# @return 0 on success, 1 on failure.
+function getLatestVersion() {
+
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local userAgent=''
+  local cookies=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate+' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: getLatestVersion: get latest version number of '${fileTemplate}' in '${sourceUrl}'." >&2
+
+  ( getLatestVersionUrl --quiet="${quiet}" --verbose="${verbose}"\
+          --sourceUrl="${sourceUrl}" --fileTemplate="${fileTemplate}" \
+          --userAgent="${userAgent}" --cookies="${cookies}"\
+      | getVersionFromUrl --quiet="${quiet}" --verbose="${verbose}" --fileTemplate="${fileTemplate}" ) \
+    && return 0
+
+  cecho 'red' "Error: failed to detect latest version number."
+
+  return 1
+} # getLatestVersion()
+
+
+
+# Detect the URL of the file to download.
+# Output the URL on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The URL of the inspected contents.
+# @param string $fileTemplate The template to match to detect the latest VERSION.
+# @param string $urlTemplate an optionnal URL template to with apply the VERSION (need fileTemplate).
+# @param string $userAgent an optionnal User Agent string.
+# @param string $cookies an optionnal cookie header.
+#
+# @return 0 on success, 1 on failure.
+function getFileUrl() {
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local urlTemplate=''
+  local userAgent=''
+  local cookies=''
+
+  local version=''
+  local fileUrl=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate' 'urlTemplate' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  # Test if file template is set. Use it to fetch latest version url in sourceUrl contents.
+  if [[ -n "${fileTemplate}" ]]; then
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: getFileUrl(): call getLatestVersionUrl()." >&2
+    if fileUrl="$(getLatestVersionUrl --quiet="${quiet}" --verbose="${verbose}" \
+            --sourceUrl="${sourceUrl}" --fileTemplate="${fileTemplate}" \
+            --userAgent="${userAgent}" --cookies="${cookies}")"; then
+
+      if [[ -n "${urlTemplate}" ]]; then
+        # An alternative URL template has been provided.
+        # Fetch version number from latest version url.
+        if version="$(getVersionFromUrl --quiet="${quiet}" --verbose="${verbose}" \
+                        --fileTemplate="${fileTemplate}" "${fileUrl}")"; then
+          fileUrl="${urlTemplate//VERSION/${version}}"
+        else
+          [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to detect latest version number." >&2
+          return 1
+        fi
+      fi
+    else
+      [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to detect latest version URL." >&2
+      return 1
+    fi
+  else
+    # fileTemplate is not set. fileUrl default to the provided source URL.
+    fileUrl="${sourceUrl}"
+  fi
+
+  echo "${fileUrl}"
+
+  return 0
+} # getFileUrl()
+
+
+
+# Compute the local path of the downloaded file.
+# Output the path on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $outputPath The default output path.
+# @param string $fileUrl The URL of the downloaded file.
+# @param string $fileTemplate The template to match to detect the latest VERSION.
+# @param string $extract The extraction mode of the downloaded file.
+#
+# @return 0 on success, 1 on failure.
+function getFilePath() {
+  local quiet=0
+  local verbose=0
+  local outputPath=''
+  local fileUrl=''
+  local fileTemplate=''
+
+  local fileName=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'outputPath' 'fileUrl+' 'fileTemplate' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  # Download to a temporary file if target file is not specified.
+  if [[ -z "${outputPath}" || "${outputPath}" = '-' ]]; then
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: target path missing, creating temporary directory." >&2
+    outputPath="$(mktemp -d -t 'tmp.XXXXXXXXXX')"
+  fi
+
+  # If output path is a directory, try to detect the filename from URL.
+  if [[ -d "${outputPath}" ]]; then
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: output path is a directory, parsing filename from URL." >&2
+    if fileName="$(getFilenameFromUrl --quiet="${quiet}" --verbose="${verbose}" \
+                                      --fileTemplate="${fileTemplate}" "${fileUrl}")"; then
+      outputPath="${outputPath}/${fileName}"
+    else
+      # Unable to detect filename from URL. Create a temporary file name.
+      outputPath="$(mktemp -p "${outputPath}" -t 'tmp.XXXXXXXXXX')"
+    fi
+  fi
+
+  echo "${outputPath}"
+
+  return 0
+} # getFilePath()
+
+
+
+# Download content from a URL and write it to filesystem.
+# Output the path to the download file on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The versions page URL or downloaded file URL.
+# @param string $fileTemplate The filename template used to detect the URLS in the versions page.
+# @param string $urlTemplate A template URL, if the downloaded file URL is different from the detected one.
+# @param string $outputPath an optionnal output path.
+# @param string $userAgent an optionnal User Agent string.
+# @param string $cookies an optinnal Cookie header.
+#
+# @return 0 on success, 1 on failure.
+function downloadFile() {
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local urlTemplate=''
+  local outputPath=''
+  local userAgent=''
+  local cookies=''
+
+  local fileUrl=''
+  local filePath=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate' 'urlTemplate' \
+                        'outputPath' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  if fileUrl="$(getFileUrl --quiet="${quiet}" --verbose="${verbose}" \
+        --sourceUrl="${sourceUrl}" --fileTemplate="${fileTemplate}" --urlTemplate="${urlTemplate}" \
+        --userAgent="${userAgent}" --cookies="${cookies}")"; then
+
+    if filePath="$(getFilePath --quiet="${quiet}" --verbose="${verbose}" --outputPath="${outputPath}" \
+          --fileUrl="${fileUrl}" --fileTemplate="${fileTemplate}")"; then
+
+      [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: downloadFile: downloading '${fileUrl}' to '${filePath}'." >&2
+
+      if download --quiet="${quiet}" --verbose="${verbose}" \
+            --url="${fileUrl}" --outputPath="${filePath}" \
+            --userAgent="${userAgent}" --cookies="${cookies}"; then
+        echo "${filePath}"
+
+        return 0
+      else
+        [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: failed to download file." >&2
+
+        return 1
+      fi
+
+    else
+      [[ "${quiet}" -ne 0 ]] && cecho 'red' "Error: failed to create output path." >&2
+      return 1
+    fi
+
+  else
+    [[ "${quiet}" -ne 0 ]] && cecho 'red' "Error: failed to detect file URL." >&2
+    return 1
+  fi
+
+  return 1
+} # downloadFile()
+export -f 'downloadFile'
+
+
+
+# Extract a tar.gz or tar.bz2 file to the given output path.
+# Output the path to the extracted contents on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $filePath The path to the file to extract.
+# @param string $outputPath a output path.
+# @param string extract An optionnal extract mode (gzip or bzip2).
+# @param integer stripComponents See tar --strip-components option.
+#
+# @return 0 on success, 1 on failure.
+function extractTar() {
+  local quiet=0
+  local verbose=0
+  local filePath=''
+  local outputPath=''
+  local extract=''
+  local stripComponents=0
+
+  local tarOptions=()
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'filePath+' 'outputPath+' 'extract' 'stripComponents' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  # Test if the given path is a file.
+  if [[ ! -f "${filePath}" ]]; then
+    cecho 'red' "Error: '${filePath}' is not a file." >&2
+    return 1
+  fi
+
+  # Test if the given output path is a directory.
+  if [[ ! -d "${outputPath}" ]]; then
+    cecho 'red' "Error: '${outputPath}' is not a directory." >&2
+    return 1
+  fi
+
+  case "${extract}" in
+    'gzip' | 'tar.gz' | 'tgz' | 'application/gzip' )
+      tarOptions+=( '--gzip' )
+      ;;
+    'bzip2' | 'tar.bz2' | 'tbz2' | 'application/x-bzip2' )
+      tarOptions+=( '--bzip2' )
+      ;;
+  esac
+
+  if tar --strip-components="${stripComponents}" \
+      --directory="${outputPath}" \
+      "${tarOptions[@]}" --extract --file="${filePath}"; then
+    # Extraction is successfull.
+
+    if [[ $(find "${outputPath}" -maxdepth 1 | wc -l) -eq 2 \
+          && "${stripComponents}" = "0" ]]; then
+      outputPath="${outputPath}/$(ls -1 "${outputPath}")"
+    fi
+
+    echo "${outputPath}"
+
+    return 0
+  fi
+
+  return 1
+} # extractTar()
+
+
+
+# Extract a Zip file to the given output path.
+# Output the path to the extracted contents on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $filePath The path to the file to extract.
+# @param string $outputPath a output path.
+# @param integer stripComponents See tar --strip-components option.
+#
+# @return 0 on success, 1 on failure.
+function extractZip() {
+  local quiet=0
+  local verbose=0
+  local filePath=''
+  local outputPath=''
+  local stripComponents=0
+
+  local extractionPath=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'filePath+' 'outputPath+' 'stripComponents' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  # Test if the given path is a file.
+  if [[ ! -f "${filePath}" ]]; then
+    cecho 'red' "Error: '${filePath}' is not a file." >&2
+    return 1
+  fi
+
+  # Test if the given output path is a directory.
+  if [[ ! -d "${outputPath}" ]]; then
+    cecho 'red' "Error: '${outputPath}' is not a directory." >&2
+    return 1
+  fi
+
+  extractionPath="${outputPath}"
+  if [[ "${stripComponents}" != "0" ]]; then
+    # If stripComponents is not zero, extract to a temporary directory.
+    extractionPath="$(mktemp -d -t "tmp.XXXXXXXXXX")"
+  fi
+
+  if unzip -d "${extractionPath}" -o -qq "${filePath}"; then
+    # Extraction is successfull.
+
+    # Emulate tar strip components.
+    if [[ "${stripComponents}" != "0" ]]; then
+      find "${extractionPath}" -mindepth "$((stripComponents + 1))" -maxdepth "$((stripComponents + 1))" -print0 \
+        | xargs -0 -iFILE mv FILE "${outputPath}"
+
+      rm -r "${extractionPath}"
+    fi
+
+    if [[ $(find "${outputPath}" -maxdepth 1 | wc -l) -eq 2 \
+          && "${stripComponents}" = "0" ]]; then
+      outputPath="${outputPath}/$(ls -1 "${outputPath}")"
+    fi
+
+    echo "${outputPath}"
+
+    return 0
+  fi
+
+  return 1
+} # extractZip()
+
+
+
+# Extract a file to the given output path or a temporary directory.
+# Output the path to the extracted contents on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $filePath The path to the file to extract.
+# @param string $outputPath an optionnal output path.
+# @param string extract An extract mode.
+# @param integer stripComponents See tar --strip-components option.
+#
+# @return 0 on success, 1 on failure.
+function extractFile() {
+  local quiet=0
+  local verbose=0
+  local filePath=''
+  local outputPath=''
+  local extract=''
+  local stripComponents=0
+
+  local extractCommandLine=()
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'filePath+' 'outputPath' 'extract' 'stripComponents' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  # Test if the given path is a file.
+  if [[ ! -f "${filePath}" ]]; then
+    cecho 'red' "Error: '${filePath}' is not a file." >&2
+    return 1
+  fi
+
+  # Extract to a temporary path if outputPath is not specified.
+  if [[ -z "${outputPath}" || "${outputPath}" = '-' ]]; then
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: output path missing, creating temporary directory." >&2
+    outputPath="$(mktemp -d -t 'tmp.XXXXXXXXXX')"
+  fi
+
+  # Test if output path is not a directory, 
+  if [[ ! -d "${outputPath}" ]]; then
+    cecho 'red' "Error: '${outputPath}' is not a directory." >&2
+    return 1
+  fi
+
+  # If extract mode is auto, detect the downloaded file mime type.
+  if [[ "${extract}" = 'auto' ]]; then
+    extract="$(file --mime-type "${filePath}" | sed -e 's/^.*: //')"
+  fi
+
+  case "${extract}" in
+    'zip' | 'application/zip' )
+      extractCommandLine+=( 'extractZip' )
+      ;;
+    'tar.gz' | 'tgz' | 'gzip' | 'application/gzip' | 'tar.bz2' | 'tbz2' | 'application/x-bzip2' )
+      extractCommandLine+=( 'extractTar' "--extract=${extract}" )
+      ;;
+    * )
+      cecho 'red' "Error: unsupported archive type ('${extract}')." >&2
+      return 1
+      ;;
+  esac
+
+  if "${extractCommandLine[@]}" --quiet="${quiet}" --verbose="${verbose}" \
+    --stripComponents="${stripComponents}" --filePath="${filePath}" --outputPath="${outputPath}"; then
+    # Extraction is a success.
+    return 0
+  fi
+
+  return 1
+} # extractFile()
+export -f 'extractFile'
+
+
+
+# Download content from a URL and extract it to filesystem.
+# Output the path to the extracted contents on stdout.
+#
+# @param bool $quiet 1 to quiet output.
+# @param bool $verbose 1 to enable verbose output.
+# @param string $sourceUrl The versions page URL or downloaded file URL.
+# @param string $fileTemplate The filename template used to detect the URLS in the versions page.
+# @param string $urlTemplate A template URL, if the downloaded file URL is different from the detected one.
+# @param string $outputPath an optionnal output path.
+# @param string extract An extract mode.
+# @param integer stripComponents See tar --strip-components option.
+# @param string $userAgent an optionnal User Agent string.
+# @param string $cookies an optinnal Cookie header.
+#
+# @return 0 on success, 1 on failure.
+function downloadAndExtractFile() {
+  local quiet=0
+  local verbose=0
+  local sourceUrl=''
+  local fileTemplate=''
+  local urlTemplate=''
+  local outputPath=''
+  local extract=''
+  local stripComponents=0
+  local userAgent=''
+  local cookies=''
+
+  local filePath=''
+
+  local arguments=()
+  local allowedOptions=( 'quiet' 'verbose' 'sourceUrl+' 'fileTemplate' 'urlTemplate' \
+                        'outputPath' 'extract' 'stripComponents' 'userAgent' 'cookies' )
+
+  ### Process function options.
+  processOptions "${allowedOptions[*]}" "${@}" || return 1
+
+  filePath="${outputPath}"
+  if [[ -n "${extract}" ]]; then
+    filePath="$(mktemp -t 'tmp.XXXXXXXXXX')"
+  fi
+
+  if filePath="$(downloadFile --quiet="${quiet}" --verbose="${verbose}" \
+      --userAgent="${userAgent}" --cookies="${cookies}" \
+      --outputPath="${filePath}" --urlTemplate="${urlTemplate}" \
+      --fileTemplate="${fileTemplate}" --sourceUrl="${sourceUrl}")"; then
+
+    if [[ -n "${extract}" ]]; then
+      if extractFile --quiet="${quiet}" --verbose="${verbose}" \
+        --extract="${extract}" --stripComponents="${stripComponents}" \
+        --filePath="${filePath}" --outputPath="${outputPath}"; then
+        # Remove downloaded file on successful extraction.
+        rm "${filePath}"
+      else
+        # Extraction failed, exit with error.
+        return 1
+      fi
+    else
+      # Extraction is not asked. Output downloaded file path.
+      echo "${filePath}"
+      return 0
+    fi
+  else
+    cecho 'red' "Error: failed to download file." >&2
+    return 1
+  fi
+
+  return 1
+} # downloadAndExtractFile()
+export -f 'downloadAndExtractFile'
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  (( $# )) || return 1
+  local optionList
+  optionList="${1#;}"
+  (( optionIndex )) || optionIndex=1
+  [[ ${optionIndex} -lt $# ]] || return 1
+  shift ${optionIndex}
+  if [[ "${1}" != "-" && "${1}" != "${1#-}" ]]; then
+    optionIndex=$((optionIndex + 1)); if [[ "${1}" != "--" ]]; then
+    local o
+    o="-${1#-${optionOfs}}"
+    for opt in ${optionList#;}
+    do
+      optionName="${opt%[;.:]}"
+      unset optionArgument
+      local optionType="${opt##*[^;:.]}"
+      [[ -z "${optionType}" ]] && optionType=";"
+      if [[ ${#optionName} -gt 1 ]]; then
+        # long-named option
+        case "$o" in
+          "--${optionName}")
+            if [[ "${optionType}" != ":" ]]; then
+              return 0
+            fi
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              # error: must have an agrument
+              echo "$0: error: ${optionName} must have an argument" >&2
+              optionArgument="${optionName}";
+              optionName="?"
+              return 1;
+            fi
+            optionIndex=$((optionIndex + 1)) # skip option's argument
+            return 0
+          ;;
+          "--${optionName}="*)
+            if [[ "${optionType}" = ";" ]];
+            then  # error: must not have arguments
+              (( OPTERR )) && echo "$0: error: ${optionName} must not have arguments" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionArgument=${o#--${optionName}=}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-${optionName}")
+            unset optionOfs
+            [[ "${optionType}" != ":" ]] && return 0
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              echo "$0: error: -${optionName} must have an argument" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionIndex=$(( optionIndex + 1 )) # skip option's argument
+            return 0
+          ;;
+          "-${optionName}"*)
+            if [ ${optionType} = ";" ]
+            then # an option with no argument is in a chain of options
+              optionOfs="${optionOfs}?" # move to the next option in the chain
+              optionIndex=$(( optionIndex - 1 )) # the chain still has other options
+              return 0
+            else
+              unset optionOfs
+              optionArgument="${o#-${optionName}}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage 1
+  fi; fi
+  optionName="?"
+  unset optionArgument
+  return 1
+}
+
+function optionListex
+{
+  local l="${1}"
+  local m # mask
+  local r # to store result
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [[ -n "${l%%[^:.;]*}" ]]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo "${r}"
+}
+
+function getopt()
+{
+  local optionList
+
+  optionList="$(optionListex "${1}")"
+  shift
+  getoptex "${optionList}" "${@}"
+  return ${?}
+}
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Check for binaries presence
+check_binary 'basename' 'coreutils' >'/dev/null'
+check_binary 'dirname' 'coreutils' >'/dev/null'
+check_binary 'mktemp' 'mktemp' >'/dev/null'
+check_binary 'sed' 'sed' >'/dev/null'
+
+# Check for curl or wget.
+check_binary "wget;curl" "wget" >'/dev/null'
+
+
+# Application defaults
+quiet=0
+verbose=0
+
+action='download'
+
+urlTemplate=''
+fileTemplate=''
+sourceUrl=''
+extract=''
+forge=''
+userAgent=''
+cookies=''
+stripComponents=0
+outputPath=''
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+declare -a scriptArguments
+scriptArguments=( 'help' 'h' 'quiet' 'q' 'verbose' 'v' \
+    'extract.' 'x.' 'user-agent:' 'a:' 'cookies:' 'c:' \
+    'url-template:' 'u:' 'file-template:' 't:' 'forge:' 'f:' \
+    'strip-components:' 's:' 'output-path=:' 'o:' 'print-version' 'p' 'list-versions' 'list' 'l')
+while getoptex "${scriptArguments[*]}" "${@}"; do
+  # Options debuging.
+  # echo "Option <$optionName> ${optionArgument:+has an arg <$optionArgument>}"
+
+  case "${optionName}" in
+    'list-versions' | 'list' | 'l' )
+      action='list-versions'
+      ;;
+
+    'print-version' | 'p' )
+      action='print-version'
+      ;;
+
+    'extract' | 'x' )
+      extract='auto'
+      [[ -n "${optionArgument}" ]] && extract="${optionArgument}"
+      ;;
+
+    'user-agent' | 'a' )
+      userAgent="${optionArgument}"
+      ;;
+
+    'cookies' | 'c' )
+      cookies="${optionArgument}"
+      ;;
+
+    'forge' | 'f' )
+      forge="${optionArgument}"
+      ;;
+
+    'url-template' | 'u' )
+      urlTemplate="${optionArgument}"
+      ;;
+
+    'file-template' | 't' )
+      fileTemplate="${optionArgument}"
+      ;;
+
+    'strip-components' | 's' )
+      stripComponents="${optionArgument}"
+      ;;
+
+    'output-path' | 'o' )
+      outputPath="$(realpath_check "${optionArgument}")" || exit 1
+      ;;
+
+    'quiet' | 'q' )
+      quiet=1
+      ;;
+
+    'verbose' | 'v' )
+      verbose=1
+      ;;
+
+    'help' | 'h' | * )
+      usage 0
+      ;;
+  esac
+done
+
+shift $((optionIndex - 1))
+
+sourceUrl="${1}"
+
+# Can't be quiet when verbose.
+[[ "${verbose}" -ne 0 ]] && quiet=0
+
+if [[ -z "${sourceUrl}" ]]; then
+  cecho 'red' "Error: mandatory argument missing." >&2
+  exit 1
+fi
+
+# If final argument is not a URL, try to apply the forge setting.
+if ! isUrl "${sourceUrl}"; then
+  case "${forge}" in
+    'github' )
+      # Forge is github
+      sourceUrl="https://github.com/${sourceUrl}/releases"
+      ;;
+
+    'sourceforge' )
+      # Forge is sourceforge. Need to set a cookie.
+      sourceUrl="http://sourceforge.net/projects/${sourceUrl}/files/latest/download"
+
+      [[ -n "${cookies}" ]] && cookies="${cookies; }"
+      cookies="FreedomCookie=true"
+
+      # Set a default userAgent
+      # User Agent is used by sites such as sourceforge.net to propose OS specific files to download.
+      # It can be a hassle to get to the default source file.
+      [[ -z "${userAgent}" ]] && userAgent="Mozilla/5.0 (X11; U; Linux $(uname -m); rv:5.0) Gecko/20100101 Firefox/5.0"
+      ;;
+    * )
+      cecho 'red' "Error: no valid URL given." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+case "${action}" in
+  'print-version' )
+    getLatestVersion --quiet="${quiet}" --verbose="${verbose}" \
+      --userAgent="${userAgent}" --cookies="${cookies}" \
+      --fileTemplate="${fileTemplate}" --sourceUrl="${sourceUrl}"
+    exit "${?}"
+    ;;
+
+  'list-versions' )
+    listVersions --quiet="${quiet}" --verbose="${verbose}" \
+      --userAgent="${userAgent}" --cookies="${cookies}" \
+      --fileTemplate="${fileTemplate}" --sourceUrl="${sourceUrl}"
+    exit "${?}"
+    ;;
+
+  'extract' | 'download' | * )
+    downloadAndExtractFile --quiet="${quiet}" --verbose="${verbose}" \
+      --userAgent="${userAgent}" --cookies="${cookies}" \
+      --outputPath="${outputPath}" --extract="${extract}" --stripComponents="${stripComponents}" \
+      --urlTemplate="${urlTemplate}" --fileTemplate="${fileTemplate}" --sourceUrl="${sourceUrl}"
+    exit "${?}"
+    ;;
+esac
+exit 0
