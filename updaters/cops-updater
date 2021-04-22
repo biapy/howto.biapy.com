@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Update COPS local installation from fron github.
+# Update COPS local installation from github.
 # Check github for new release of COPS, and update
 # local installation if a newer version is available.
 #
@@ -11,15 +11,17 @@
 #
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/updaters/cops-updater"
 
-version="1.0.0"
+version="1.1.0"
 
 # History
 # -------
 #
+# 1.1.0
+#  - Replace sf-downloader by biapy-downloader.
+#
 # 1.0.0
 #  - Initial release, first proof of concept.
 #
-
 
 
 
@@ -403,7 +405,6 @@ check_binary "dirname" "coreutils" > '/dev/null'
 check_binary "mktemp" "mktemp" > '/dev/null'
 check_binary "sed" "sed" > '/dev/null'
 check_binary "wget" "wget" > '/dev/null'
-check_binary "dpkg" "dpkg" > '/dev/null'
 
 releasesPageUrl='https://github.com/seblucas/cops/releases'
 
@@ -459,9 +460,10 @@ grep -q 'COPS (Calibre OPDS PHP Server)' "${installPath}/base.php" 2>'/dev/null'
 
 
 [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Get newest release version from ${releasesPageUrl}."
-newestVersion="$(sf-downloader \
-    --generic="${releasesPageUrl}" \
-    --version 'cops' 'cops-VERSION.zip')"
+newestVersion="$(biapy-downloader \
+    --print-version --forge='github' \
+    --file-template='cops-VERSION.zip' 'seblucas/cops')"
+
 [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Newest COPS version is ${newestVersion}."
 
 [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Get currently installed version from '${installPath}'."
@@ -471,10 +473,9 @@ currentVersion="$(grep 'define.*VERSION' "${installPath}/base.php" \
 
 if [[ "${newestVersion}" != "${currentVersion}" ]]; then
   [[ "${quiet}" -eq 0 ]] && cecho 'green' "Udating COPS in '${installPath}' from version ${currentVersion} to ${newestVersion}."
-  sf-downloader \
-      --output-directory="${installPath}" \
-      --generic="${releasesPageUrl}" \
-      --zip 'cops' 'cops-VERSION.zip' >'/dev/null'
+  biapy-downloader \
+      --output-path="${installPath}" --extract --forge='github' \
+      --file-template='cops-VERSION.zip' 'seblucas/cops'
 else
   [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: COPS is up-to-date, nothing done."
 fi
