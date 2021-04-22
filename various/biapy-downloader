@@ -8,10 +8,14 @@
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/various/biapy-downloader"
-version="0.0.1"
+version="0.0.2"
 
 # History
 # -------
+#
+# 0.0.2
+#  - Add missing bzip2 and unzip checks.
+#  - Fix output-path argument.
 #
 # 0.0.1
 #  - First alpha release.
@@ -1477,6 +1481,10 @@ check_binary 'basename' 'coreutils' >'/dev/null'
 check_binary 'dirname' 'coreutils' >'/dev/null'
 check_binary 'mktemp' 'mktemp' >'/dev/null'
 check_binary 'sed' 'sed' >'/dev/null'
+check_binary 'tar' 'tar' >'/dev/null'
+check_binary 'unzip' 'unzip' >'/dev/null'
+check_binary 'bzip2' 'bzip2' >'/dev/null'
+check_binary 'gzip' 'gzip' >'/dev/null'
 
 # Check for curl or wget.
 check_binary "wget;curl" "wget" >'/dev/null'
@@ -1503,7 +1511,7 @@ declare -a scriptArguments
 scriptArguments=( 'help' 'h' 'quiet' 'q' 'verbose' 'v' \
     'extract.' 'x.' 'user-agent:' 'a:' 'cookies:' 'c:' \
     'url-template:' 'u:' 'file-template:' 't:' 'forge:' 'f:' \
-    'strip-components:' 's:' 'output-path=:' 'o:' 'print-version' 'p' 'list-versions' 'list' 'l')
+    'strip-components:' 's:' 'output-path:' 'o:' 'print-version' 'p' 'list-versions' 'list' 'l')
 while getoptex "${scriptArguments[*]}" "${@}"; do
   # Options debuging.
   # echo "Option <$optionName> ${optionArgument:+has an arg <$optionArgument>}"
