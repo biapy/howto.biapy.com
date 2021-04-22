@@ -13,6 +13,9 @@ version="0.0.2"
 # History
 # -------
 #
+# 0.0.3
+#  - Replace mv by cp in extractZip strip-components implementation.
+#
 # 0.0.2
 #  - Add missing bzip2 and unzip checks.
 #  - Fix output-path argument.
@@ -1183,7 +1186,7 @@ function extractZip() {
     # Emulate tar strip components.
     if [[ "${stripComponents}" != "0" ]]; then
       find "${extractionPath}" -mindepth "$((stripComponents + 1))" -maxdepth "$((stripComponents + 1))" -print0 \
-        | xargs -0 -iFILE mv FILE "${outputPath}"
+        | xargs -0 -iFILE cp -a FILE "${outputPath}"
 
       rm -r "${extractionPath}"
     fi
