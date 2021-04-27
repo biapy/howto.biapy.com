@@ -1,0 +1,527 @@
+#!/bin/bash
+#
+# Update Shaarli local installation from github.
+# Check github for new release of Shaarli, and update
+# local installation if a newer version is available.
+#
+# For suggestion and bug reports, please contact
+# Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
+#
+# @see https://github.com/seblucas/cops/
+#
+# upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/updaters/shaarli-updater"
+
+version="1.0.0"
+
+# History
+# -------
+#
+# 1.0.0
+#  - Initial release, first proof of concept.
+#
+
+
+# TODO
+# ----
+#
+# * Upgrade installed third party themes and plugins.
+#   At the moment, only material theme is supported.
+#
+
+
+# Get the basename of a path (multi-plateform version)
+# Print the result on &1 if found.
+#
+# @param string $path A path.
+#
+# @return A return code..
+function basename() {
+
+  [[ ${#} -eq 0 ]] && exit 1
+
+  case "$(uname)" in
+    'Linux' )
+      command basename -z -- "${@}" \
+        | command tr -d '\0'
+      ;;
+    'Darwin' | * )
+      command basename -- "${@}"
+      ;;
+  esac
+
+  return ${?}
+} # basename()
+export -f 'basename'
+
+
+
+# Get the absolute path for a file or directory.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return ${realpath} A absolute path.
+function realpath() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+
+  case "$(uname)" in
+    'Linux' )
+      realpath="$(readlink -f "${1}")"
+      ;;
+    'Darwin' )
+      realpath="$(stat -f '%N' "${1}")"
+      ;;
+    * )
+      realpath="$(realpath "${1}")"
+      ;;
+  esac
+
+  echo -n "${realpath}"
+  return 0
+} # realpath
+
+
+
+scriptName="$(basename "${0}")"
+
+
+
+# Print this script help.
+function usage {
+  echo "Shaarli Updater v${version}
+This script automate updating a local COPS installation.
+@see https://github.com/shaarli/Shaarli/
+
+Usage :
+
+  ${scriptName} [ --help ] [ --quiet ] [ --verbose ] '/path/to/shaarli'
+
+  Available options are :
+    * --help | -h     : Display this message.
+    * --quiet | -q    : Disable almost all outputs.
+    * --verbose | -v  : Enable debug outputs.
+    * '/path/to/shaarli' : Path of the updated loca l Shaarli installation.
+"
+
+  [[ -n "${1}" ]] && exit "${1}"
+} # usage
+
+
+
+# Get the absolute path for a file or directory and check the file existance.
+# If the file does not exists, display an error message and exit the script.
+# Print its path on &1 if found.
+#
+# @param string $path A relative path.
+#
+# @return Exit with error if the path is missing.
+function realpath_check() {
+  [[ ${#} -ne 1 ]] && exit 1
+
+  local realpath
+  realpath="$(realpath "${1}")"
+
+  if [[ -n "${realpath}" && ! -e "${realpath}" ]]; then
+    realpath=''
+  fi
+
+  if [[ -z "${realpath}" ]]; then
+    cecho 'redbold' "Error: File '${1}' does not exists." >&2
+    exit 1
+  fi
+
+  echo -n "${realpath}"
+  return 0
+} # realpath_check
+
+
+
+# Check if a binary is present. Print its path on &1 if found.
+#
+# @param string $binary The binaries to check, separated by ;.
+# @param string $package The package the binary come from.
+#
+# @return Exit with error if the binary is missing.
+function check_binary() {
+  [[ ${#} -ne 2 ]] && exit 1
+
+  local primary
+  local binaries
+  local binary
+
+  primary="${1%%;*}"
+  binaries=()
+
+  read -d ';' -r -a binaries <<< "${1}"
+
+  # Test the binary presence.
+  for binary in "${binaries[@]}"; do
+    if type "${binary}" &>'/dev/null'; then
+      command -v "${binary}"
+      return 0
+    fi
+  done
+
+  cecho 'redbold' "Error: '${primary}' is missing. Please install package '${2}'." >&2
+  exit 1
+} # check_binary()
+
+
+
+# Echo text in color.
+#
+# Colors definitions.
+# See http://mywiki.wooledge.org/BashFAQ/037
+#
+# @param string $color Color and weight for text. (boldgreen for example).
+# @param string $text The text to echo (and echo options).
+function cecho() {
+  if [[ ${#} -lt 2 ]]; then
+    echo "${@}"
+    return 0
+  fi
+
+  local color="${1}"
+
+  # remove color information from arguments.
+  shift 1
+
+  # Check that the output is to a terminal.
+  if [[ ! -t 1 ]]; then
+    # Not outputing to a terminal, discaring colors.
+    echo "${@}"
+    return 0
+  fi
+
+  local key
+
+  # Bash 4 version with associative array.
+  ## Color and weight definitions.
+  #declare -A font
+  #font['black']="$(tput 'setaf' 0)"
+  #font['red']="$(tput 'setaf' 1)"
+  #font['green']="$(tput 'setaf' 2)"
+  #font['yellow']="$(tput 'setaf' 3)"
+  #font['blue']="$(tput 'setaf' 4)"
+  #font['magenta']="$(tput 'setaf' 5)"
+  #font['cyan']="$(tput 'setaf' 6)"
+  #font['white']="$(tput 'setaf' 7)"
+
+  #font['bgBlack']="$(tput 'setab' 0)"
+  #font['bgRed']="$(tput 'setab' 1)"
+  #font['bgGreen']="$(tput 'setab' 2)"
+  #font['bgYellow']="$(tput 'setab' 3)"
+  #font['bgBlue']="$(tput 'setab' 4)"
+  #font['bgMagenta']="$(tput 'setab' 5)"
+  #font['bgCyan']="$(tput 'setab' 6)"
+  #font['bgWhite']="$(tput 'setab' 7)"
+
+  #font['bold']="$(tput 'bold')"
+  #font['stout']="$(tput 'smso')" # Standout.
+  #font['under']="$(tput 'smul')" # Underline.
+  #font['blink']="$(tput 'blink')" # Blinking
+  #font['italic']="$(tput 'sitm')"
+
+  ## Parse the color string.
+  #for key in "${!font[@]}"; do
+  #  [[ "${color}" = *"${key}"* ]] && echo -n "${font[${key}]}"
+  #done
+
+  declare -a fontIndex
+  declare -a fontValue
+
+  fontIndex=()
+  fontValue=()
+
+  fontIndex+=( 'black' );     fontValue+=( "$(tput 'setaf' 0)" )
+  fontIndex+=( 'red' );       fontValue+=( "$(tput 'setaf' 1)" )
+  fontIndex+=( 'green' );     fontValue+=( "$(tput 'setaf' 2)" )
+  fontIndex+=( 'yellow' );    fontValue+=( "$(tput 'setaf' 3)" )
+  fontIndex+=( 'blue' );      fontValue+=( "$(tput 'setaf' 4)" )
+  fontIndex+=( 'magenta' );   fontValue+=( "$(tput 'setaf' 5)" )
+  fontIndex+=( 'cyan' );      fontValue+=( "$(tput 'setaf' 6)" )
+  fontIndex+=( 'white' );     fontValue+=( "$(tput 'setaf' 7)" )
+
+  fontIndex+=( 'bgBlack' );   fontValue+=( "$(tput 'setab' 0)" )
+  fontIndex+=( 'bgRed' );     fontValue+=( "$(tput 'setab' 1)" )
+  fontIndex+=( 'bgGreen' );   fontValue+=( "$(tput 'setab' 2)" )
+  fontIndex+=( 'bgYellow' );  fontValue+=( "$(tput 'setab' 3)" )
+  fontIndex+=( 'bgBlue' );    fontValue+=( "$(tput 'setab' 4)" )
+  fontIndex+=( 'bgMagenta' ); fontValue+=( "$(tput 'setab' 5)" )
+  fontIndex+=( 'bgCyan' );    fontValue+=( "$(tput 'setab' 6)" )
+  fontIndex+=( 'bgWhite' );   fontValue+=( "$(tput 'setab' 7)" )
+
+  fontIndex+=( 'bold' );      fontValue+=( "$(tput 'bold')" )
+  fontIndex+=( 'stout' );     fontValue+=( "$(tput 'smso')" ) # Standout.
+  fontIndex+=( 'under' );     fontValue+=( "$(tput 'smul')" ) # Underline.
+  fontIndex+=( 'blink' );     fontValue+=( "$(tput 'blink')" ) # Blinking.
+  fontIndex+=( 'italic' );    fontValue+=( "$(tput 'sitm')" )
+
+  for key in "${!fontIndex[@]}"; do
+    [[ "${color}" = *"${fontIndex[${key}]}"* ]] && echo -n "${fontValue[${key}]}"
+  done
+
+  # Output the text.
+  echo "${@}"
+
+  # Reset all attributes.
+  tput 'sgr0'
+
+  return 0
+} # cecho()
+export -f 'cecho'
+
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+# Include from /usr/share/doc/bash-doc/examples/functions/getoptx.bash of package bash-doc.
+#######################################################################################
+#######################################################################################
+#######################################################################################
+function getoptex()
+{
+  (( $# )) || return 1
+  local optionList
+  optionList="${1#;}"
+  (( optionIndex )) || optionIndex=1
+  [[ ${optionIndex} -lt $# ]] || return 1
+  shift ${optionIndex}
+  if [[ "${1}" != "-" && "${1}" != "${1#-}" ]]; then
+    optionIndex=$((optionIndex + 1)); if [[ "${1}" != "--" ]]; then
+    local o
+    o="-${1#-${optionOfs}}"
+    for opt in ${optionList#;}
+    do
+      optionName="${opt%[;.:]}"
+      unset optionArgument
+      local optionType="${opt##*[^;:.]}"
+      [[ -z "${optionType}" ]] && optionType=";"
+      if [[ ${#optionName} -gt 1 ]]; then
+        # long-named option
+        case "$o" in
+          "--${optionName}")
+            if [[ "${optionType}" != ":" ]]; then
+              return 0
+            fi
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              # error: must have an agrument
+              echo "$0: error: ${optionName} must have an argument" >&2
+              optionArgument="${optionName}";
+              optionName="?"
+              return 1;
+            fi
+            optionIndex=$((optionIndex + 1)) # skip option's argument
+            return 0
+          ;;
+          "--${optionName}="*)
+            if [[ "${optionType}" = ";" ]];
+            then  # error: must not have arguments
+              (( OPTERR )) && echo "$0: error: ${optionName} must not have arguments" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionArgument=${o#--${optionName}=}
+            return 0
+          ;;
+        esac
+      else # short-named option
+        case "$o" in
+          "-${optionName}")
+            unset optionOfs
+            [[ "${optionType}" != ":" ]] && return 0
+            optionArgument="$2"
+            if [[ -z "${optionArgument}" ]]; then
+              echo "$0: error: -${optionName} must have an argument" >&2
+              optionArgument="${optionName}"
+              optionName="?"
+              return 1
+            fi
+            optionIndex=$(( optionIndex + 1 )) # skip option's argument
+            return 0
+          ;;
+          "-${optionName}"*)
+            if [ ${optionType} = ";" ]
+            then # an option with no argument is in a chain of options
+              optionOfs="${optionOfs}?" # move to the next option in the chain
+              optionIndex=$(( optionIndex - 1 )) # the chain still has other options
+              return 0
+            else
+              unset optionOfs
+              optionArgument="${o#-${optionName}}"
+              return 0
+            fi
+          ;;
+        esac
+      fi
+    done
+    echo "Error : invalid option : '${o}'." >&2
+    usage 1
+  fi; fi
+  optionName="?"
+  unset optionArgument
+  return 1
+}
+
+function optionListex
+{
+  local l="${1}"
+  local m # mask
+  local r # to store result
+  while [[ ${#m} -lt $((${#l}-1)) ]]; do m="$m?"; done # create a "???..." mask
+  while [[ -n "$l" ]]
+  do
+    r="${r:+"$r "}${l%$m}" # append the first character of $l to $r
+    l="${l#?}" # cut the first charecter from $l
+    m="${m#?}"  # cut one "?" sign from m
+    if [[ -n "${l%%[^:.;]*}" ]]
+    then # a special character (";", ".", or ":") was found
+      r="$r${l%$m}" # append it to $r
+      l="${l#?}" # cut the special character from l
+      m="${m#?}"  # cut one more "?" sign
+    fi
+  done
+  echo "${r}"
+}
+
+function getopt()
+{
+  local optionList
+
+  optionList="$(optionListex "${1}")"
+  shift
+  getoptex "${optionList}" "${@}"
+  return ${?}
+}
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+# Check for binaries presence
+check_binary "basename" "coreutils" > '/dev/null'
+check_binary "dirname" "coreutils" > '/dev/null'
+check_binary "mktemp" "mktemp" > '/dev/null'
+check_binary "sed" "sed" > '/dev/null'
+check_binary "wget" "wget" > '/dev/null'
+check_binary "biapy-downloader" "biapy-downloader" > '/dev/null'
+
+releasesPageUrl='https://github.com/shaarli/Shaarli/releases'
+
+installPath=''
+
+quiet=0
+verbose=0
+
+# Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
+while getoptex "help h quiet q verbose v cron c source: s:" "${@}"; do
+  # Options debuging.
+  # echo "Option <$optopt> ${optarg:+has an arg <$optarg>}"
+
+  case "${optionName}" in
+    'quiet' | 'q' )
+      quiet=1
+      ;;
+
+    'verbose' | 'v' )
+      verbose=1
+      ;;
+
+    'help' | 'h' | * )
+      usage 0
+      ;;
+  esac
+done
+
+# Discard processed options.
+shift $((optionIndex - 1))
+
+if [[ "${verbose}" -ne 0 ]]; then
+  quiet=0
+fi
+
+quietAndVerboseOptions=()
+[[ "${quiet}" -ne 0 ]] && quietAndVerboseOptions+=( '--quiet' )
+[[ "${verbose}" -ne 0 ]] &&  quietAndVerboseOptions+=( '--verbose' )
+
+if [[ -z "${1}" ]]; then
+  [[ "${quiet}" -ne 0 ]] && exit 1
+
+  cecho 'red' "Error: installation path is mandatory." >&2
+  usage 1
+fi
+
+# Check if the given COPS install path exists.
+[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Check if path '${1}' exists." >&2
+installPath="$(realpath_check "${1}")"
+
+# Check if installPath contain a COPS installation.
+[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Check if Shaarli installation present in '${installPath}'." >&2
+[[ -e "${installPath}/shaarli_version.php" ]] || {
+  [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: No Shaarli installation found in '${installPath}'." >&2
+  exit 1
+}
+
+
+[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Get newest release version from ${releasesPageUrl}."
+newestVersion="$(biapy-downloader \
+    --print-version --forge='github' \
+    --file-template='shaarli-vVERSION-full.tar.gz' 'shaarli/Shaarli')"
+
+[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Newest Shaarli version is ${newestVersion}."
+
+[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Get currently installed version from '${installPath}'."
+currentVersion="$(cut --delimiter=' ' --fields=3 < "${installPath}/shaarli_version.php")"
+[[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Currently installed Shaarli version is ${currentVersion}."
+
+if [[ "${newestVersion}" != "${currentVersion}" ]]; then
+  [[ "${quiet}" -eq 0 ]] && cecho 'green' "Udating Shaarli in '${installPath}' from version ${currentVersion} to ${newestVersion}."
+  if biapy-downloader --forge='github' \
+    --output-path="${installPath}" --extract --strip-components=1 \
+    --file-template='shaarli-vVERSION-full.tar.gz' 'shaarli/Shaarli' > '/dev/null'; then
+
+    # Adjusting permissions
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Shaarli upgrade successfull, adjusting files permissions"
+    chown -R root:root "${installPath}"
+    chmod -R go-w "${installPath}"
+    writeableDirectories=( 'cache/' 'data/' 'pagecache/' 'tmp/' )
+    for writeablePath in "${writeableDirectories[@]}"; do
+      chown -R www-data:www-data "${installPath}/${writeablePath}"
+    done
+
+    # Test for presence of material theme.
+    if [[ -d "${installPath}/tpl/material" ]]; then
+      [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Upgrading material theme."
+      biapy-downloader "${quietAndVerboseOptions[@]}" --forge='github' \
+          --extract --output-path="${installPath}/tpl" \
+          --file-template='vVERSION.tar.gz' 'kalvn/Shaarli-Material' > '/dev/null'
+    fi
+
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Removing temporary files."
+    find "${installPath}/tmp" -name "*.php" -exec rm {} \+
+
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Removing page cache files."
+    find "${installPath}/pagecache" -name "*.cache" -exec rm {} \+
+
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Removing cache files."
+    [[ -d "${installPath}/cache/finder" ]] && rm -r "${installPath}/cache/finder"
+    [[ -d "${installPath}/cache/thumb" ]] && rm -r "${installPath}/cache/thumb"
+
+    [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Clearing PHP cache."
+
+    php-tools "${quietAndVerboseOptions[@]}" --reload
+  else
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: upgrade failed."
+
+    exit 1
+  fi
+else
+  [[ "${verbose}" -ne 0 ]] && cecho 'blue' "Info: Shaarli is up-to-date, nothing done."
+fi
+
+exit 0
