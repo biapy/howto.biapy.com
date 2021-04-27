@@ -8,10 +8,17 @@
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/various/biapy-downloader"
-version="0.0.3"
+version="0.0.5"
 
 # History
 # -------
+#
+# 0.0.5
+#  - Fix exit with error when extraction is a success.
+#
+# 0.0.4
+#  - Add --keep-directory-symlink to tar to preserve linking when extracting
+#    over older versions.
 #
 # 0.0.3
 #  - Replace mv by cp in extractZip strip-components implementation.
@@ -760,7 +767,7 @@ function listVersions() {
   local userAgent=''
   local cookies=''
 
-  local versionsUrls=()
+  local versionUrls=()
   local version=''
   local url=''
 
@@ -1098,13 +1105,13 @@ function extractTar() {
 
   # Test if the given path is a file.
   if [[ ! -f "${filePath}" ]]; then
-    cecho 'red' "Error: '${filePath}' is not a file." >&2
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${filePath}' is not a file." >&2
     return 1
   fi
 
   # Test if the given output path is a directory.
   if [[ ! -d "${outputPath}" ]]; then
-    cecho 'red' "Error: '${outputPath}' is not a directory." >&2
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${outputPath}' is not a directory." >&2
     return 1
   fi
 
@@ -1118,7 +1125,7 @@ function extractTar() {
   esac
 
   if tar --strip-components="${stripComponents}" \
-      --directory="${outputPath}" \
+      --directory="${outputPath}" --keep-directory-symlink \
       "${tarOptions[@]}" --extract --file="${filePath}"; then
     # Extraction is successfull.
 
@@ -1164,13 +1171,13 @@ function extractZip() {
 
   # Test if the given path is a file.
   if [[ ! -f "${filePath}" ]]; then
-    cecho 'red' "Error: '${filePath}' is not a file." >&2
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${filePath}' is not a file." >&2
     return 1
   fi
 
   # Test if the given output path is a directory.
   if [[ ! -d "${outputPath}" ]]; then
-    cecho 'red' "Error: '${outputPath}' is not a directory." >&2
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${outputPath}' is not a directory." >&2
     return 1
   fi
 
@@ -1247,7 +1254,7 @@ function extractFile() {
 
   # Test if output path is not a directory, 
   if [[ ! -d "${outputPath}" ]]; then
-    cecho 'red' "Error: '${outputPath}' is not a directory." >&2
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${outputPath}' is not a directory." >&2
     return 1
   fi
 
@@ -1264,7 +1271,7 @@ function extractFile() {
       extractCommandLine+=( 'extractTar' "--extract=${extract}" )
       ;;
     * )
-      cecho 'red' "Error: unsupported archive type ('${extract}')." >&2
+      [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unsupported archive type ('${extract}')." >&2
       return 1
       ;;
   esac
@@ -1333,6 +1340,8 @@ function downloadAndExtractFile() {
         --filePath="${filePath}" --outputPath="${outputPath}"; then
         # Remove downloaded file on successful extraction.
         rm "${filePath}"
+
+        return 0
       else
         # Extraction failed, exit with error.
         return 1
@@ -1343,7 +1352,7 @@ function downloadAndExtractFile() {
       return 0
     fi
   else
-    cecho 'red' "Error: failed to download file." >&2
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: failed to download file." >&2
     return 1
   fi
 
