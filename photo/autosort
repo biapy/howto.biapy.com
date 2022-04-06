@@ -6,11 +6,13 @@
 # You need to have :
 # exiftool and ufraw 0.15 installed
 
-version="2.0.2"
+version="2.0.3"
 
 # History
 # -------
 #
+# 2.0.3:
+#  - Add dng file type support.
 # 2.0.2:
 #  - Fix null byte warning in basename and dirname.
 #
@@ -449,6 +451,7 @@ while read -r sourceFile; do
     || "${sourceExtension}" = "jpg" \
     || "${sourceExtension}" = "tiff" \
     || "${sourceExtension}" = "tif" ) ) \
+    || "${sourceExtension}" = "dng" \
     || "${sourceExtension}" = "crw" \
     || "${sourceExtension}" = "cr2" \
     || "${sourceExtension}" = "nef" ]]; then # Test if we process only raw files.
@@ -517,7 +520,8 @@ while read -r sourceFile; do
 
       if [[ ${createJpeg} -ne 0 \
           && ! -s "${jpgTarget}" \
-          && ( "${sourceExtension}" = "crw" \
+          && ( "${sourceExtension}" = "dng" \
+          || "${sourceExtension}" = "crw" \
           || "${sourceExtension}" = "cr2" \
           || "${sourceExtension}" = "nef" ) ]]; then
         echo -n "    Converting to ${jpgTargetFile}..."
