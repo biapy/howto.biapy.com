@@ -6,10 +6,14 @@
 # Pierre-Yves Landuré <pierre-yves dot landure at biapy dot fr>
 #
 # upstreamUrl="https://raw.githubusercontent.com/biapy/howto.biapy.com/master/mysql/mysql-tools"
-version="1.2.0"
+version="1.3.0"
 
 # History
 # -------
+#
+# 1.3.0
+#  - Added support for MariaDB / MySQL installed in Docker containers.
+#  - Added options for collation and character set at database creation.
 #
 # 1.2.0
 #  - Major rewriting for better lisibility.
@@ -91,6 +95,8 @@ Usage :
       [ --host='user_host' ] [ --auto-hosts ]
       [ --user='mysql_user' ] [ --password='mysql_password' ]
       [ --mysql='mysql' ] [ --server='localhost' ] [ --with-ssh[=root] ]
+      [ --docker='container' ]
+      [ --charset='utf8mb4' ] [ --collation='utf8mb4_unicode_ci' ]
       [ --create='database_name' |
         --drop='database_name' |
         --empty='database_name' |
@@ -108,8 +114,9 @@ Usage :
     * --with-ssh | -r : If server is remote and mysql connection failed,
                         try to run mysql-tools on the remote server via ssh.
                         Optional argument is SSH user to use (default to current user).
+    * --docker        : Specify a MySQL (or MariaDB) docker container name.
     * --host | -h     : The created user host (multiple occurence allowed).
-    * --auto-hosts     : Automaticaly compute created user hosts.
+    * --auto-hosts    : Automaticaly compute created user hosts.
     * --db-prefix | --dp    : The database name prefix.
     * --user-prefix | --up  : The username prefix.
     * --database | --db     : The database name.
@@ -540,7 +547,8 @@ function computeUserName() {
 
 # Call MySQL.
 #
-# @param string $mysqlCommand The MySQL command to use..
+# @global array $mysqlCommand The MySQL command to use.
+#
 # @param string $mysqlHost The MySQL server host.
 # @param string $mysqlUser A MySQL user.
 # @param string $mysqlPassword A MySQL user password.
@@ -548,13 +556,14 @@ function computeUserName() {
 #
 # @return MySQL command result.
 function mysql_call {
-  [[ ${#} -lt 5 ]] && exit 1
+  [[ ${#} -lt 4 ]] && exit 1
 
-  local mysqlCommand="${1}"
-  local mysqlHost="${2}"
-  local mysqlUser="${3}"
-  local mysqlPassword="${4}"
-  shift 4
+  # global mysqlCommand
+
+  local mysqlHost="${1}"
+  local mysqlUser="${2}"
+  local mysqlPassword="${3}"
+  shift 3
 
   local mysqlOptions=()
 
@@ -565,7 +574,7 @@ function mysql_call {
   mysqlOptions+=( "${@}" )
 
   # Run mysql with given options.
-  "${mysqlCommand:-mysql}" "${mysqlOptions[@]}"
+  "${mysqlCommand[@]}" "${mysqlOptions[@]}"
 
   return "${?}"
 } # mysql_call
@@ -583,15 +592,14 @@ function mysql_call {
 #
 # @return 1 if connection to MySQL fail, 0 on success.
 function check_mysql {
-  [[ ${#} -lt 6 ]] && exit 1
+  [[ ${#} -lt 5 ]] && exit 1
 
   local quiet="${1}"
   local verbose="${2}"
-  local mysqlCommand="${3}"
-  local mysqlHost="${4}"
-  local mysqlUser="${5}"
-  local mysqlPassword="${6}"
-  local mysqlDatabase="${7}"
+  local mysqlHost="${3}"
+  local mysqlUser="${4}"
+  local mysqlPassword="${5}"
+  local mysqlDatabase="${6}"
 
   local mysqlOptions=()
 
@@ -602,7 +610,7 @@ function check_mysql {
   fi
 
   # Test the MySQL connection.
-  if ! mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+  if ! mysqlError="$(mysql_call "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" \
         "${mysqlOptions[@]}" 2>&1 1>'/dev/null')"; then
 
@@ -621,7 +629,6 @@ function check_mysql {
 #
 # @param bool $quiet 1 to quiet output.
 # @param bool $verbose 1 to enable verbose output.
-# @param string $mysqlCommand The MySQL command to use..
 # @param string $mysqlHost The MySQL server host.
 # @param string $mysqlUser A MySQL user.
 # @param string $mysqlPassword A MySQL user password.
@@ -629,16 +636,15 @@ function check_mysql {
 #
 # @return 1 if all user deletion failed, 0 if at least one deletion succeed.
 function deleteUser() {
-  [[ ${#} -lt 7 ]] && exit 1
+  [[ ${#} -lt 6 ]] && exit 1
 
   local quiet="${1}"
   local verbose="${2}"
 
-  local mysqlCommand="${3}"
-  local mysqlHost="${4}"
-  local mysqlUser="${5}"
-  local mysqlPassword="${6}"
-  shift 6
+  local mysqlHost="${3}"
+  local mysqlUser="${4}"
+  local mysqlPassword="${5}"
+  shift 5
   local deletedUsers=( "${@}" )
 
   local deletedUser=''
@@ -658,7 +664,7 @@ function deleteUser() {
 '${sqlQuery}'." >&2
 
     # Fetching dropped users drop queries.
-    if sqlQuery="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+    if sqlQuery="$(mysql_call "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
@@ -670,7 +676,7 @@ function deleteUser() {
   '${sqlQuery}'." >&2
 
         [[ "${quiet}" -eq 0 ]] && echo -n "Deleting user '${deletedUser}'..." >&2
-        if mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+        if mysqlError="$(mysql_call "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" \
           --execute="${sqlQuery}" 2>&1)"; then
 
@@ -711,7 +717,6 @@ export -f 'deleteUser'
 #
 # @param bool $quiet 1 to quiet output.
 # @param bool $verbose 1 to enable verbose output.
-# @param string $mysqlCommand The MySQL command to use..
 # @param string $mysqlHost The MySQL server host.
 # @param string $mysqlUser A MySQL user.
 # @param string $mysqlPassword A MySQL user password.
@@ -723,22 +728,21 @@ export -f 'deleteUser'
 #
 # @return 1 if all user creation failed, 0 if it succeed.
 function addUser() {
-  [[ ${#} -lt 10 ]] && exit 1
+  [[ ${#} -lt 9 ]] && exit 1
 
   local quiet="${1}"
   local verbose="${2}"
 
-  local mysqlCommand="${3}"
-  local mysqlHost="${4}"
-  local mysqlUser="${5}"
-  local mysqlPassword="${6}"
+  local mysqlHost="${3}"
+  local mysqlUser="${4}"
+  local mysqlPassword="${5}"
 
-  local databaseUser="${7}"
-  local databasePassword="${8}"
-  local databaseName="${9}"
-  local userPrivileges="${10}"
+  local databaseUser="${6}"
+  local databasePassword="${7}"
+  local databaseName="${8}"
+  local userPrivileges="${9}"
 
-  shift 10
+  shift 9
 
   local databaseUserHosts=( "${@}" )
 
@@ -776,7 +780,7 @@ MYSQL_PASSWORD=${databasePassword}"
   [[ "${quiet}" -eq 0 ]] && echo -n "Adding user '${databaseUser}'" >&2
   [[ "${quiet}" -eq 0 && -n "${databaseName}" ]] && echo -n " for database '${databaseName}'" >&2
   [[ "${quiet}" -eq 0 ]] && echo -n '...' >&2
-  if mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+  if mysqlError="$(mysql_call "${mysqlHost}" \
       "${mysqlUser}" "${mysqlPassword}" \
       --execute="${sqlQuery}" 2>&1)"; then
 
@@ -802,7 +806,6 @@ export -f 'addUser'
 #
 # @param bool $quiet 1 to quiet output.
 # @param bool $verbose 1 to enable verbose output.
-# @param string $mysqlCommand The MySQL command to use..
 # @param string $mysqlHost The MySQL server host.
 # @param string $mysqlUser A MySQL user.
 # @param string $mysqlPassword A MySQL user password.
@@ -810,17 +813,16 @@ export -f 'addUser'
 #
 # @return 1 on failure, 0 otherwise.
 function emptyDatabase() {
-  [[ ${#} -lt 7 ]] && exit 1
+  [[ ${#} -lt 6 ]] && exit 1
 
   local quiet="${1}"
   local verbose="${2}"
 
-  local mysqlCommand="${3}"
-  local mysqlHost="${4}"
-  local mysqlUser="${5}"
-  local mysqlPassword="${6}"
+  local mysqlHost="${3}"
+  local mysqlUser="${4}"
+  local mysqlPassword="${5}"
 
-  shift 6
+  shift 5
 
   local databaseNames=( "${@}" )
 
@@ -830,7 +832,7 @@ function emptyDatabase() {
 
     [[ "${verbose}" -ne 0 ]] && cecho 'blue' " - Info: generating DROP VIEW queries." >&2
     # List existing views and prepare drop queries.
-    if sqlQuery="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+    if sqlQuery="$(mysql_call "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
@@ -846,7 +848,7 @@ SET FOREIGN_KEY_CHECKS = 1;"
 
       [[ "${quiet}" -eq 0 ]] && echo -n " - Dropping views..." >&2
 
-      if mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+      if mysqlError="$(mysql_call "${mysqlHost}" \
             "${mysqlUser}" "${mysqlPassword}" \
             "${databaseName}" --execute="${sqlQuery}" 2>&1)"; then
 
@@ -861,7 +863,7 @@ SET FOREIGN_KEY_CHECKS = 1;"
 
     # List existing tables and prepare drop queries.
     [[ "${verbose}" -ne 0 ]] && cecho 'blue' " - Info: generating DROP TABLES queries." >&2
-    if sqlQuery="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+    if sqlQuery="$(mysql_call "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" \
         --batch --skip-column-names \
         --skip-line-numbers --skip-pager \
@@ -875,7 +877,7 @@ SET FOREIGN_KEY_CHECKS = 1;"
 
       [[ "${quiet}" -eq 0 ]] && echo -n " - Dropping tables..." >&2
 
-      if mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+      if mysqlError="$(mysql_call "${mysqlHost}" \
             "${mysqlUser}" "${mysqlPassword}" \
             "${databaseName}" --execute="${sqlQuery}" 2>&1)"; then
 
@@ -900,7 +902,6 @@ export -f 'emptyDatabase'
 #
 # @param bool $quiet 1 to quiet output.
 # @param bool $verbose 1 to enable verbose output.
-# @param string $mysqlCommand The MySQL command to use..
 # @param string $mysqlHost The MySQL server host.
 # @param string $mysqlUser A MySQL user.
 # @param string $mysqlPassword A MySQL user password.
@@ -908,23 +909,22 @@ export -f 'emptyDatabase'
 #
 # @return 1 on failure, 0 otherwise.
 function dropDatabase() {
-  [[ ${#} -ne 7 ]] && exit 1
+  [[ ${#} -ne 6 ]] && exit 1
 
   local quiet="${1}"
   local verbose="${2}"
 
-  local mysqlCommand="${3}"
-  local mysqlHost="${4}"
-  local mysqlUser="${5}"
-  local mysqlPassword="${6}"
-  local databaseName="${7}"
+  local mysqlHost="${3}"
+  local mysqlUser="${4}"
+  local mysqlPassword="${5}"
+  local databaseName="${6}"
 
   [[ "${quiet}" -eq 0 ]] && echo -n "Dropping database '${databaseName}'..." >&2
 
   # Dropping database.
   sqlQuery="DROP DATABASE \`${databaseName}\`;"
 
-  if mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+  if mysqlError="$(mysql_call "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" \
         --execute="${sqlQuery}" 2>&1)"; then
 
@@ -947,7 +947,6 @@ export -f 'dropDatabase'
 #
 # @param bool $quiet 1 to quiet output.
 # @param bool $verbose 1 to enable verbose output.
-# @param string $mysqlCommand The MySQL command to use..
 # @param string $mysqlHost The MySQL server host.
 # @param string $mysqlUser A MySQL user.
 # @param string $mysqlPassword A MySQL user password.
@@ -957,18 +956,17 @@ export -f 'dropDatabase'
 #
 # @return 1 on failure, 0 otherwise.
 function createDatabase() {
-  [[ ${#} -ne 9 ]] && exit 1
+  [[ ${#} -ne 8 ]] && exit 1
 
   local quiet="${1}"
   local verbose="${2}"
 
-  local mysqlCommand="${3}"
-  local mysqlHost="${4}"
-  local mysqlUser="${5}"
-  local mysqlPassword="${6}"
-  local databaseName="${7}"
-  local characterSet="${8}"
-  local collation="${9}"
+  local mysqlHost="${3}"
+  local mysqlUser="${4}"
+  local mysqlPassword="${5}"
+  local databaseName="${6}"
+  local characterSet="${7}"
+  local collation="${8}"
 
 
   [[ "${quiet}" -eq 0 ]] && echo -n "Creating database '${databaseName}'..." >&2
@@ -978,7 +976,7 @@ function createDatabase() {
                 DEFAULT CHARACTER SET ${characterSet:-utf8mb4}
                 DEFAULT COLLATE ${collation:-utf8mb4_unicode_ci};"
 
-  if mysqlError="$(mysql_call "${mysqlCommand}" "${mysqlHost}" \
+  if mysqlError="$(mysql_call "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" \
         --execute="${sqlQuery}" 2>&1)"; then
 
@@ -1137,10 +1135,12 @@ declare -a databaseUserHosts
 # Application defaults
 quiet=0
 verbose=0
-mysqlCommand='mysql'
+mysqlCommandName='mysql'
 mysqlHost=''
 mysqlUser=''
 mysqlPassword=''
+
+dockerContainer=''
 
 overSSH=0
 sshUser="${USER}"
@@ -1169,7 +1169,7 @@ characterSet='utf8mb4'
 collation='utf8mb4_unicode_ci'
 
 # Parse options using getoptex from /usr/share/doc/bash-doc/examples/functions/getoptx.bash
-while getoptex "help quiet q verbose v create: c: db-prefix: dp: database: db: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r. auto-hosts" "${@}"; do
+while getoptex "help quiet q verbose v create: c: db-prefix: dp: database: db: user-prefix: up: drop: d: empty: e: adduser: a: grant: g: deluser: host: h: user: u: password. p. mysql: m: server: s: with-ssh. r. auto-hosts docker: charset: collation:" "${@}"; do
   # Options debuging.
   # echo "Option <$OPTOPT> ${optionArgument:+has an arg <$optionArgument>}"
 
@@ -1256,7 +1256,7 @@ while getoptex "help quiet q verbose v create: c: db-prefix: dp: database: db: u
 
     'mysql' | 'm' )
       if [ -n "${optionArgument}" ]; then
-        mysqlCommand="${optionArgument}"
+        mysqlCommandName="${optionArgument}"
       fi
       ;;
 
@@ -1281,6 +1281,18 @@ while getoptex "help quiet q verbose v create: c: db-prefix: dp: database: db: u
         # Output a new line.
         echo ''
       fi
+      ;;
+
+    'docker' )
+      dockerContainer="${optionArgument}"
+      ;;
+
+    'charset' )
+      characterSet="${optionArgument}"
+      ;;
+
+    'collation' )
+      collation="${optionArgument}"
       ;;
 
     'q' )
@@ -1315,18 +1327,46 @@ fi
 
 
 
-# Check custom mysqlCommand existance.
-if [[ "${mysqlCommand}" =~ "/" ]]; then
-  # mysqlCommand is a path.
-  mysqlCommand="$(realpath_check "${mysqlCommand}")"
-else
-  # mysqlCommand is a command.
-  mysqlCommandPath="$(which "${mysqlCommand}")"
-  if [[ -z "${mysqlCommandPath}" ]]; then
-    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${mysqlCommand}' is not installed." >&2
+if [[ -n "${dockerContainer}" ]]; then
+  # A Docker container has been specified.
+  # mysqlCommand is a docker exec command.
+
+  dockerCommandPath="$(which 'docker')"
+  if [[ -z "${dockerCommandPath}" ]]; then
+    [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: 'docker' is not installed." >&2
     exit 1
   fi
-  mysqlCommand="${mysqlCommandPath}"
+
+  containerId="$(${dockerCommandPath} ps --quiet \
+      --filter="status=running" \
+      --filter="name=${dockerContainer}\." )"
+
+  if [[ -z "${containerId}" ]]; then
+      [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: unable to find '${dockerContainer}' container ID." >&2
+      exit 1
+  fi
+
+  containerCount="$(echo "${containerId}" | command wc -l)"
+  if [[ ${containerCount} -gt 1 ]]; then
+      [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: found ${containerCount} containers matching '${dockerContainer}' name. Please provide an exact name." >&2
+      exit 1
+  fi
+
+  mysqlCommand=( "${dockerCommandPath}" 'exec' '-it' "${containerId}" "${mysqlCommandName}" )
+else
+  # Check custom mysqlCommand existance.
+  if [[ "${mysqlCommandName}" =~ "/" ]]; then
+    # mysqlCommand is a path.
+    mysqlCommand=( "$(realpath_check "${mysqlCommandName}")" )
+  else
+    # mysqlCommand is a command.
+    mysqlCommandPath="$(which "${mysqlCommandName}")"
+    if [[ -z "${mysqlCommandPath}" ]]; then
+      [[ "${quiet}" -eq 0 ]] && cecho 'red' "Error: '${mysqlCommandName}' is not installed." >&2
+      exit 1
+    fi
+    mysqlCommand=( "${mysqlCommandPath}" )
+  fi
 fi
 
 
@@ -1360,10 +1400,10 @@ fi
 
 # Check MySQL connection
 
-if ! check_mysql "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+if ! check_mysql "${quiet}" "${verbose}" "${mysqlHost}" \
         "${mysqlUser}" "${mysqlPassword}" ""; then
   # Connection test failed.
-
+  
   # If allowed, try to access remote MySQL server over SSH.
   if [[ "${overSSH}" -ne 0 \
     && -n "${mysqlHost}" \
@@ -1371,13 +1411,14 @@ if ! check_mysql "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
     && "${mysqlHost}" != "127.0.0.1" \
     && "${mysqlHost}" != "::1" ]]; then
 
-    overSshArguments=( "--mysql='${mysqlCommand}'" "--server='localhost'" \
+    overSshArguments=( "--mysql='${mysqlCommandName}'" "--server='localhost'" \
       "--user='${mysqlUser}'" "--db-prefix='${baseDbPrefix}'" "--user-prefix='${baseUserPrefix}'" \
       "--grant='${userPrivileges}'" "--database='${baseDbName}'" )
 
     [[ "${quiet}" -ne 0 ]] && overSshArguments+=( '--quiet' )
     [[ "${verbose}" -ne 0 ]] && overSshArguments+=( '--verbose' )
     [[ -n "${mysqlPassword}" ]] && overSshArguments+=( "--password='${mysqlPassword}'" )
+    [[ -n "${dockerContainer}" ]] && overSshArguments+=( "--docker='${dockerContainer}'" )
 
     for userHost in "${databaseUserHosts[@]}"; do
       overSshArguments+=( "--host='${userHost}'" )
@@ -1408,8 +1449,6 @@ if ! check_mysql "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
   fi
 fi
 
-
-
 case "${action}" in
   ###############
   #
@@ -1418,11 +1457,11 @@ case "${action}" in
   ###############
   'create' )
     # Create the database.
-    if createDatabase "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+    if createDatabase "${quiet}" "${verbose}" "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" "${databaseName}" \
           "${characterSet}" "${collation}"; then
       # Database has been successfully created, create associated user.
-      addUser "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+      addUser "${quiet}" "${verbose}" "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" \
           "${databaseUser}" "${databasePassword}" \
           "${databaseName}" "${userPrivileges}" \
@@ -1444,11 +1483,11 @@ case "${action}" in
   'drop' )
     # drop user if possible (user name automatically generated).
     [[ -n "${databaseUser}" ]] && deleteUser "${quiet}" "${verbose}" \
-          "${mysqlCommand}" "${mysqlHost}" \
+          "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" "${databaseUser}"
 
     # Drop the database.
-    dropDatabase "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+    dropDatabase "${quiet}" "${verbose}" "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" "${databaseName}"
     exit "${?}"
     ;;
@@ -1461,7 +1500,7 @@ case "${action}" in
   #
   ###############
   'empty' )
-    emptyDatabase "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+    emptyDatabase "${quiet}" "${verbose}" "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" "${databaseName}"
     exit "${?}"
     ;;
@@ -1474,7 +1513,7 @@ case "${action}" in
   #
   ###############
   'adduser' )
-    addUser "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+    addUser "${quiet}" "${verbose}" "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" \
           "${databaseUser}" "${databasePassword}" \
           "${databaseName}" "${userPrivileges}" \
@@ -1490,7 +1529,7 @@ case "${action}" in
   #
   ###############
   'deluser' )
-    deleteUser "${quiet}" "${verbose}" "${mysqlCommand}" "${mysqlHost}" \
+    deleteUser "${quiet}" "${verbose}" "${mysqlHost}" \
           "${mysqlUser}" "${mysqlPassword}" "${databaseUser}"
     exit "${?}"
     ;;
